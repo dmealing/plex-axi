@@ -98,14 +98,30 @@ def test_no_command_ever_emits_a_rating_key_in_the_guid_namespace(server, cli_ru
             assert not _FORBIDDEN.search(line.strip().strip('"')), (argv, line)
 
 
-def test_the_play_hint_is_absent_unless_it_is_configured(server, cli_run, plex_env):
-    """The default output names no consumer: plex-axi does not know what plays this."""
-    bare = cli_run("track", "111")
-    assert bare.code == 0
-    assert "play_with" not in bare
+def test_the_handoff_block_is_identifiers_and_nothing_else(server, cli_run):
+    """plex-axi prints identifiers and stops.
 
-    configured = dict(plex_env)
-    configured["PLEX_AXI_PLAY_HINT"] = "example-player queue {media_id}"
-    hinted = cli_run("track", "111", env=configured)
-    assert hinted.code == 0
-    assert hinted.line("play_with:").rstrip('"').endswith(f"queue plex://{MACHINE_ID}/111")
+    The block names no consumer and suggests no command to play the id with,
+    because anything it could suggest would have to come from the caller in the
+    first place -- and echoing that back tells them nothing they did not know.
+    """
+    result = cli_run("track", "111")
+    assert result.code == 0
+    block = _block(result.out, "item:")
+    assert list(block) == ["media_id", "rating_key", "guid", "note"]
+
+
+def _block(out: str, header: str) -> dict:
+    """The indented `key: value` lines under one header, in order."""
+    fields = {}
+    inside = False
+    for line in out.splitlines():
+        if line.rstrip() == header:
+            inside = True
+            continue
+        if inside:
+            if not line.startswith("  "):
+                break
+            key, _, value = line.strip().partition(": ")
+            fields[key] = value.strip('"')
+    return fields

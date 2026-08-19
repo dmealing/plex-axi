@@ -102,18 +102,51 @@ itself in one turn.
 - **`rating_key` is local to one server and moves** when an item is re-matched or the library is
   rebuilt. Keep the `guid` beside it anywhere the value is written down.
 
-### Handing an id to something that plays it
+## What `media_id` is, and what consumes it
 
-`plex-axi` prints `media_id` in the one `plex://` form that is unambiguous —
-`plex://<machineIdentifier>/<ratingKey>` — and never the two forms that break a consumer. What
-plays it is your business, not the tool's, so the "play this with…" line is configuration:
+Every command that identifies one item prints a block like this and then stops:
 
-```sh
-export PLEX_AXI_PLAY_HINT='my-player enqueue {media_id}'
+```
+item:
+  media_id: "plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/111"
+  rating_key: 111
+  guid: "plex://track/a1b2c3d4e5f60718293c0111"
+  note: "rating_key is local to this server and changes when an item is re-matched or the library is rebuilt; guid is the identifier that survives, so keep them together"
 ```
 
-With the variable unset, no such line is printed. `{media_id}`, `{rating_key}` and `{guid}` are
-substituted.
+`media_id` is `plex://<machineIdentifier>/<ratingKey>`: the id of the item, prefixed by the id of
+the server it lives on. That combination is what a media player needs to fetch it without being told
+separately which Plex server you meant, and it is the form most Plex clients and integrations accept
+as a media content id.
+
+It matters that it is *that* form. Five `plex://` strings circulate and they all look alike. Two of
+them break a consumer: `plex://track/<ratingKey>` parses the word `track` as a server name and
+resolves to a server that does not exist, and `plex://track/<24-hex>` — which is a perfectly
+legitimate Plex identifier, the one printed here as `guid` — raises an error inside consumers that
+expect a number in that position. `plex-axi` emits only the safe form, and a test sweeps every
+command asserting it never emits the other two.
+
+`plex-axi` does not dispatch it anywhere. Handing it to something that plays is a single call in
+whatever already owns your speakers. In Home Assistant, for example, the `media_player.play_media`
+service takes it directly:
+
+```yaml
+service: media_player.play_media
+target:
+  entity_id: media_player.example_speaker
+data:
+  media_content_type: music
+  media_content_id: "plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/111"
+```
+
+That is illustrative, not a dependency: nothing in `plex-axi` knows Home Assistant exists, and the
+same id is what Plex's own clients and other integrations consume. Substitute whatever plays music
+where you are.
+
+**Keep the `guid` with the `rating_key` wherever you write one down.** A rating key is a row number
+in one server's database. It changes when an item is re-matched or the library is rebuilt, and the
+same number will then resolve to a different recording — silently. The `guid` is the identifier that
+survives, which is why both are printed together and why the note travels with them.
 
 ## Agent integration
 

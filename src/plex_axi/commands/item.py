@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..ids import handoff, handoff_hint, validate_rating_key
+from ..ids import handoff, validate_rating_key
 from ..music import date_only, stars, tag_titles
 from ..output import HelpBlock, truncate
 from ..plex import translate
@@ -113,11 +113,7 @@ def run(ctx, name: str, sub: str, parsed):
 
     doc = _BUILDERS[name](item, parsed)
 
-    block = handoff(server.machineIdentifier, item)
-    hint = handoff_hint(ctx.environ, block)
-    if hint:
-        block["play_with"] = hint
-    doc["item"] = block
+    doc["item"] = handoff(server.machineIdentifier, item)
 
     help_lines = _next_steps(name, item)
     if help_lines:

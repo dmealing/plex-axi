@@ -15,7 +15,7 @@ that makes the search work.
 from __future__ import annotations
 
 from ..argspec import Command, Flag, Sub
-from ..ids import handoff, handoff_hint
+from ..ids import handoff
 from ..music import (
     available_fields,
     build_filters,
@@ -132,12 +132,12 @@ def run(ctx, name: str, sub: str, parsed):
         return _empty(doc, libtype, described, query)
 
     doc[f"{libtype}s"] = project(rows, fields)
-    doc.update(_handoff_block(ctx, section, result.items))
+    doc.update(_handoff_block(section, result.items))
     doc["help"] = HelpBlock(_next_steps(libtype, rows, result, limit))
     return doc
 
 
-def _handoff_block(ctx, section, items) -> dict:
+def _handoff_block(section, items) -> dict:
     """The labelled identifier for the first result, when there is exactly one.
 
     A single match is the case where the caller is about to use the id, so the
@@ -145,11 +145,7 @@ def _handoff_block(ctx, section, items) -> dict:
     """
     if len(items) != 1:
         return {}
-    block = handoff(section._server.machineIdentifier, items[0])
-    hint = handoff_hint(ctx.environ, block)
-    if hint:
-        block["play_with"] = hint
-    return {"item": block}
+    return {"item": handoff(section._server.machineIdentifier, items[0])}
 
 
 def _next_steps(libtype, rows, result, limit) -> list:

@@ -67,7 +67,7 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 - `commands/` — one module per noun, each exposing `COMMAND_FOR(noun)` and
   `run(ctx, noun, sub, parsed)`.
 
-**Deviation from the sibling project, and why.** `ha-axi` maps one module to one noun and exports a
+**Deviation from the sibling project, and why.** The sibling AXI project maps one module to one noun and exports a
 single `COMMAND`. Here two modules each serve three nouns that differ only by a Plex libtype or
 filter field — `genres`/`moods`/`styles`, and `track`/`album`/`artist` — so modules export
 `COMMAND_FOR(noun)` instead. Three near-identical files per group would have been worse than one
@@ -188,12 +188,14 @@ identifier handed out under the attribute name `guid`. `ids.media_content_id` bu
 form and refuses anything that is not a decimal rating key; `tests/test_ids.py` sweeps every command
 and asserts none of them ever emits form 4 or 5.
 
-**Labels are vendor-neutral.** The field is `media_id`, not the name of any particular consumer:
-this ships to anyone with a Plex library, and naming one consumer in the default output would be
-wrong for everyone else. The "what plays this" line is **configuration**, not a hardcoded string —
-`PLEX_AXI_PLAY_HINT` carries a command template with `{media_id}`, `{rating_key}` and `{guid}`
-placeholders, and with the variable unset the field is omitted entirely. A suggestion naming the
-wrong consumer is worse than none, because an agent will run it.
+**Labels are vendor-neutral, and the output stops at the identifier.** The field is `media_id`, not
+the name of any particular consumer: this ships to anyone with a Plex library, and naming one in the
+default output would be wrong for everyone else. There is deliberately no "play this with …" line
+and no configuration for one. A template could only ever come from the operator, so printing it back
+tells the caller nothing they did not already know — it was ceremony. The `item:` block is exactly
+four fields — `media_id`, `rating_key`, `guid`, `note` — and `tests/test_ids.py` asserts that list
+verbatim. The README explains in prose what consumes a `media_id`; that belongs in documentation,
+not in output.
 
 **`rating_key` is not stable.** It is a row number in one server's database and it moves when an
 item is re-matched or the library is rebuilt. Every command that emits one emits the `guid` beside

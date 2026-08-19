@@ -111,49 +111,19 @@ def media_content_id(machine_identifier: str, rating_key) -> str:
     return f"plex://{machine_identifier}/{key}"
 
 
-def handoff(machine_identifier: str, item, *, hint: str = "") -> dict:
+def handoff(machine_identifier: str, item) -> dict:
     """The labelled identifier block every item-producing command prints.
 
-    The labels are vendor-neutral on purpose: this tool ships to anyone with a
-    Plex library, and naming one particular consumer in the default output would
-    be wrong for everybody else. ``hint`` carries the "play this with ..." line
-    only when the operator has configured one -- see :func:`handoff_hint`.
+    Four fields, and nothing about what will consume them. The labels are
+    vendor-neutral because this tool ships to anyone with a Plex library, and
+    the output stops at the identifier because a suggestion about what plays it
+    could only be assembled from something the caller told us -- which is
+    information they already had. plex-axi prints identifiers and stops.
     """
     rating_key = getattr(item, "ratingKey", None)
-    guid = getattr(item, "guid", "") or ""
-    block = {
+    return {
         "media_id": media_content_id(machine_identifier, rating_key),
         "rating_key": int(rating_key),
-        "guid": guid,
+        "guid": getattr(item, "guid", "") or "",
         "note": STABILITY_NOTE,
     }
-    if hint:
-        block["play_with"] = hint
-    return block
-
-
-#: Where an operator declares the command that plays a media id in *their*
-#: house. It is configuration rather than a hardcoded line because plex-axi has
-#: no idea what owns the speakers where it is installed, and a suggestion that
-#: names the wrong consumer is worse than none: an agent will run it.
-HINT_VAR = "PLEX_AXI_PLAY_HINT"
-
-#: Placeholders a hint template may carry. Anything else is left alone, so a
-#: template with a typo prints as written rather than failing the command.
-_HINT_FIELDS = ("media_id", "rating_key", "guid")
-
-
-def handoff_hint(environ, block: dict) -> str:
-    """Render the operator's configured play command, or nothing at all.
-
-    An unset variable yields an empty string and the field is omitted entirely.
-    That is the deliberate default: nothing in plex-axi's own output assumes
-    what will play the id it just produced.
-    """
-    template = (environ or {}).get(HINT_VAR, "")
-    if not template.strip():
-        return ""
-    rendered = template
-    for field in _HINT_FIELDS:
-        rendered = rendered.replace("{" + field + "}", str(block.get(field, "")))
-    return rendered
