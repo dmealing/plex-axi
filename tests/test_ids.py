@@ -1,0 +1,111 @@
+"""The identifier boundary: which `plex://` string may be printed, and which never.
+
+Two of the five `plex://` forms in circulation break a consumer, and one of them
+raises inside it rather than failing a lookup. This is where that is prevented,
+so these tests assert on the strings the tool emits as much as on the ones it
+refuses.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from conftest import MACHINE_ID
+from plex_axi.errors import UsageError
+from plex_axi.ids import media_content_id, validate_rating_key
+
+#: The form that must never leave this tool: a rating key wearing the guid
+#: namespace. A consumer parses the namespace as a server name, looks for a
+#: server called "track", and fails -- and the sibling form, a real 24-hex guid
+#: in the same position, raises rather than failing. A guid is all-hex and 24
+#: characters; a rating key is a short run of digits, which is what this matches.
+_FORBIDDEN = re.compile(r"plex://(artist|album|track)/\d{1,12}(?![0-9a-f])")
+
+
+def test_the_content_id_names_the_server_as_well_as_the_item():
+    """M5: the canonical form, not the one a consumer calls legacy."""
+    assert media_content_id(MACHINE_ID, 311) == f"plex://{MACHINE_ID}/311"
+
+
+def test_a_content_id_is_never_built_from_a_guid():
+    """The `plex://track/<hex>` form raises inside a consumer rather than failing."""
+    with pytest.raises(ValueError):
+        media_content_id(MACHINE_ID, "0000000000000000000000a1")
+
+
+def test_a_content_id_needs_the_machine_identifier():
+    with pytest.raises(ValueError):
+        media_content_id("", 311)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "plex://track/a1b2c3d4e5f60718293a0100",
+        "plex://0f0f0f0f/311",
+        "plex://311",
+        "not-a-key",
+        "",
+        "12a",
+    ],
+)
+def test_only_a_decimal_rating_key_is_accepted(value):
+    with pytest.raises(UsageError):
+        validate_rating_key(value, invocation="plex-axi track")
+
+
+def test_a_guid_is_rejected_by_name_rather_than_crashing():
+    """§ the collision is real: a guid is a legitimate Plex identifier."""
+    with pytest.raises(UsageError) as caught:
+        validate_rating_key("plex://track/a1b2c3d4e5f60718293a0100", invocation="plex-axi track")
+    assert caught.value.code == "GUID_NOT_RATING_KEY"
+    assert "guid" in caught.value.message
+
+
+def test_a_media_id_is_rejected_with_the_field_that_carries_the_number():
+    with pytest.raises(UsageError) as caught:
+        validate_rating_key("plex://abc/311", invocation="plex-axi track")
+    assert caught.value.code == "MEDIA_ID_NOT_RATING_KEY"
+
+
+def test_the_search_output_labels_the_id_and_carries_the_guid(server, cli_run):
+    """M5/M6: three labelled fields, and the note that the key can move."""
+    result = cli_run("search", "--track", "Guest Track")
+    assert result.code == 0
+    assert result.line("media_id:").endswith(f'"plex://{MACHINE_ID}/311"')
+    assert result.line("rating_key:") == "rating_key: 311"
+    guid = result.line("guid:").split(": ", 1)[1].strip('"')
+    assert re.fullmatch(r"plex://track/[0-9a-f]{24}", guid)
+    assert "changes when an item is re-matched" in result
+
+
+def test_no_command_ever_emits_a_rating_key_in_the_guid_namespace(server, cli_run):
+    """M5: the form that resolves to a server called "track" and fails there."""
+    for argv in (
+        ("search", "--track", "Guest Track"),
+        ("track", "311"),
+        ("album", "310"),
+        ("artist", "300"),
+        ("similar", "111"),
+        ("recent",),
+        ("sessions",),
+    ):
+        result = cli_run(*argv)
+        assert result.code == 0, argv
+        for line in result.out.splitlines():
+            assert not _FORBIDDEN.search(line.strip().strip('"')), (argv, line)
+
+
+def test_the_play_hint_is_absent_unless_it_is_configured(server, cli_run, plex_env):
+    """The default output names no consumer: plex-axi does not know what plays this."""
+    bare = cli_run("track", "111")
+    assert bare.code == 0
+    assert "play_with" not in bare
+
+    configured = dict(plex_env)
+    configured["PLEX_AXI_PLAY_HINT"] = "example-player queue {media_id}"
+    hinted = cli_run("track", "111", env=configured)
+    assert hinted.code == 0
+    assert hinted.line("play_with:").rstrip('"').endswith(f"queue plex://{MACHINE_ID}/111")
