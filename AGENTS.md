@@ -264,10 +264,29 @@ a server that collapses repeated titles and one that accepts the parameter and i
 a given Plex build is cannot be settled without a live server, so the tool is tested against both and
 reports which one it met.
 
-Supported Pythons are 3.9 through 3.12. `from __future__ import annotations` is what makes the
-`X | None` annotation syntax safe on 3.9 — keep it at the top of every module. Note that nested
-quotes inside a multi-line f-string expression need 3.12; the test fixtures use `.format` for that
-reason.
+Supported Pythons are 3.10 through 3.12, and **the floor is not a free choice — `PlexAPI` sets
+it.** plexapi 4.18.0 raised its own `requires-python` to `>=3.10`, which raised this project's floor
+with it and said nothing: `requires-python = ">=3.9"` stayed in `pyproject.toml`, the whole test
+suite passed on 3.10 through 3.12, and the only thing that ever noticed was `pip install` on 3.9
+failing to resolve the dependency at all. Published metadata is the one claim tests cannot check,
+because the interpreter that would have failed is the one they were never run on. **Read plexapi's
+`requires-python` before raising the pin, and treat a bump as a possible floor change until you
+have.** `tests/test_python_floor.py` now holds `requires-python`, the `ci.yml` matrix and the
+`Programming Language :: Python :: X.Y` classifiers to one number, so drifting any one of them
+apart fails locally rather than at somebody's install.
+
+Ruff's `target-version` is deliberately **still `py39`**, which is the one place the floor is stated
+and was not moved with it. Raising it to `py310` enables `B905` (`zip()` without `strict=`), whose
+only site is `commands/similar.py` — a correct fix, `rows_for` is 1:1 over its input, but a runtime
+behaviour change to a shipped command, which does not belong in a change that moves published
+metadata. Bump it in its own commit and take the `strict=True` with it. Leaving it low is safe
+meanwhile: `target-version` only bounds which upgrades ruff proposes, and a low one is conservative,
+never wrong.
+
+`from __future__ import annotations` stays at the top of every module. It is no longer what makes
+`X | None` safe — that is native from 3.10 — but it keeps annotations lazy and the modules uniform,
+and removing 23 of them is a separate change from moving a floor. Note that nested quotes inside a
+multi-line f-string expression need 3.12; the test fixtures use `.format` for that reason.
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
 `plex-axi skill` and commit the result; CI fails if the two disagree.
@@ -276,7 +295,7 @@ reason.
 
 Three workflows, split by where the work is cheap:
 
-- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.9 through 3.12,
+- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests.
 - **`.github/workflows/hygiene.yml`** — the leak scan alone, on `ubuntu-latest`, on `pull_request`.

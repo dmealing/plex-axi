@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Agent eXperience Interface (AXI) CLI for structured, per-field music search against a Plex Media Server"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["plex", "music", "cli", "axi", "agent", "toon"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -16,11 +16,20 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Multimedia :: Sound/Audio",
 ]
 dependencies = [
   # The model layer is the point. plexapi carries MusicSection, the filter DSL
   # and its server-side validation; a transport-only SDK carries none of it.
+  #
+  # This pin sets `requires-python` above: plexapi 4.18.0 dropped Python 3.9,
+  # so raising this minimum can raise the floor without mentioning it. Keep the
+  # two in step -- `tests/test_python_floor.py` checks the floor against the CI
+  # matrix, but only an install on the oldest version proves the pin is
+  # satisfiable there.
   "PlexAPI>=4.18",
 ]
 
