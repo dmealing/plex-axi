@@ -146,12 +146,16 @@ FIELD_MAP = {
     "year": lambda libtype: "album.year",
 }
 
-#: How each field's operator reads in the output, so the caller can see what was
-#: actually asked rather than inferring it. Plex's string default is "contains".
-OPERATOR_LABEL = {
-    "": "contains",
-    ">": ">=",
-}
+#: The operator each filter carries on the wire. A field given without a suffix
+#: normalises to ``=``, and what ``=`` *means* is a property of the field's
+#: type: "contains" on a string, "is" on a tag or an integer. The label printed
+#: back is therefore read from the section's own operator table by
+#: :func:`label_filters` rather than guessed once for all fields here.
+BARE_OPERATOR = "="
+
+#: ``userRating>`` normalises to ``>=`` -- Plex's "is greater than or equals".
+#: A symbol needs no per-type resolution, so it is printed as it normalises.
+RATING_OPERATOR = ">="
 
 
 def parse_stars(raw, *, flag: str) -> float:
@@ -191,7 +195,7 @@ def build_filters(parsed, libtype: str) -> tuple:
             continue
         field = FIELD_MAP[flag](libtype)
         filters[field] = value
-        described.append({"field": field, "operator": OPERATOR_LABEL[""], "value": value})
+        described.append({"field": field, "operator": BARE_OPERATOR, "value": value})
 
     raw_rating = parsed.get("rated_min")
     if raw_rating not in (None, ""):
@@ -207,12 +211,43 @@ def build_filters(parsed, libtype: str) -> tuple:
         described.append(
             {
                 "field": f"{libtype}.userRating",
-                "operator": OPERATOR_LABEL[">"],
+                "operator": RATING_OPERATOR,
                 "value": f"{points} ({value:g} stars)",
             }
         )
 
     return filters, described
+
+
+def label_filters(section, described: list, *, libtype: str) -> list:
+    """Give each echoed filter the operator title the server itself advertises.
+
+    The echo is a promise about the predicate that ran, and ``=`` does not mean
+    one thing: "contains" on a string field, "is" on a tag or an integer. A
+    single label for all of them invites substrings and synonyms on fields that
+    only match an exact value, so the title is read from the section's operator
+    table -- the same metadata the search just validated against, already
+    fetched and cached by then, so this costs no round trip.
+    """
+    for row in described:
+        if row["operator"] != BARE_OPERATOR:
+            continue
+        row["operator"] = _operator_title(section, row["field"], libtype=libtype)
+    return described
+
+
+def _operator_title(section, field: str, *, libtype: str) -> str:
+    """The title the section gives the ``=`` operator on one field's type.
+
+    The field is found the way the validation finds it: a ``libtype.field``
+    scope in the name redirects the lookup to that libtype's advertised fields,
+    which is why ``artist.genre`` resolves even when tracks were searched.
+    """
+    scope, _, name = field.rpartition(".")
+    fields = section.listFields(scope or libtype)
+    filter_field = next(f for f in fields if f.key.split(".")[-1] == name)
+    operators = section.getFieldType(filter_field.type).operators
+    return next(operator.title for operator in operators if operator.key == BARE_OPERATOR)
 
 
 # -------------------------------------------------------------------- search

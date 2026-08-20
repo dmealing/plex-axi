@@ -5,10 +5,13 @@ command is an inconvenience rather than a wall. One raw-path command covers the
 whole residue; a wrapper per endpoint would be the anti-pattern this tool exists
 to avoid, and would drift from the server the moment Plex shipped a change.
 
-**GET and HEAD only.** plex-axi is read-only in this release, and a raw escape
-hatch that could POST would quietly make it something else -- several Plex write
+**GET only.** plex-axi is read-only in this release, and a raw escape hatch
+that could POST would quietly make it something else -- several Plex write
 endpoints are destructive and answer a GET-shaped URL. The restriction is
 enforced here rather than documented, because "documented" is not a control.
+A HEAD is refused as well: the command's whole value is the response body it
+renders, and a HEAD has none -- `api GET <path>` answers whether a path exists
+and shows what is there.
 
 Plex answers XML. The response is converted to the same structured shape every
 other command prints, so an agent does not have to parse two formats.
@@ -23,10 +26,15 @@ from ..plex import translate
 from ._common import parse_pairs
 
 #: The methods a read-only tool may issue. Anything else is refused by name.
-METHODS = ("GET", "HEAD")
+METHODS = ("GET",)
 
 #: Methods a caller might try, and what to say instead of "unknown method".
 _WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+#: Safe but unsupported: a HEAD returns headers and no body, and the body is
+#: this command's entire value. Refused by name rather than executed as the GET
+#: a defaulted request method would send.
+_HEAD_METHODS = ("HEAD",)
 
 #: How deep the XML is walked before the shape is summarised. Plex nests media
 #: parts and streams several levels down, and a detail view that dumped all of
@@ -50,7 +58,7 @@ COMMAND = Command(
         ),
     ),
     notes=(
-        f"methods: {', '.join(METHODS)}; GET is used when no method is given",
+        "the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render",
         "write methods are refused: plex-axi is read-only, and several Plex write "
         "endpoints are destructive",
         "the token is sent as a header and never appears in the path this prints",
@@ -173,6 +181,12 @@ def _method_and_path(positionals: list):
                 "Run `plex-axi api GET <path>` to read the same resource",
             ],
             code="READ_ONLY",
+        )
+    if head in _HEAD_METHODS:
+        raise UsageError(
+            f"{head} is not available: plex-axi renders response bodies, and a {head} has none",
+            help_lines=["Run `plex-axi api GET <path>` to read the resource"],
+            code="UNSUPPORTED_METHOD",
         )
     if head in METHODS:
         if len(values) < 2:

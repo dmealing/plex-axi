@@ -98,7 +98,7 @@ def count_line(shown: int, total: int) -> str:
 
 def describe_filters(described: list) -> str:
     """A one-line echo of the applied filters, for an empty state."""
-    return " ".join(f'{row["field"]}{row["operator"]}"{row["value"]}"' for row in described)
+    return " ".join(f'{row["field"]} {row["operator"]} "{row["value"]}"' for row in described)
 
 
 def parse_pairs(pairs: list, *, flag: str) -> dict:

@@ -193,7 +193,7 @@ plex-axi api /status/sessions
 plex-axi api /library/sections/1/all --query type=10 --query limit=5
 ```
 
-- methods: GET, HEAD; GET is used when no method is given
+- the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render
 - write methods are refused: plex-axi is read-only, and several Plex write endpoints are destructive
 - the token is sent as a header and never appears in the path this prints
 

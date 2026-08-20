@@ -257,6 +257,19 @@ def test_api_refuses_a_write_method_rather_than_documenting_that_it_should_not(s
         assert "read-only" in result
 
 
+def test_api_refuses_head_rather_than_sending_the_get_it_would_become(server, cli_run):
+    """A HEAD has no body to render, and a defaulted request method sends a GET.
+
+    Answering a HEAD by rendering a GET's body under `request.method: HEAD`
+    would be output naming a request that was never made.
+    """
+    result = cli_run("api", "HEAD", "/library/sections")
+    assert result.code == 2
+    assert "HEAD" in result
+    assert "GET" in result
+    assert not server.requests
+
+
 def test_api_passes_query_parameters_through(server, cli_run):
     result = cli_run("api", "/library/sections/3/all", "--query", "type=10", "--query", "limit=2")
     assert result.code == 0

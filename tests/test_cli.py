@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from plex_axi import cli
+from plex_axi import argspec, cli
 from plex_axi.errors import EXIT_ERROR, EXIT_OK, EXIT_USAGE
 
 
@@ -43,6 +43,19 @@ def test_a_plausible_wrong_guess_gets_a_targeted_hint(server, cli_run, wrong, ri
     result = cli_run("search", wrong, "x")
     assert result.code == EXIT_USAGE
     assert f"use {right} instead" in result
+
+
+@pytest.mark.parametrize("wrong", sorted(argspec.RENAMED))
+def test_every_renamed_hint_can_actually_fire(server, cli_run, wrong):
+    """A RENAMED key that is also a global can never reach the hint.
+
+    ``parse()`` accepts globals on every command and records them silently, so
+    such an entry would document a correction that never happens -- and a
+    caller spelling the flag would get the generic behaviour instead.
+    """
+    result = cli_run("search", wrong, "x")
+    assert result.code == EXIT_USAGE
+    assert f"unknown flag {wrong}" in result
 
 
 def test_an_out_of_scope_noun_is_answered_with_the_reason(cli_run):

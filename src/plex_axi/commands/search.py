@@ -20,6 +20,7 @@ from ..music import (
     available_fields,
     build_filters,
     default_fields,
+    label_filters,
     rows_for,
     run_search,
     with_track_artist,
@@ -117,6 +118,7 @@ def run(ctx, name: str, sub: str, parsed):
     )
 
     rows = rows_for(libtype, result.items)
+    described = label_filters(section, described, libtype=libtype)
     if libtype == "track":
         fields = with_track_artist(fields, rows)
 
@@ -189,7 +191,7 @@ def _empty(doc: dict, libtype: str, described: list, query):
     """
     applied = describe_filters(described)
     if query:
-        applied = f'{applied} title~"{query}"'.strip()
+        applied = f'{applied} title ~ "{query}"'.strip()
     doc[f"{libtype}s"] = f"0 {libtype}s matched {applied}" if applied else f"0 {libtype}s"
     lines = []
     if any(row["field"].endswith("genre") for row in described):

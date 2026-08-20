@@ -156,7 +156,29 @@ def test_an_empty_result_names_the_filters_and_hands_back_the_vocabulary(server,
     assert result.code == 0
     assert "0 tracks matched" in result
     assert "artist.title" in result
+    assert 'artist.genre is \\"Jazz\\"' in result
     assert "plex-axi genres" in result
+
+
+def test_the_filter_echo_names_the_operator_the_server_actually_applies(server, cli_run):
+    """``=`` means "contains" on a string field and "is" on a tag.
+
+    The echo is a promise about the predicate that ran. Label a tag field
+    "contains" and an agent will reasonably try substrings and synonyms the
+    server refuses to match -- which is why the label is read from the same
+    operator table the search validated against, not spelled out once.
+    """
+    result = cli_run("search", "--genre", "Jazz")
+    assert result.code == 0
+    assert "artist.genre,is,Jazz" in result.out
+
+    result = cli_run("search", "--track", "Example Track")
+    assert result.code == 0
+    assert "track.title,contains,Example Track" in result.out
+
+    result = cli_run("search", "--rated-min", "4")
+    assert result.code == 0
+    assert "track.userRating,>=,8 (4 stars)" in result.out
 
 
 def test_search_with_no_field_is_a_usage_error_not_a_whole_library_dump(server, cli_run):

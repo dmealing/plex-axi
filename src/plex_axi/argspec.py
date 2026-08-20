@@ -59,7 +59,6 @@ RENAMED: dict = {
     "--top": "--limit",
     "--kind": "--type",
     "--libtype": "--type",
-    "--section": "--type",
     "--format": "--fields",
     "--output": "--fields",
     "--group": "--no-group",
