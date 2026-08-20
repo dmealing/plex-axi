@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "plex-axi"
+version = "0.1.0"
+description = "Agent eXperience Interface (AXI) CLI for structured, per-field music search against a Plex Media Server"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["plex", "music", "cli", "axi", "agent", "toon"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+  # The model layer is the point. plexapi carries MusicSection, the filter DSL
+  # and its server-side validation; a transport-only SDK carries none of it.
+  "PlexAPI>=4.18",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+plex-axi = "plex_axi.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dmealing/plex-axi"
+Source = "https://github.com/dmealing/plex-axi"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plex_axi"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:plex_axi.*"]
