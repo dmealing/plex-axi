@@ -46,7 +46,36 @@ def test_the_skill_states_what_the_tool_will_not_do():
     content = _rendered()
     assert "never plays anything" in content
     assert "music only" in content
-    assert "read-only" in content
+
+
+def test_the_skill_never_claims_the_tool_is_read_only_without_qualifying_it():
+    """The claim was total in the first release and is not any more.
+
+    A stale "it is read-only" in a document an agent loads on demand is a
+    correctness bug: it would decide, on that sentence, that a command it is
+    holding cannot possibly change anything.
+    """
+    from plex_axi import writes
+
+    content = _rendered()
+    for line in content.splitlines():
+        if writes.READ_ONLY not in line:
+            continue
+        # Every surviving mention is the per-command access declaration, which
+        # is about one command rather than about the tool.
+        assert line.lstrip().startswith(("- **", "  - ")), line
+    assert writes.ALLOW_VAR in content
+    assert "--write" in content
+
+
+def test_the_skill_states_which_commands_can_write():
+    from plex_axi import writes
+
+    content = _rendered()
+    for noun in ("rate", "playlist"):
+        section = content.split(f"### `plex-axi {noun}`", 1)[1]
+        assert writes.MUTATING in section.split("###", 1)[0]
+    assert f"- **{writes.ACCESS[writes.READ_ONLY]}**" in content
 
 
 def test_the_check_flag_fails_on_a_stale_copy(tmp_path, cli_run):

@@ -24,7 +24,7 @@ COMMAND = Command(
     subs=(Sub(name="sessions", summary="List active sessions"),),
     notes=(
         "music sessions are listed first; anything else is counted, not detailed",
-        "read-only: this command reports sessions and cannot control one",
+        "nothing here can start, stop or address a stream: listing one is a read",
     ),
     examples=("plex-axi sessions",),
 )

@@ -1,6 +1,6 @@
 ---
 name: plex-axi
-description: Search and diagnose a Plex music library through the plex-axi CLI - structured per-field search on artist, album, track, genre, mood, style, year and rating; the library's own genre/mood/style vocabulary; track, album and artist detail including file availability; and sonically similar tracks. Use whenever a task touches a Plex music library: finding a recording, checking why a search found nothing, or resolving a title to a media id. It never plays anything.
+description: Search and diagnose a Plex music library through the plex-axi CLI - structured per-field search on artist, album, track, genre, mood, style, year and rating; the library's own genre/mood/style vocabulary; track, album and artist detail including file availability; and sonically similar tracks. It can also set a rating and edit an audio playlist, but only when the operator has enabled writes. Use whenever a task touches a Plex music library: finding a recording, checking why a search found nothing, or resolving a title to a media id. It never plays anything.
 ---
 
 # plex-axi
@@ -17,6 +17,7 @@ Plex token is a bearer credential for the whole library.
 export PLEX_URL=http://plex.example.com:32400   # the server on the local network
 export PLEX_TOKEN=<a Plex access token>
 export PLEX_SECTION='Example Music'             # only if there is more than one
+export PLEX_AXI_ALLOW_WRITES=true        # only to allow `rate` and `playlist` to write
 ```
 
 Point `PLEX_URL` at the server itself rather than at plex.tv, so the tool keeps
@@ -43,14 +44,19 @@ carry the command that fixes them.
   whatever owns the speakers.
 - **It is music only.** No films, shows, episodes or watchlist. The rest of the Plex
   tooling landscape is video-shaped; this is the half nothing else covers.
-- **It is read-only.** Nothing here changes the library, and `api` refuses write
-  methods rather than documenting that it should not be used for them.
+- **It reads unless it is told twice that it may write.** Only `rate` and
+  `playlist create|add|remove` change anything. They refuse unless `PLEX_AXI_ALLOW_WRITES`
+  is `true` in the environment, and even then they preview the change and
+  send nothing until `--write` is passed. Every other command reads, and `api` refuses
+  every method but GET rather than documenting that it should not be used for them.
 
 ## Commands
 
 ### `plex-axi search`
 
 Search the music library field by field, server-side.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi search --artist 'Example Artist' --track 'Example Track'
@@ -65,11 +71,29 @@ plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,r
 - album fields: key, title, artist, year, rating, tracks, added, guid
 - artist fields: key, title, rating, added, guid
 - identical track titles are collapsed with Plex's own `group=title`; --no-group shows each
-- read-only: this command cannot change anything on the server
+
+### `plex-axi pick`
+
+Choose tracks to play now, filtered and shuffled by the server.
+
+- **read-only - this command cannot change anything on the server**
+
+```sh
+plex-axi pick
+plex-axi pick --rated-min 4 --limit 20
+plex-axi pick --genre Jazz --not-played-since 30d --exclude-live
+```
+
+- every filter is a Plex predicate evaluated server-side; anything this server does not offer is reported under `unapplied`, never applied client-side
+- the shuffle is the server's `sort=random` over the whole match set, not a shuffle of one page
+- identical titles are collapsed with Plex's own `group=title`, so one song does not fill the list from three pressings
+- ratings are stars (0-5) in and out, so a rating in a result can be passed back
 
 ### `plex-axi genres`
 
 List the genres this library uses.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi genres
@@ -78,11 +102,12 @@ plex-axi search --genre '<value>'
 
 - the values this library will accept for `search --genre`, read from the server
 - genres are carried on the artist in a Plex music library, not on the track
-- read-only: this command cannot change anything on the server
 
 ### `plex-axi moods`
 
 List the moods this library uses.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi moods
@@ -91,11 +116,12 @@ plex-axi search --mood '<value>'
 
 - the values this library will accept for `search --mood`, read from the server
 - moods are written at every level; --type chooses which set to list
-- read-only: this command cannot change anything on the server
 
 ### `plex-axi styles`
 
 List the styles this library uses.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi styles
@@ -104,11 +130,12 @@ plex-axi search --style '<value>'
 
 - the values this library will accept for `search --style`, read from the server
 - styles are carried on the artist in a Plex music library, not on the track
-- read-only: this command cannot change anything on the server
 
 ### `plex-axi track`
 
 Show one track in full, with its media id.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi track 12345
@@ -118,11 +145,13 @@ plex-axi search --artist 'Example Artist' --type track
 - analysis is Plex's musicAnalysisVersion; 0 means `similar` has no seed
 - rating is in stars (0-5), the same scale as `search --rated-min`
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- read-only: this command cannot change anything on the server
+- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
 
 ### `plex-axi album`
 
 Show one album in full, with its media id.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi album 12345
@@ -131,11 +160,13 @@ plex-axi search --artist 'Example Artist' --type album
 
 - rating is in stars (0-5), the same scale as `search --rated-min`
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- read-only: this command cannot change anything on the server
+- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
 
 ### `plex-axi artist`
 
 Show one artist in full, with its media id.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi artist 12345
@@ -144,11 +175,13 @@ plex-axi search --artist 'Example Artist' --type artist
 
 - rating is in stars (0-5), the same scale as `search --rated-min`
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- read-only: this command cannot change anything on the server
+- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
 
 ### `plex-axi similar`
 
 List tracks Plex's analysis finds sonically similar, with distances.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi similar 12345
@@ -157,11 +190,12 @@ plex-axi similar 12345 --max-distance 0.1 --limit 5
 
 - distance is the server's own sonic distance: 0 is identical, larger is further away
 - a seed whose `analysis` is 0 has not been analysed and can return nothing at all
-- read-only: this command cannot change anything on the server
 
 ### `plex-axi recent`
 
 List what was added to the music library most recently.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi recent
@@ -169,22 +203,60 @@ plex-axi recent --type track --limit 50
 ```
 
 - scoped to the music library: the server-wide recently-added list spans video too
-- read-only: this command cannot change anything on the server
+
+### `plex-axi playlist`
+
+List, inspect and edit the audio playlists on this server.
+
+- **list, show: read-only - this command cannot change anything on the server**
+  - create, add, remove: mutating - needs PLEX_AXI_ALLOW_WRITES=true in the environment; without --write it previews the change and sends nothing
+
+```sh
+plex-axi playlist
+plex-axi playlist show 'Example Playlist'
+plex-axi playlist add 'Example Playlist' --key 12345 --key 12346
+plex-axi playlist create 'Example Playlist' --key 12345 --write
+```
+
+- only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
+- a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
+- titles match exactly, case-folded; on a miss the real titles are handed back
+- nothing here plays a playlist: `show` prints the tracks and their media ids
+
+### `plex-axi rate`
+
+Set or clear your rating on one track, album or artist.
+
+- **mutating - needs PLEX_AXI_ALLOW_WRITES=true in the environment; without --write it previews the change and sends nothing**
+
+```sh
+plex-axi rate 12345 --stars 4
+plex-axi rate 12345 --stars 4 --write
+plex-axi rate 12345 --clear --write
+```
+
+- the rating printed afterwards is read back from the server, not echoed from the request
+- a rating is per-account state, not library metadata; editing metadata stays out of scope
+- rating something to the value it already has is a no-op and exits 0
 
 ### `plex-axi sessions`
 
 List the streams the server currently believes are playing.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi sessions
 ```
 
 - music sessions are listed first; anything else is counted, not detailed
-- read-only: this command reports sessions and cannot control one
+- nothing here can start, stop or address a stream: listing one is a read
 
 ### `plex-axi api`
 
 Make an authenticated GET to any Plex API path.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi api /
@@ -194,12 +266,14 @@ plex-axi api /library/sections/1/all --query type=10 --query limit=5
 ```
 
 - the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render
-- write methods are refused: plex-axi is read-only, and several Plex write endpoints are destructive
+- write methods are refused here even when writes are enabled: a mutation goes through a typed command that can validate and preview it, and several Plex write endpoints are destructive
 - the token is sent as a header and never appears in the path this prints
 
 ### `plex-axi doctor`
 
 Check the environment, the server, the music library and its filters.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi doctor
@@ -212,6 +286,8 @@ plex-axi --section 'Example Music' doctor
 ### `plex-axi skill`
 
 Write or verify the generated Agent Skill for this CLI.
+
+- **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi skill
@@ -238,4 +314,7 @@ plex-axi skill --check
   value is written down.
 - **A track with `analysis: 0` has never been analysed**, so `similar` has nothing
   to work from and its empty answer is not a statement about the library.
+- **A mutating command run without `--write` is safe and useful.** It prints what
+  would change and sends nothing, which is how to check a playlist edit before
+  making it -- and how a smart playlist is caught before the server refuses.
 - Every command supports `--help`, which is the authoritative reference for its flags.

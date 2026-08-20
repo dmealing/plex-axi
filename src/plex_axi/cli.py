@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from . import __version__, output
+from . import __version__, output, writes
 from . import config as config_module
 from .argspec import GLOBAL_FLAGS, VALUE_GLOBALS, Command, parse, render_command_help
 from .commands import api as api_command
@@ -13,6 +13,9 @@ from .commands import doctor as doctor_command
 from .commands import genres as genres_command
 from .commands import home as home_command
 from .commands import item as item_command
+from .commands import pick as pick_command
+from .commands import playlist as playlist_command
+from .commands import rate as rate_command
 from .commands import recent as recent_command
 from .commands import search as search_command
 from .commands import sessions as sessions_command
@@ -26,6 +29,7 @@ from .output import MODE_HUMAN, MODE_JSON, MODE_TOON, HelpBlock
 #: vocabulary when nothing matched, look at one item, then the diagnostics.
 COMMAND_ORDER = (
     "search",
+    "pick",
     "genres",
     "moods",
     "styles",
@@ -34,6 +38,8 @@ COMMAND_ORDER = (
     "artist",
     "similar",
     "recent",
+    "playlist",
+    "rate",
     "sessions",
     "api",
     "doctor",
@@ -50,6 +56,9 @@ _MODULES = {
     "artist": item_command,
     "similar": similar_command,
     "recent": recent_command,
+    "pick": pick_command,
+    "playlist": playlist_command,
+    "rate": rate_command,
     "sessions": sessions_command,
     "api": api_command,
     "doctor": doctor_command,
@@ -77,6 +86,10 @@ _ALIASES = {
     "playing": "sessions",
     "sonic": "similar",
     "related": "similar",
+    "playlists": "playlist",
+    "shuffle": "pick",
+    "random": "pick",
+    "suggest": "pick",
 }
 
 #: Nouns that belong to the half of Plex this tool deliberately does not model.
@@ -102,7 +115,6 @@ _OUT_OF_SCOPE = {
     "scan": "server administration",
     "refresh": "server administration",
     "edit": "metadata editing",
-    "rate": "metadata editing",
 }
 
 
@@ -120,11 +132,13 @@ class Context:
         mode: str = MODE_TOON,
         timeout: float | None = None,
         section: str | None = None,
+        user: str | None = None,
     ) -> None:
         self.environ = environ
         self.mode = mode
         self.timeout = timeout
         self.section_name = section
+        self.user = user
         self._config = None
         self._server = None
         self._section = None
@@ -138,11 +152,23 @@ class Context:
         return self._config
 
     def server(self):
-        """Connect once. Every command in one invocation shares the connection."""
+        """Connect once. Every command in one invocation shares the connection.
+
+        With ``--user`` that costs a second connection and one plex.tv
+        round-trip: the admin connection is what reports the machine identifier
+        the sharing record is keyed on, and the second is authenticated as the
+        named account so that every per-account value -- ratings, playlists --
+        is theirs rather than the owner's.
+        """
         if self._server is None:
             from .plex import connect
 
-            self._server = connect(self.config())
+            server = connect(self.config())
+            if self.user:
+                from .users import connect_as
+
+                server = connect_as(server, self.config(), self.user)
+            self._server = server
         return self._server
 
     def section(self):
@@ -167,14 +193,17 @@ def render_root_help() -> str:
         f"description: {home_command.DESCRIPTION}",
         f"commands[{len(COMMAND_ORDER) + 1}]:",
         f"  (none)=home, {names}",
-        "flags[7]:",
+        "flags[8]:",
         "  --human (readable output), --json (raw JSON output), --timeout <seconds> (default 30),",
         "  --section <title|key> (which music library), --debug (diagnostics on stderr),",
-        "  --help, -v/--version",
-        "env[3]:",
+        "  --user <plex-user> (read as another account: admin only, and the one flag here",
+        "    that needs a plex.tv round-trip), --help, -v/--version",
+        "env[4]:",
         "  PLEX_URL - the server's local address, e.g. http://plex.example.com:32400",
         "  PLEX_TOKEN - a Plex access token; there is deliberately no --token flag",
         "  PLEX_SECTION - default music library, when a server has more than one",
+        f"  {writes.ALLOW_VAR} - set to {writes.ALLOW_VALUE} to allow `playlist` and `rate` to"
+        " write; unset, they refuse",
         f"summaries[{len(COMMAND_ORDER)}]:",
     ]
     width = max(len(name) for name in COMMAND_ORDER)
@@ -182,16 +211,25 @@ def render_root_help() -> str:
     lines.extend(
         [
             "note:",
-            "  plex-axi reads and diagnoses a music library. It has no play command and no",
-            "  concept of a speaker: it ends at a labelled media id and leaves dispatch to",
-            "  whatever owns the speakers. Video is out of scope by the same decision.",
+            "  plex-axi reads and diagnoses a music library, and can change two things in it:",
+            "  a rating and a playlist. Both are refused unless "
+            f"{writes.ALLOW_VAR}={writes.ALLOW_VALUE}",
+            "  is exported, and each still needs --write on the invocation; without --write",
+            "  they show the change and send nothing. Every other command only reads, and",
+            "  `api` refuses every method but GET. Each command's --help says which it is.",
+            "note:",
+            "  It has no play command and no concept of a speaker: it ends at a labelled media",
+            "  id and leaves dispatch to whatever owns the speakers. Video is out of scope by",
+            "  the same decision.",
             "examples:",
             "  plex-axi",
             "  plex-axi search --artist 'Example Artist' --track 'Example Track'",
             "  plex-axi search --genre Jazz --rated-min 4 --limit 10",
+            "  plex-axi pick --rated-min 4 --not-played-since 30d",
             "  plex-axi genres",
             "  plex-axi track 12345",
             "  plex-axi similar 12345",
+            "  plex-axi playlist show 'Example Playlist'",
             "  plex-axi doctor",
         ]
     )
@@ -299,6 +337,29 @@ def _resolve_timeout(raw) -> float | None:
             f"--timeout must be greater than 0, got {value:g}",
             help_lines=["Run `plex-axi --timeout 60 <command>`"],
             code="BAD_TIMEOUT",
+        )
+    return value
+
+
+def _resolve_user(raw) -> str | None:
+    if raw is None:
+        return None
+    if raw is _MISSING_VALUE:
+        raise UsageError(
+            "--user needs a Plex username",
+            help_lines=[
+                "Run `plex-axi --user '<plex-username>' <command>`",
+                "`--user` is admin-only and needs a plex.tv round-trip; every other flag here "
+                "works against the local server alone",
+            ],
+            code="BAD_USER",
+        )
+    value = str(raw).strip()
+    if not value:
+        raise UsageError(
+            "--user needs a Plex username",
+            help_lines=["Run `plex-axi --user '<plex-username>' <command>`"],
+            code="BAD_USER",
         )
     return value
 
@@ -443,6 +504,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
             mode=mode,
             timeout=_resolve_timeout(globals_.get("timeout")),
             section=_resolve_section(globals_.get("section")),
+            user=_resolve_user(globals_.get("user")),
         )
         doc = module.run(ctx, name, sub_name, parsed)
     except AxiError as exc:

@@ -38,7 +38,7 @@ def _command(name: str) -> Command:
     notes = [
         "rating is in stars (0-5), the same scale as `search --rated-min`",
         "rating_key is local to this server; guid is the identifier that survives a re-match",
-        "read-only: this command cannot change anything on the server",
+        "run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports",
     ]
     if name == "track":
         flags.insert(

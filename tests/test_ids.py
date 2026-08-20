@@ -81,21 +81,43 @@ def test_the_search_output_labels_the_id_and_carries_the_guid(server, cli_run):
     assert "changes when an item is re-matched" in result
 
 
-def test_no_command_ever_emits_a_rating_key_in_the_guid_namespace(server, cli_run):
-    """M5: the form that resolves to a server called "track" and fails there."""
+def test_no_command_ever_emits_a_rating_key_in_the_guid_namespace(server, cli_run, writable_env):
+    """M5: the form that resolves to a server called "track" and fails there.
+
+    Swept over every command that names an item, including the two that write:
+    a mutation response identifies what it changed, and that is exactly where an
+    identifier gets copied into a configuration file.
+    """
     for argv in (
         ("search", "--track", "Guest Track"),
+        ("pick",),
         ("track", "311"),
         ("album", "310"),
         ("artist", "300"),
         ("similar", "111"),
         ("recent",),
         ("sessions",),
+        ("playlist",),
+        ("playlist", "show", "Example Playlist"),
+        ("rate", "311", "--stars", "3"),
+        ("rate", "311", "--stars", "3", "--write"),
+        ("playlist", "add", "Example Playlist", "--key", "311"),
     ):
-        result = cli_run(*argv)
+        result = cli_run(*argv, env=writable_env)
         assert result.code == 0, argv
         for line in result.out.splitlines():
             assert not _FORBIDDEN.search(line.strip().strip('"')), (argv, line)
+
+
+def test_a_mutation_hands_back_the_same_four_labelled_fields(server, cli_run, writable_env):
+    """A write is the response most likely to be pasted somewhere permanent.
+
+    `rating_key` moves when an item is re-matched, so the `guid` and the note
+    travel with it here for the same reason they do everywhere else.
+    """
+    result = cli_run("rate", "111", "--stars", "5", "--write", env=writable_env)
+    assert result.code == 0
+    assert list(_block(result.out, "item:")) == ["media_id", "rating_key", "guid", "note"]
 
 
 def test_the_handoff_block_is_identifiers_and_nothing_else(server, cli_run):

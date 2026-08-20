@@ -62,8 +62,15 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 - `music.py` — the product: section resolution, the per-field filter map, the search, the exact
   count, and the row shapes.
 - `ids.py` — which `plex://` string may be printed. See "The five `plex://` forms" below.
-- `argspec.py` — per-subcommand flag declarations. Unknown flags are rejected by name with the valid
-  ones inlined; `RENAMED` maps plausible wrong guesses (mostly video vocabulary) to the real flag.
+- `writes.py` — the write gate and the `access` vocabulary. Nothing mutates without going through
+  `writes.require`, and every command declares `access=READ_ONLY` or `access=MUTATING` so that
+  `--help` and the generated skill are printing the *same declaration* rather than two descriptions
+  that can drift. See "The write gate" below.
+- `users.py` — `--user`: one plex.tv call, parsed with the standard library. Deliberately not the
+  client library's own user switch; see the sharp edge below.
+- `argspec.py` — per-subcommand flag declarations, and the `access:` block `--help` prints under the
+  description. Unknown flags are rejected by name with the valid ones inlined; `RENAMED` maps
+  plausible wrong guesses (mostly video vocabulary) to the real flag.
 - `commands/` — one module per noun, each exposing `COMMAND_FOR(noun)` and
   `run(ctx, noun, sub, parsed)`.
 
@@ -89,11 +96,51 @@ parameterised one. Adding a noun is still one entry in `COMMAND_ORDER` and one i
 - **`redact()` has a token-shaped backstop as well as the registered literal.** `X-Plex-Token=` as a
   URL parameter is redacted whether or not the value ever passed through this process's config,
   because the client library appends it to artwork, stream and web URLs.
-- **`api` refuses write methods.** A read-only tool with a POST escape hatch is not a read-only tool,
-  and several Plex write endpoints are destructive. It also refuses a caller-supplied
-  `--query X-Plex-Token=…`, which is how a credential reaches shell history.
+- **`api` refuses write methods, and that did not change when the tool learned to write.** A raw
+  path that could POST would make the gate meaningless: anything a typed command refused could be
+  reissued by hand, with none of the validation, the preview or the explanation. Several Plex write
+  endpoints are destructive besides. It also refuses a caller-supplied `--query X-Plex-Token=…`,
+  which is how a credential reaches shell history.
+- **A write is refused before the connection is opened.** `writes.require` runs at the top of
+  `run()`, ahead of `ctx.server()`, so a mutating command with the gate closed reaches the server
+  **zero times**. A refusal that read the item first and then declined would produce the same exit
+  code and the same message while telling the server what was attempted;
+  `tests/test_writes.py` asserts on `server.requests`, not on the exit code, for exactly that
+  reason.
+- **A per-user token is registered as a secret the moment it arrives.** `--user` receives a bearer
+  credential from plex.tv that never passed through this process's own configuration, so
+  `users.access_token` calls `register_secret` on it before returning.
 - Tests for all of this live in `tests/test_credentials.py`, which asserts `capsys` **stderr** is
   clean as often as stdout.
+
+## The write gate
+
+The first release was read-only end to end and said so everywhere. This one is not, and the
+mechanism that keeps that honest is one decision with two conjuncts:
+
+1. **`PLEX_AXI_ALLOW_WRITES=true` in the environment is the gate**, matched case-insensitively
+   after stripping. It is the primary because of *who sets it*: the operator, once, outside the
+   invocation. A caller composing a command line cannot grant itself a permission it was not given,
+   and the refusal can name what to change. A value that is set but is not `true` is refused **by
+   name** rather than treated as false — an operator who exported `yes` meant to open it, and a
+   silent "not set" would send them hunting for a variable they had already exported.
+2. **`--write` on the invocation is the confirmation, and it is not a second gate.** With the gate
+   open and the flag absent the command still runs and *previews*: it reads the item or the
+   playlist, prints what would change, and sends nothing. That is what stops the flag being
+   ceremony an agent shrugs off and retries past — leaving it out asks a different, cheaper
+   question, and it is where both playlist failure modes are caught before anything is written.
+
+`Command.access` / `Sub.access` are the declaration, and they default to `READ_ONLY` so a command
+added without anyone thinking about the question is described as the thing it almost certainly is.
+`argspec.render_access` prints it as the `access:` block directly under the description — not among
+the notes, because "can this change my library?" is not a footnote — and `skill.py` renders the same
+block from the same declaration, so the help and the skill cannot say different things.
+`tests/test_writes.py` sweeps every noun asserting the block is there and near the top.
+
+**Anything that claims the tool is read-only has to be qualified or deleted.** README, the generated
+skill, the home view (`writes:`), root `--help` and this file were all updated together;
+`tests/test_skill.py` fails if an unqualified claim comes back. The one place the old wording is
+still correct is `api`, which is GET-only whatever the gate says.
 
 ## Sharp edges
 
@@ -149,6 +196,37 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
 - **A session element carries a `<User>` child and the library reads it unguarded.** A `/status/sessions`
   response without one raises `AttributeError` inside `PlexSession._loadData` rather than parsing to
   something empty. The test double models the real shape so this is exercised rather than assumed.
+- **A boolean key in `filters` may not have a sibling.** `_validateAdvancedSearch` raises
+  *"Multiple keys in the same dictionary with and/or is not allowed"* the moment `{'or': [...]}`
+  shares a dictionary with anything else, so a parenthesised OR has to be composed as
+  `{'and': [{...simple...}, {'or': [...]}]}` — which is what `pick._compose` does. This is also why
+  `group=title` is no longer passed inside `filters`: it moved to `run_search`'s `**kwargs`, where
+  `_buildSearchKey` validates it against the same field table and emits the same `group=title`
+  parameter *outside* any group. A `group` inside the parentheses would be a SQL GROUP BY scoped to
+  half the predicate, which is not what anyone means.
+- **A never-played track has no `lastViewedAt` at all.** The column is null rather than zero, so
+  `track.lastViewedAt<<=-30d` excludes exactly the tracks most obviously not played lately. That is
+  why `pick --not-played-since` ORs the date predicate with `track.unplayed` server-side, and why
+  the double models the attribute as absent rather than as `0` — a fixture with a zero there would
+  let the wrong single-predicate version pass.
+- **A tag filter is negated with `!`, and the value should be a list.** `--exclude-live` sends
+  `filters={'album.subformat!': ['Compilation', 'Live']}` rather than Plex's own
+  `'Compilation,Live'` string, because a list is resolved element by element to the numeric ids Plex
+  filters on. The comma-joined string reaches the URL as text and only matches if the server happens
+  to accept names there.
+- **`rate()` refuses a negative rating from a caller.** `RatingMixin.rate` raises `BadRequest` for
+  anything outside 0-10 and sends `-1` itself when the argument is *omitted*. So clearing a rating
+  is `item.rate()` with no argument; passing `-1` through is a client-side refusal that never
+  reaches the server and looks like the server said no.
+- **`--user` does not go through the client library's user switch, and must not start to.**
+  `switchUser` reaches the account object — the same object that resolves Sonos speakers by name and
+  dispatches playback to them — and costs three round-trips, two of them to plex.tv. `users.py` asks
+  plex.tv one question instead (`/api/servers/<machineId>/shared_servers`, which already carries the
+  username, the user id *and* that user's access token for this machine) and parses it with
+  `xml.etree`. One round-trip instead of two, and `MyPlexAccount`, `myPlexAccount`, `switchUser` and
+  `plexapi.myplex` all stay on `tests/test_no_dispatch.py`'s forbidden list.
+- **Plex Home users are not in the sharing record**, so `--user` cannot reach them. The error says
+  so and points at exporting that user's own `PLEX_TOKEN`, rather than reporting them as absent.
 - **Sort fields are libtype-scoped on the wire.** `recentlyAddedAlbums` builds
   `sort=album.addedAt:desc`, not `sort=addedAt:desc`. Anything parsing a sort parameter has to strip
   the scope.
@@ -212,19 +290,33 @@ PR must say what. The current set, each with its reason:
 | Command | What `api` cannot do |
 |---|---|
 | `search` | build the filter expression at all: per-field scoping, operator normalisation and tag-id resolution are three round-trips and a validation pass |
+| `pick` | compose a parenthesised OR, check the section's advertised fields before building a predicate, and report the ones this server cannot honour instead of applying them in Python |
 | `genres` / `moods` / `styles` | know that the choices endpoint is per-field and per-libtype, and hand the list back as the recovery set on a miss |
 | `track` / `album` / `artist` | the second round-trip behind `--check-files`, and the difference between "not checked" and "not accessible" |
 | `similar` | surface `distance`, which is on the wire but meaningless without the seed's `analysis` version beside it |
 | `recent` | pick the music-typed endpoint over the server-wide one that spans video |
 | `sessions` | separate music sessions from the rest without the caller parsing types |
+| `playlist` | pass `playlistType='audio'` (without it `playlists()` returns films and photos too), and tell the two `BadRequest`s apart — smart playlist means pick a different playlist, mixed media means pick different items |
+| `rate` | convert stars to Plex's 0-10 in the same place the read path converts back, refuse a no-op, and read the result back rather than echoing the request |
 | `doctor` | check four things in the order they fail, and exit non-zero |
 
 **Demotion.** If a typed command's body reduces to flag-mapping plus a request, delete it — the
 measure is the diff, not the intention.
 
+**`--count` became `--limit`, deliberately.** The requirements table spells `pick`'s size flag
+`--count`. Every other list command here takes `--limit`, and `RENAMED` already maps `--count` to
+`--limit` as a wrong guess — so shipping both spellings would have made that correction table lie
+and given an agent two names for one idea. The flag is `--limit`; the deviation is here rather than
+silent.
+
+**`queue create` (W11) is still out.** A playqueue id is not universally accepted — Sonos rejects
+Plex playqueues outright — so shipping one without naming which platforms take it only moves the
+discovery to a 500.
+
 **What is deliberately absent, and will stay absent.** No playback of any kind, no speaker, room,
-player, client or target concept, no video, no server administration, no metadata editing, no second
-Plex client library, and no semantic name resolution by regex or substring. The first is enforced by
+player, client or target concept, no video, no server administration, no *metadata* editing (a user
+rating is per-account state, not library metadata, which is why `rate` is in and `edit` is not), no
+second Plex client library, and no semantic name resolution by regex or substring. The first is enforced by
 `tests/test_no_dispatch.py`; read its module docstring before touching it. The rule is not that the
 tool *cannot* play music — the client library can, over a live cloud path to a Sonos and over a
 local one to a Chromecast, and both are one attribute access away. It is that it *must not*, because
@@ -234,7 +326,7 @@ reaching past the seam makes two systems believe they own the same queue.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~200 tests, a couple of seconds
+pytest                                   # ~400 tests, a couple of seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
@@ -262,7 +354,33 @@ could not test any of them.
 The double also models both answers to the open question about grouping (`FakePlex(groupable=…)`):
 a server that collapses repeated titles and one that accepts the parameter and ignores it. Which one
 a given Plex build is cannot be settled without a live server, so the tool is tested against both and
-reports which one it met.
+reports which one it met. `FakePlex(spartan=True)` is the same idea for filter metadata: a library
+that advertises none of the fields `pick` would like, so the "report it as unapplied" path has a
+server to run against rather than a comment claiming it works.
+
+**The writes half, and four things it needs.**
+
+- **The fixture is per-server now.** `Tables` deep-copies the artist/album/track rows into each
+  `FakePlex`, because a rating written by one test would otherwise be visible to the next. Ratings
+  are keyed by `(account, rating_key)`, which is what makes `--user` testable: a rating written as
+  one account is not the other's.
+- **`FakeSession` has `put`, `post` and `delete`.** The client library reaches for them by name, so
+  a double with only `get` makes every write path untestable rather than merely untested.
+- **`FakePlex.writes` records every non-GET request**, and the gate test asserts it is empty. The
+  gate test also asserts `requests` is empty, which is the stronger claim: the server never heard
+  about the attempt at all.
+- **The write endpoints refuse like Plex.** `/:/rate` requires `key`, `identifier` and a rating in
+  0-10 (or `-1`); a playlist `uri` must name *this* machine identifier and may only carry items
+  whose media type matches the playlist's. A double that accepted a 0-5 rating there would let the
+  star conversion break silently, which is the one bug that endpoint can actually have.
+
+**plex.tv is answered by the same double, routed on the hostname.** That is what lets "plex.tv is
+unreachable but the library is fine" be a test case rather than a hypothetical, and it is why
+`--user` uses `plex.build_session()` like everything else.
+
+**The query parameters are handed over ordered as well as mapped.** A parenthesised filter
+expression is carried by the *order* of `push`/`or`/`pop`, so a dictionary cannot represent it and a
+test that only saw the mapping could not tell `(A or B) and C` from `A or (B and C)`.
 
 Supported Pythons are 3.10 through 3.12, and **the floor is not a free choice — `PlexAPI` sets
 it.** plexapi 4.18.0 raised its own `requires-python` to `>=3.10`, which raised this project's floor
@@ -285,7 +403,7 @@ never wrong.
 
 `from __future__ import annotations` stays at the top of every module. It is no longer what makes
 `X | None` safe — that is native from 3.10 — but it keeps annotations lazy and the modules uniform,
-and removing 23 of them is a separate change from moving a floor. Note that nested quotes inside a
+and removing them from every module is a separate change from moving a floor. Note that nested quotes inside a
 multi-line f-string expression need 3.12; the test fixtures use `.format` for that reason.
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
