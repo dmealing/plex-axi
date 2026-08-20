@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/dmealing/plex-axi/compare/v0.1.0...v0.2.0) (2026-08-20)
+
+
+### Features
+
+* add pick, playlist, rate and --user behind an explicit write gate ([#4](https://github.com/dmealing/plex-axi/issues/4)) ([122b598](https://github.com/dmealing/plex-axi/commit/122b5981599cec7c17f888f7fd824b556238f10e))
+
 ## 0.1.0 (2026-08-20)
 
 
