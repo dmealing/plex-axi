@@ -224,6 +224,26 @@ def test_a_sort_is_passed_to_the_server_rather_than_applied_here(server, cli_run
     assert _search_requests(server)[0]["query"]["sort"] == "track.userRating:desc"
 
 
+def test_an_unknown_sort_is_diagnosed_not_reported_as_a_missing_result(server, cli_run):
+    """A wrong ``--sort`` value is a client-side validation miss.
+
+    The client library signals it as ``NotFound``, so without a translation of
+    its own the canned "the search results was not found on this server" answer
+    escapes: a false diagnosis -- no request was sent -- with the server's own
+    list of valid sorts discarded. Filter fields and operators already get the
+    recoverable treatment; sorts must not be the exception. The value is the
+    caller's argument, rejected before any query, so it exits 2 like --fields
+    rather than 1 like a missing result.
+    """
+    result = cli_run("search", "--artist", "Example Artist", "--sort", "nosuchfield:desc")
+    assert result.code == 2
+    assert result.line("code:") == "code: UNKNOWN_SORT_FIELD"
+    assert "sort fields for track: " in result
+    assert "titleSort" in result  # the advertised sorts, inlined
+    assert "not found on this server" not in result
+    assert _search_requests(server) == []  # rejected before any request was built
+
+
 def test_an_unknown_field_is_rejected_with_the_available_ones(server, cli_run):
     result = cli_run("search", "--artist", "Example Artist", "--fields", "key,bpm")
     assert result.code == 2

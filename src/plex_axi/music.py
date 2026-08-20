@@ -406,6 +406,22 @@ def _filter_error(exc: Exception, libtype: str):
             help_lines=[f"Run the command again with `--type {LIBTYPES[0]}`"],
             code="UNKNOWN_LIBTYPE",
         )
+    if "Unknown sort field" in text:
+        # plexapi signals this one as NotFound, not BadRequest: a wrong --sort
+        # value is a client-side validation miss, and letting it fall through
+        # to the generic NotFound translation would tell the caller their
+        # results "were not found on this server" when no request was sent.
+        # It is the caller's argument rather than a lookup outcome, so like
+        # --fields it exits on the usage side, not the lookup side.
+        sorts = _bracketed(text)
+        return UsageError(
+            f"this server does not offer that sort for a {libtype}",
+            help_lines=[
+                f"sort fields for {libtype}: {sorts}" if sorts else "",
+                "Run the same search with `--sort addedAt:desc` for newest first",
+            ],
+            code="UNKNOWN_SORT_FIELD",
+        )
     return translate(exc, what="the search results")
 
 
