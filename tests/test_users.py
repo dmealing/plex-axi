@@ -88,6 +88,25 @@ def test_plex_tv_being_unreachable_says_that_and_nothing_else(user_server, cli_r
     assert fake.plex_tv_requests == []
 
 
+def test_a_refused_per_user_token_is_not_blamed_on_plex_token(user_server, cli_run):
+    """The admin connection has already succeeded by the time the per-user one
+    opens, so a 401 there is not about PLEX_TOKEN. A recovery line that said
+    "re-export PLEX_TOKEN" would send the operator hunting for a variable that
+    is demonstrably working."""
+    fake = user_server(refuse_user_token=True)
+    result = cli_run("--user", SHARED_USERNAME, "search", "--track", "Example Track")
+    assert result.code == 1
+    assert result.line("code:") == "code: USER_TOKEN_REFUSED"
+    assert SHARED_USERNAME in result
+    assert "without `--user`" in result
+    assert "re-export PLEX_TOKEN" not in result
+    # The attribution rests on these two facts: the cloud call succeeded and the
+    # admin token was accepted, so the per-user token is the only credential
+    # left that could have been refused.
+    assert len(fake.plex_tv_requests) == 1
+    assert TOKEN in _tokens(fake)
+
+
 def test_an_unknown_user_is_answered_with_the_accounts_that_do_exist(user_server, cli_run):
     fake = user_server()
     result = cli_run("--user", "nobody", "search", "--track", "Example Track")

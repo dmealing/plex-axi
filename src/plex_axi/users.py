@@ -48,7 +48,23 @@ def connect_as(server, config, name: str):
     from .plex import connect
 
     token = access_token(config, server.machineIdentifier, name)
-    return connect(config, token=token)
+    try:
+        return connect(config, token=token)
+    except AuthFailed:
+        # The admin connection has already succeeded by this point, so a refusal
+        # here is not about PLEX_TOKEN: the credential at fault is the per-user
+        # token plex.tv just handed back, and the recovery is about the share,
+        # not the environment. Caught as the translated error rather than the
+        # library's own exception so nothing from it crosses this boundary.
+        raise AuthFailed(
+            f"the server refused the token plex.tv returned for {name!r}",
+            help_lines=[
+                "The share may have been revoked or never accepted; check it in Plex's own "
+                "sharing settings",
+                "Run the command without `--user` to read as the account PLEX_TOKEN belongs to",
+            ],
+            code="USER_TOKEN_REFUSED",
+        ) from None
 
 
 def access_token(config, machine_identifier: str, name: str) -> str:

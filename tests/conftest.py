@@ -964,6 +964,7 @@ class FakePlex:
         shared_users=None,
         plex_tv_status=200,
         plex_tv_unreachable=False,
+        refuse_user_token=False,
     ):
         self.groupable = groupable
         self.token = token
@@ -990,6 +991,13 @@ class FakePlex:
         self.shared_users = SHARED_USERS if shared_users is None else shared_users
         self.plex_tv_status = plex_tv_status
         self.plex_tv_unreachable = plex_tv_unreachable
+        #: A server that no longer accepts the per-user token even though
+        #: plex.tv still lists it -- revoked, or a short-lived token that aged
+        #: out. It is the one `--user` failure that arrives *after* the cloud
+        #: call succeeds, so the tool has to blame the per-user token rather
+        #: than PLEX_TOKEN, and a double that always accepted it could not test
+        #: that attribution.
+        self.refuse_user_token = refuse_user_token
         #: Every request this server was asked for, so a test can assert on the
         #: request the client actually built.
         self.requests = []
@@ -1061,7 +1069,7 @@ class FakePlex:
         identities = {self.token: "owner"}
         for user in self.shared_users:
             identities[user["token"]] = user["username"]
-        if token not in identities:
+        if token not in identities or (self.refuse_user_token and token != self.token):
             raise PlexRefusal(
                 401, '<Response code="1001" status="User could not be authenticated"/>'
             )

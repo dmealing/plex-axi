@@ -81,6 +81,32 @@ def test_not_played_since_includes_a_track_that_was_never_played(server, cli_run
     assert query["track.unplayed"] == "1"
 
 
+def test_an_absolute_date_is_echoed_as_the_date_and_not_prefixed(server, cli_run):
+    """The `filters:` echo is a promise about the predicate that ran, and the
+    `-` prefix belongs to a relative period -- it is where the client library's
+    own normalisation puts it. `-2020-01-01` is not a day anybody asked for."""
+    result = cli_run("pick", "--not-played-since", "2020-01-01")
+    assert result.code == 0
+    echoed = _echoed_period(result)
+    assert echoed.endswith(",2020-01-01")
+    # The predicate ran, and as a date: the library converts an absolute date to
+    # the epoch the server compares against, so the wire carries digits rather
+    # than a calendar.
+    query = _search_queries(server)[-1]
+    assert query["track.lastViewedAt<<"].isdigit()
+    assert query["push"] == "1" and query["or"] == "1" and query["track.unplayed"] == "1"
+
+    # The relative form keeps its sign, which is the half the prefix is for.
+    assert "-30d" in _echoed_period(cli_run("pick", "--not-played-since", "30d"))
+
+
+def _echoed_period(result):
+    """The `filters:` row a run printed for the last-played predicate."""
+    return next(
+        line for line in result.out.splitlines() if line.lstrip().startswith("track.lastViewedAt")
+    )
+
+
 def test_the_or_is_a_real_parenthesised_expression_on_the_wire(server, cli_run):
     """A parenthesised OR is structure, and structure can arrive flattened.
 

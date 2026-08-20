@@ -350,6 +350,26 @@ def test_a_playlist_can_be_created_added_to_and_trimmed(server, cli_run, writabl
     assert "Example Track" not in shown
 
 
+def test_a_playlist_that_holds_only_albums_is_a_zero_not_a_crash(server, cli_run, writable_env):
+    """Every music libtype reports listType 'audio', so Plex will hold an album
+    or an artist in an audio playlist -- "items but no tracks" is a real state,
+    reachable with this tool's own `--key`. The zero is the answer, it names
+    what the playlist does hold, and the next steps quote no track key because
+    there is none in the list."""
+    created = cli_run(
+        "playlist", "create", "Example Albums", "--key", "110", "--write", env=writable_env
+    )
+    assert created.code == 0
+
+    shown = cli_run("playlist", "show", "Example Albums", env=writable_env)
+    assert shown.code == 0
+    assert shown.line("count:") == "count: 0 of 1 items"
+    assert "0 tracks in this playlist" in shown
+    assert shown.line("other:") == "other: 1 item(s) that are not tracks"
+    assert "playlist add 'Example Albums' --key <rating_key>" in shown
+    assert "INTERNAL_ERROR" not in shown
+
+
 def test_creating_a_playlist_that_exists_is_refused_with_the_command_that_works(
     server, cli_run, writable_env
 ):

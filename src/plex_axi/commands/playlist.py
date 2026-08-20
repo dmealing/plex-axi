@@ -177,6 +177,23 @@ def _show(ctx, parsed):
         doc["tracks"] = "0 items in this playlist"
         return doc
 
+    if not rows:
+        # Items but no tracks is a real state, not a contradiction: every music
+        # libtype reports listType 'audio', so Plex will hold albums and artists
+        # in an audio playlist. The zero is the answer, the `other` line says
+        # what the playlist does hold, and the suggestions cannot quote a track
+        # key because there is none in the list.
+        doc["tracks"] = "0 tracks in this playlist"
+        doc["other"] = f"{len(items)} item(s) that are not tracks"
+        doc["help"] = HelpBlock(
+            [
+                f"Run `plex-axi playlist add '{playlist.title}' --key <rating_key>` to preview "
+                "adding a track",
+                "Run `plex-axi search --track '<title>'` to find rating keys",
+            ]
+        )
+        return doc
+
     doc["tracks"] = project(rows, fields)
     if len(tracks) != len(items):
         # Counted, not detailed: a non-track item in an audio playlist is not

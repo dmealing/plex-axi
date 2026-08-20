@@ -33,6 +33,7 @@ from ..errors import AxiError
 from ..ids import handoff
 from ..music import (
     POINTS_PER_STAR,
+    RELATIVE_DATE,
     advertised_sorts,
     available_fields,
     default_fields,
@@ -253,6 +254,17 @@ def _compose(filters: dict, groups: list) -> dict:
     return parts[0] if len(parts) == 1 else {"and": parts}
 
 
+def _echo_period(period: str) -> str:
+    """The period as the predicate that ran should be read back.
+
+    A relative period is echoed with the sign the client library's normalisation
+    puts on the wire -- ``30d`` reaches the server as ``-30d``. An absolute date
+    is echoed as itself, because nothing prefixes it and ``-2020-01-01`` is not a
+    day anybody asked for.
+    """
+    return f"-{period}" if RELATIVE_DATE.match(period) else period
+
+
 def _add_last_played(section, period, filters, groups, described, unapplied) -> None:
     """ "Not played since 30d" has two halves, and the second one is the point.
 
@@ -276,14 +288,14 @@ def _add_last_played(section, period, filters, groups, described, unapplied) -> 
             {
                 "field": "track.lastViewedAt",
                 "operator": "is before, or never played",
-                "value": f"-{period}",
+                "value": _echo_period(period),
             }
         )
         return
     if has_date:
         filters["track.lastViewedAt<<"] = period
         described.append(
-            {"field": "track.lastViewedAt", "operator": "is before", "value": f"-{period}"}
+            {"field": "track.lastViewedAt", "operator": "is before", "value": _echo_period(period)}
         )
         unapplied.append(
             {
