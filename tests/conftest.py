@@ -28,6 +28,9 @@ from a real library.
 
 from __future__ import annotations
 
+import copy
+import re
+import time
 import urllib.parse
 from xml.sax.saxutils import quoteattr
 
@@ -36,6 +39,15 @@ import pytest
 # --------------------------------------------------------------------- fixture data
 
 TOKEN = "example-token-0000000001"
+
+#: The access token plex.tv hands back for the one account this server is shared
+#: with. Built from the same obviously-synthetic shape as the owner's, and never
+#: printed by anything: `--user` registers it as a secret the moment it arrives.
+USER_TOKEN = "example-token-0000000002"
+SHARED_USERNAME = "example-friend"
+SHARED_EMAIL = "example-friend@example.com"
+SHARED_USER_ID = "770077"
+
 MACHINE_ID = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
 SERVER_NAME = "Example Server"
 SERVER_VERSION = "1.41.0.0000-abcdef"
@@ -50,6 +62,10 @@ VIDEO_SECTION_TITLE = "Example Films"
 #: skipped the ids would not be testing the path the tool actually takes.
 GENRES = {"11": "Jazz", "12": "Rock"}
 STYLES = {"21": "Cool Jazz", "22": "Indie Rock"}
+#: Plex's pressing tags. `pick --exclude-live` filters on these, and they are
+#: numeric ids on the wire exactly like a genre -- which is why the tool resolves
+#: the names rather than putting them in the URL as text.
+SUBFORMATS = {"51": "Compilation", "52": "Live"}
 TRACK_MOODS = {"31": "Mellow", "32": "Energetic"}
 ARTIST_MOODS = {"41": "Reflective"}
 
@@ -101,6 +117,7 @@ ALBUMS = [
         "title": "Example Album",
         "artist": 100,
         "year": 1977,
+        "subformat": [],
         "leafCount": 2,
         "userRating": 8.0,
         "addedAt": 1600000100,
@@ -112,6 +129,8 @@ ALBUMS = [
         "title": "Example Anthology",
         "artist": 100,
         "year": 1995,
+        # Tagged a compilation, so `pick --exclude-live` must drop its tracks.
+        "subformat": ["51"],
         "leafCount": 2,
         "userRating": None,
         "addedAt": 1600000200,
@@ -123,6 +142,7 @@ ALBUMS = [
         "title": "Second Album",
         "artist": 200,
         "year": 2001,
+        "subformat": ["52"],
         "leafCount": 1,
         "userRating": None,
         "addedAt": 1610000100,
@@ -134,6 +154,7 @@ ALBUMS = [
         "title": "Example Compilation",
         "artist": 300,
         "year": 2003,
+        "subformat": ["51"],
         "leafCount": 1,
         "userRating": None,
         "addedAt": 1620000100,
@@ -275,6 +296,63 @@ TRACKS = [
     },
 ]
 
+#: One film, on the video library this server also has. It exists for exactly one
+#: reason: a rating key that resolves here but cannot go into an audio playlist
+#: is the *only* way to reach plexapi's mixed-media refusal, and a refusal with
+#: no way to trigger it is a translation nobody has tested.
+MOVIES = [
+    {
+        "key": 900,
+        "title": "Example Film",
+        "guid": "plex://movie/a1b2c3d4e5f60718293d0900",
+        "year": 2011,
+        "addedAt": 1630000000,
+        "duration": 5400000,
+    },
+]
+
+#: Playlists as the server holds them. Three, because all three matter: an
+#: ordinary audio one that can be edited, a *smart* audio one that cannot, and a
+#: video one that must never appear in a music tool's listing.
+PLAYLISTS = [
+    {
+        "id": 501,
+        "title": "Example Playlist",
+        "type": "audio",
+        "smart": 0,
+        "items": [111, 112],
+        "updatedAt": 1700000100,
+    },
+    {
+        "id": 502,
+        "title": "Example Smart Playlist",
+        "type": "audio",
+        "smart": 1,
+        "items": [111, 211],
+        "updatedAt": 1700000200,
+    },
+    {
+        "id": 503,
+        "title": "Example Film Night",
+        "type": "video",
+        "smart": 0,
+        "items": [900],
+        "updatedAt": 1700000300,
+    },
+]
+
+#: What plex.tv answers when the owner asks who this server is shared with. The
+#: access token here is the whole point: it is the only place the mapping from a
+#: username to a per-user token for this machine exists.
+SHARED_USERS = [
+    {
+        "id": SHARED_USER_ID,
+        "username": SHARED_USERNAME,
+        "email": SHARED_EMAIL,
+        "token": USER_TOKEN,
+    },
+]
+
 #: Sonic neighbours, keyed by seed rating key, as (rating key, distance).
 NEIGHBOURS = {
     111: [(211, 0.0821), (311, 0.1902)],
@@ -283,18 +361,38 @@ NEIGHBOURS = {
 
 SESSIONS = [{"track": 111, "device": "Example Player", "state": "playing"}]
 
-BY_KEY = {}
-for _row in ARTISTS:
-    BY_KEY[_row["key"]] = ("artist", _row)
-for _row in ALBUMS:
-    BY_KEY[_row["key"]] = ("album", _row)
-for _row in TRACKS:
-    BY_KEY[_row["key"]] = ("track", _row)
-
-ALBUM_BY_KEY = {row["key"]: row for row in ALBUMS}
-ARTIST_BY_KEY = {row["key"]: row for row in ARTISTS}
-
 SEARCH_TYPES = {"8": "artist", "9": "album", "10": "track"}
+
+
+class Tables:
+    """One server's own copy of the fixture.
+
+    The tables were module-level constants until this tool could write. They
+    cannot stay that way: a rating set by one test would be visible to the next,
+    and a suite whose fixtures leak between cases is a suite that passes for
+    reasons nobody chose. Every :class:`FakePlex` deep-copies them, so a write
+    is visible to the next read *within one test* and to nothing outside it.
+    """
+
+    def __init__(self):
+        self.artists = copy.deepcopy(ARTISTS)
+        self.albums = copy.deepcopy(ALBUMS)
+        self.tracks = copy.deepcopy(TRACKS)
+        self.movies = copy.deepcopy(MOVIES)
+        self.artist_by_key = {row["key"]: row for row in self.artists}
+        self.album_by_key = {row["key"]: row for row in self.albums}
+        self.by_key = {}
+        for kind, rows in (
+            ("artist", self.artists),
+            ("album", self.albums),
+            ("track", self.tracks),
+            ("movie", self.movies),
+        ):
+            for row in rows:
+                self.by_key[row["key"]] = (kind, row)
+
+    def rows(self, libtype):
+        return {"artist": self.artists, "album": self.albums, "track": self.tracks}[libtype]
 
 
 # ------------------------------------------------------------- accepted parameters
@@ -322,6 +420,13 @@ KNOWN_PARAMS = {
     "X-Plex-Container-Size",
 }
 
+#: The parenthesis and boolean markers Plex's advanced search uses. They are not
+#: filters and they are not skippable noise either: they carry the *structure* of
+#: the expression, so they are read in order rather than looked up in a dict --
+#: which is why :class:`FakeSession` hands the parameters over as an ordered list
+#: as well as a mapping.
+GROUPING_PARAMS = {"push", "pop", "or", "and"}
+
 #: Field parameters, as ``<libtype>.<field>`` with an optional operator suffix.
 #: The operator set is Plex's own, and deliberately does not contain ``__gte``
 #: and friends: those are the client library's Python-side operators, and a URL
@@ -342,7 +447,20 @@ KNOWN_FIELDS = {
     "artist.addedAt",
     "album.addedAt",
     "track.addedAt",
+    "track.lastViewedAt",
+    "track.unplayed",
+    "album.subformat",
 }
+
+#: Query parameters the playlist endpoints define. Same rule as everywhere else:
+#: anything not here is a 400, so a write that reached the URL misspelled fails
+#: the suite rather than being quietly absorbed.
+KNOWN_PLAYLIST_PARAMS = {"playlistType", "sectionID", "title", "sort", "type", "smart", "uri"}
+
+#: What `/:/rate` requires. `identifier` is not decoration: without it Plex does
+#: not know which agent's rating is being set.
+RATE_PARAMS = {"key", "identifier", "rating"}
+RATE_IDENTIFIER = "com.plexapp.plugins.library"
 KNOWN_OPERATORS = {"", "=", "!", "!=", "<", ">", ">>", "<<", "<=", ">=", ">>=", "<<=", "&"}
 
 
@@ -403,8 +521,8 @@ def artist_xml(row):
     return f"<Directory {head}>{body}</Directory>"
 
 
-def album_xml(row):
-    artist = ARTIST_BY_KEY[row["artist"]]
+def album_xml(row, tables):
+    artist = tables.artist_by_key[row["artist"]]
     head = _attrs(
         [
             ("ratingKey", row["key"]),
@@ -427,9 +545,9 @@ def album_xml(row):
     return f"<Directory {head}/>"
 
 
-def track_xml(row, *, check_files=False, distance=None, session=None):
-    album = ALBUM_BY_KEY[row["album"]]
-    artist = ARTIST_BY_KEY[album["artist"]]
+def track_xml(row, tables, *, check_files=False, distance=None, session=None, item_id=None):
+    album = tables.album_by_key[row["album"]]
+    artist = tables.artist_by_key[album["artist"]]
     part = _attrs(
         [
             ("id", row["key"]),
@@ -494,10 +612,66 @@ def track_xml(row, *, check_files=False, distance=None, session=None):
             ("lastViewedAt", row["lastViewedAt"] or None),
             ("musicAnalysisVersion", row["analysis"]),
             ("distance", distance),
+            # Only present when the track is being listed as part of a playlist.
+            # It is the handle `removeItems` deletes by, and it is per membership
+            # rather than per track: the same song twice in a list has two.
+            ("playlistItemID", item_id),
         ]
     )
     body = media + _tags("Mood", row["moods"], TRACK_MOODS) + player
     return f"<Track {head}>{body}</Track>"
+
+
+def movie_xml(row, *, item_id=None):
+    """A film, which exists here only so a mixed-media playlist can be refused."""
+    head = _attrs(
+        [
+            ("ratingKey", row["key"]),
+            ("key", "/library/metadata/{}".format(row["key"])),
+            ("guid", row["guid"]),
+            ("type", "movie"),
+            ("title", row["title"]),
+            ("titleSort", row["title"]),
+            ("year", row["year"]),
+            ("duration", row["duration"]),
+            ("addedAt", row["addedAt"]),
+            ("librarySectionID", VIDEO_SECTION_KEY),
+            ("playlistItemID", item_id),
+        ]
+    )
+    return f"<Video {head}/>"
+
+
+def playlist_xml(row, tables):
+    """One playlist as the server describes it.
+
+    ``key`` carries the ``/items`` suffix a real server sends, because the client
+    library strips it -- and a double that pre-stripped it would hide the day
+    that stops being true.
+    """
+    duration = 0
+    for entry in row["items"]:
+        _kind, item = tables.by_key[entry["key"]]
+        duration += item.get("duration") or 0
+    head = _attrs(
+        [
+            ("ratingKey", row["id"]),
+            ("key", "/playlists/{}/items".format(row["id"])),
+            ("guid", "com.plexapp.agents.none://{:08d}".format(row["id"])),
+            ("type", "playlist"),
+            ("title", row["title"]),
+            ("titleSort", row["title"]),
+            ("summary", ""),
+            ("smart", row["smart"]),
+            ("playlistType", row["type"]),
+            ("composite", "/playlist/{}/composite/1".format(row["id"])),
+            ("duration", duration or None),
+            ("leafCount", len(row["items"])),
+            ("addedAt", 1700000000),
+            ("updatedAt", row["updatedAt"]),
+        ]
+    )
+    return f"<Playlist {head}/>"
 
 
 # -------------------------------------------------------------- filter metadata
@@ -537,6 +711,7 @@ SECTION_FIELDS = {
         ("album.title", "Title", "string"),
         ("album.year", "Year", "integer"),
         ("album.mood", "Mood", "tag"),
+        ("album.subformat", "Subformat", "tag"),
         ("album.userRating", "Rating", "integer"),
         ("album.addedAt", "Date Added", "date"),
     ],
@@ -545,15 +720,47 @@ SECTION_FIELDS = {
         ("track.mood", "Mood", "tag"),
         ("track.userRating", "Rating", "integer"),
         ("track.addedAt", "Date Added", "date"),
+        ("track.lastViewedAt", "Last Played", "date"),
+        ("track.unplayed", "Unplayed", "boolean"),
+    ],
+}
+
+#: The same tables with everything `pick` depends on taken out, which is what
+#: :class:`FakePlex` serves when ``spartan=True``. A server that does not
+#: advertise a field is not a hypothetical: filter metadata is per-library and
+#: changes with the Plex version, so the tool has to degrade with an explanation
+#: rather than fail, and that path needs a server to test it against.
+SPARTAN_FIELDS = {
+    "artist": SECTION_FIELDS["artist"],
+    "album": [f for f in SECTION_FIELDS["album"] if not f[0].endswith("subformat")],
+    "track": [
+        f for f in SECTION_FIELDS["track"] if not f[0].endswith(("lastViewedAt", "unplayed"))
     ],
 }
 
 #: The tag filters each libtype offers, as ``filter`` name to choices endpoint.
 SECTION_FILTERS = {
     "artist": [("genre", "Genre"), ("style", "Style"), ("mood", "Mood")],
-    "album": [("mood", "Mood")],
+    "album": [("mood", "Mood"), ("subformat", "Subformat")],
     "track": [("mood", "Mood")],
 }
+
+SPARTAN_FILTERS = {
+    "artist": SECTION_FILTERS["artist"],
+    "album": [f for f in SECTION_FILTERS["album"] if f[0] != "subformat"],
+    "track": SECTION_FILTERS["track"],
+}
+
+#: The sorts a scanned music library publishes. ``random`` is Plex's own shuffle
+#: and is the one `pick` asks for; the spartan server withholds it, because a
+#: picker that failed rather than saying "not shuffled" would be worse.
+SECTION_SORTS = (
+    ("titleSort", "Title", "asc"),
+    ("addedAt", "Date Added", "desc"),
+    ("userRating", "Rating", "desc"),
+    ("random", "Randomly", "asc"),
+)
+SPARTAN_SORTS = tuple(s for s in SECTION_SORTS if s[0] != "random")
 
 #: The ``group`` field is deliberately absent from this metadata, because it is
 #: absent from a real server's too: the client library adds it by hand rather
@@ -562,22 +769,24 @@ SECTION_FILTERS = {
 #: :class:`FakePlex` models both answers -- see its ``groupable`` argument.
 
 
-def _meta_xml():
+def _meta_xml(fields_table=None, filters_table=None, sorts=None):
+    fields_table = SECTION_FIELDS if fields_table is None else fields_table
+    filters_table = SECTION_FILTERS if filters_table is None else filters_table
+    sorts = SECTION_SORTS if sorts is None else sorts
     types = []
     for index, (libtype, code) in enumerate((("artist", 8), ("album", 9), ("track", 10))):
-        fields = list(SECTION_FIELDS[libtype])
+        fields = list(fields_table[libtype])
         field_xml = "".join(
             '<Field key="{}" title="{}" type="{}"/>'.format(*field) for field in fields
         )
         filter_xml = "".join(
             f'<Filter filter="{name}" filterType="string" key="/library/sections/{MUSIC_SECTION_KEY}/{libtype}/{name}" title="{title}" type="filter"/>'
-            for name, title in SECTION_FILTERS[libtype]
+            for name, title in filters_table[libtype]
         )
-        sort_xml = (
-            '<Sort default="asc" defaultDirection="asc" descKey="titleSort:desc" '
-            'key="titleSort" title="Title"/>'
-            '<Sort defaultDirection="desc" descKey="addedAt:desc" key="addedAt" title="Date Added"/>'
-            '<Sort defaultDirection="desc" descKey="userRating:desc" key="userRating" title="Rating"/>'
+        sort_xml = "".join(
+            f'<Sort defaultDirection="{direction}" descKey="{key}:desc" '
+            f'key="{key}" title={quoteattr(title)}/>'
+            for key, title, direction in sorts
         )
         types.append(
             f'<Type active="{1 if index == 0 else 0}" key="/library/sections/{MUSIC_SECTION_KEY}/all?type={code}" '
@@ -602,23 +811,23 @@ def _meta_xml():
 # ------------------------------------------------------------------ predicates
 
 
-def _artist_of(kind, row):
+def _artist_of(kind, row, tables):
     if kind == "artist":
         return row
     if kind == "album":
-        return ARTIST_BY_KEY[row["artist"]]
-    return ARTIST_BY_KEY[ALBUM_BY_KEY[row["album"]]["artist"]]
+        return tables.artist_by_key[row["artist"]]
+    return tables.artist_by_key[tables.album_by_key[row["album"]]["artist"]]
 
 
-def _album_of(kind, row):
+def _album_of(kind, row, tables):
     if kind == "album":
         return row
     if kind == "track":
-        return ALBUM_BY_KEY[row["album"]]
+        return tables.album_by_key[row["album"]]
     return None
 
 
-def _value_for(field, kind, row):
+def _value_for(field, kind, row, tables):
     """The value one ``<libtype>.<field>`` predicate compares against.
 
     Scoping is resolved the way Plex resolves it: a track matches
@@ -628,9 +837,9 @@ def _value_for(field, kind, row):
     """
     scope, _, name = field.partition(".")
     if scope == "artist":
-        source = _artist_of(kind, row)
+        source = _artist_of(kind, row, tables)
     elif scope == "album":
-        source = _album_of(kind, row)
+        source = _album_of(kind, row, tables)
     else:
         source = row if kind == "track" else None
     if source is None:
@@ -643,22 +852,73 @@ def _value_for(field, kind, row):
         return source.get("userRating")
     if name == "addedAt":
         return source.get("addedAt")
+    if name == "lastViewedAt":
+        # A track Plex has never played carries no lastViewedAt at all -- the
+        # column is null, not zero -- so a "played before X" predicate does not
+        # match it. That is why `pick` ORs in `unplayed`, and modelling the
+        # attribute as absent is what makes the OR testable.
+        return source.get("lastViewedAt") or None
+    if name == "unplayed":
+        return 0 if source.get("viewCount") else 1
     if name == "genre":
         return source.get("genres", [])
     if name == "style":
         return source.get("styles", [])
     if name == "mood":
         return source.get("moods", [])
+    if name == "subformat":
+        return source.get("subformat", [])
     raise PlexRefusal(400, f"unknown field {field} in this container")
 
 
-def _matches(field, operator, wanted, kind, row):
-    value = _value_for(field, kind, row)
+#: Seconds in each unit Plex's relative dates use. `mon` is deliberately not `m`:
+#: minutes are `m`, and getting that pair the wrong way round is a filter that
+#: silently means something else.
+_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800, "mon": 2592000, "y": 31536000}
+
+
+_RELATIVE = re.compile(r"^-?(\d+)(mon|[smhdwy])$")
+
+
+def _is_relative(value) -> bool:
+    return bool(_RELATIVE.match(str(value)))
+
+
+def _relative_seconds(value) -> float:
+    """A relative date as an absolute epoch, resolved the way a server would."""
+    count, unit = _RELATIVE.match(str(value)).groups()
+    return time.time() - int(count) * _UNITS[unit]
+
+
+def _matches_date(operator, wanted, value) -> bool:
+    threshold = _relative_seconds(wanted)
+    moment = float(value)
+    if operator == "<<":
+        return moment < threshold
+    if operator == ">>":
+        return moment > threshold
+    if operator == "<":
+        return moment <= threshold
+    if operator == ">":
+        return moment >= threshold
+    raise PlexRefusal(400, f"operator {operator} is not defined for a date")
+
+
+def _matches(field, operator, wanted, kind, row, tables):
+    value = _value_for(field, kind, row, tables)
     if value is None:
         return False
     if isinstance(value, list):
-        # Tag fields carry ids; a comma-separated value is an OR.
-        return any(part in value for part in wanted.split(","))
+        # Tag fields carry ids; a comma-separated value is an OR, and `!` negates
+        # the whole set -- which is what `album.subformat!=51,52` asks for.
+        held = any(part in value for part in wanted.split(","))
+        if operator in ("", "="):
+            return held
+        if operator == "!":
+            return not held
+        raise PlexRefusal(400, f"operator {operator} is not defined for a tag")
+    if _is_relative(wanted):
+        return _matches_date(operator, wanted, value)
     if isinstance(value, str):
         text, needle = value.lower(), wanted.lower()
         if operator == "":
@@ -694,22 +954,79 @@ def _matches(field, operator, wanted, kind, row):
 class FakePlex:
     """Routes a request the way a Plex Media Server does, and refuses like one."""
 
-    def __init__(self, *, groupable=True, token=TOKEN, music_sections=1):
+    def __init__(
+        self,
+        *,
+        groupable=True,
+        token=TOKEN,
+        music_sections=1,
+        spartan=False,
+        shared_users=None,
+        plex_tv_status=200,
+        plex_tv_unreachable=False,
+    ):
         self.groupable = groupable
         self.token = token
         self.music_sections = music_sections
-        #: Every (path, query, headers) triple this server was asked for, so a
-        #: test can assert on the request the client actually built.
+        self.tables = Tables()
+        #: `spartan=True` is a server whose filter metadata lacks everything
+        #: `pick` would like to use. It is not a hypothetical: filter metadata is
+        #: per-library and moves with the Plex version, and the tool's contract
+        #: is to degrade with an explanation rather than fail.
+        self.fields = SPARTAN_FIELDS if spartan else SECTION_FIELDS
+        self.filters = SPARTAN_FILTERS if spartan else SECTION_FILTERS
+        self.sorts = SPARTAN_SORTS if spartan else SECTION_SORTS
+        self.playlists = copy.deepcopy(PLAYLISTS)
+        self._next_playlist_id = 600
+        self._next_item_id = 1000
+        for playlist in self.playlists:
+            playlist["items"] = [
+                {"key": key, "item_id": self._item_id()} for key in playlist["items"]
+            ]
+        #: Ratings written during this test, keyed by *account* as well as item:
+        #: a user rating is per-account in Plex, which is the whole reason
+        #: `--user` exists.
+        self.ratings = {}
+        self.shared_users = SHARED_USERS if shared_users is None else shared_users
+        self.plex_tv_status = plex_tv_status
+        self.plex_tv_unreachable = plex_tv_unreachable
+        #: Every request this server was asked for, so a test can assert on the
+        #: request the client actually built.
         self.requests = []
+        #: The subset that was not a GET. A gate that is claimed to block has to
+        #: be shown to block *here*, on the wire, not merely in an exit code.
+        self.writes = []
+        self.plex_tv_requests = []
+        self._identity = "owner"
+
+    def _item_id(self):
+        self._next_item_id += 1
+        return self._next_item_id
 
     # -- routing ---------------------------------------------------------
 
-    def handle(self, path, query, headers):
-        self.requests.append({"path": path, "query": dict(query), "headers": dict(headers)})
-        if headers.get("X-Plex-Token") != self.token:
-            raise PlexRefusal(
-                401, '<Response code="1001" status="User could not be authenticated"/>'
-            )
+    def handle(self, path, query, headers, *, method="GET", pairs=None, host=""):
+        pairs = list(query.items()) if pairs is None else list(pairs)
+        record = {
+            "path": path,
+            "query": dict(query),
+            # Ordered as well as mapped: a parenthesised filter expression is
+            # carried by the order, and a test that only saw the mapping could
+            # not tell `(A or B) and C` from `A or (B and C)`.
+            "pairs": list(pairs),
+            "headers": dict(headers),
+            "method": method,
+            "host": host,
+        }
+        if host == "plex.tv":
+            self.plex_tv_requests.append(record)
+            return self._plex_tv(path, headers, method)
+
+        self.requests.append(record)
+        if method != "GET":
+            self.writes.append(record)
+
+        identity = self._identify(headers)
 
         start = int(headers.get("X-Plex-Container-Start", query.get("X-Plex-Container-Start", 0)))
         size = headers.get("X-Plex-Container-Size", query.get("X-Plex-Container-Size"))
@@ -722,12 +1039,34 @@ class FakePlex:
         if path.rstrip("/") == "/library/sections":
             return self._sections()
         if path.startswith("/library/sections/"):
-            return self._section(path, query, start, size)
+            return self._section(path, query, pairs, start, size)
         if path.startswith("/library/metadata/"):
             return self._metadata(path, query)
         if path == "/status/sessions":
             return self._sessions()
+        if path == "/:/rate":
+            return self._rate(query, method, identity)
+        if path == "/playlists" or path.startswith("/playlists/"):
+            return self._playlists(path, query, method, start, size)
         raise PlexRefusal(404, '<Response code="1000" status="Not Found"/>')
+
+    def _identify(self, headers):
+        """Which account this request is authenticated as, or a 401.
+
+        Two tokens are accepted rather than one, because `--user` reconnects with
+        the token plex.tv handed back and every per-account value after that has
+        to be that account's.
+        """
+        token = headers.get("X-Plex-Token")
+        identities = {self.token: "owner"}
+        for user in self.shared_users:
+            identities[user["token"]] = user["username"]
+        if token not in identities:
+            raise PlexRefusal(
+                401, '<Response code="1001" status="User could not be authenticated"/>'
+            )
+        self._identity = identities[token]
+        return self._identity
 
     def _root(self):
         head = _attrs(
@@ -772,23 +1111,27 @@ class FakePlex:
 
     # -- one section -----------------------------------------------------
 
-    def _section(self, path, query, start, size):
+    def _section(self, path, query, pairs, start, size):
         rest = path[len("/library/sections/") :]
         key, _, tail = rest.partition("/")
         if key not in (MUSIC_SECTION_KEY, "4"):
             raise PlexRefusal(404, "no such section")
 
         if tail in ("all", "collections") and query.get("includeMeta") == "1":
-            body = _meta_xml() if tail == "all" else "<Meta></Meta>"
-            return _container(body, size=0, total=len(TRACKS))
+            body = (
+                _meta_xml(self.fields, self.filters, self.sorts)
+                if tail == "all"
+                else "<Meta></Meta>"
+            )
+            return _container(body, size=0, total=len(self.tables.tracks))
 
-        for libtype, filters in SECTION_FILTERS.items():
+        for libtype, filters in self.filters.items():
             for name, _title in filters:
                 if tail == f"{libtype}/{name}":
                     return self._choices(name, libtype)
 
         if tail == "all":
-            return self._all(query, start, size)
+            return self._all(query, pairs, start, size)
         raise PlexRefusal(404, f"no such section endpoint: {tail}")
 
     def _choices(self, name, libtype):
@@ -798,6 +1141,7 @@ class FakePlex:
             ("mood", "artist"): ARTIST_MOODS,
             ("mood", "track"): TRACK_MOODS,
             ("mood", "album"): {},
+            ("subformat", "album"): SUBFORMATS,
         }[(name, libtype)]
         entries = [
             f'<Directory fastKey="/library/sections/{MUSIC_SECTION_KEY}/all?{libtype}.{name}={i}" key="{i}" title={quoteattr(t)} type="{name}"/>'
@@ -805,13 +1149,13 @@ class FakePlex:
         ]
         return _container("".join(entries), size=len(entries))
 
-    def _all(self, query, start, size):
+    def _all(self, query, pairs, start, size):
         libtype = SEARCH_TYPES.get(query.get("type", "8"))
         if libtype is None:
             raise PlexRefusal(400, "unknown type {}".format(query.get("type")))
 
-        rows = {"artist": ARTISTS, "album": ALBUMS, "track": TRACKS}[libtype]
-        matched = [row for row in rows if self._passes(query, libtype, row)]
+        rows = [self._rated(row) for row in self.tables.rows(libtype)]
+        matched = [row for row in rows if self._passes(pairs, query, libtype, row)]
 
         if query.get("group") == "title" and self.groupable:
             # `groupable=False` models the other half of the open question: a
@@ -841,8 +1185,38 @@ class FakePlex:
         ]
         return _container(body, size=len(window), total=total, extra=extra)
 
-    def _passes(self, query, libtype, row):
-        for name, value in query.items():
+    def _rated(self, row):
+        """The row as *this account* sees it.
+
+        Only the user rating is per-account here, which is enough: it is the one
+        thing this tool writes and the one thing `--user` changes the answer to.
+        """
+        override = self.ratings.get((self._identity, row["key"]), _ABSENT)
+        return row if override is _ABSENT else {**row, "userRating": override}
+
+    def _passes(self, pairs, query, libtype, row):
+        """Evaluate the filter expression in the order it arrived.
+
+        Plex's advanced search is parenthesised -- ``push=1 A or=1 B pop=1`` --
+        so a dictionary of parameters cannot represent it: the same key can
+        appear more than once and the order carries the grouping. Reading the
+        pairs is what lets an OR that reached the wire in the wrong shape fail
+        here instead of quietly matching everything.
+        """
+        stack = [{"mode": "and", "results": []}]
+        for name, value in pairs:
+            if name == "push":
+                stack.append({"mode": "and", "results": []})
+                continue
+            if name in ("or", "and"):
+                stack[-1]["mode"] = name
+                continue
+            if name == "pop":
+                if len(stack) == 1:
+                    raise PlexRefusal(400, "pop without a matching push")
+                group = stack.pop()
+                stack[-1]["results"].append(_combine(group))
+                continue
             if name in KNOWN_PARAMS:
                 continue
             field, operator = _split_operator(name)
@@ -855,16 +1229,19 @@ class FakePlex:
                 )
             if operator not in KNOWN_OPERATORS:
                 raise PlexRefusal(400, f"unknown operator {operator!r}")
-            if not _matches(field, operator, value, libtype, row):
-                return False
-        return "title" not in query or query["title"].lower() in row["title"].lower()
+            stack[-1]["results"].append(_matches(field, operator, value, libtype, row, self.tables))
+        if len(stack) != 1:
+            raise PlexRefusal(400, "push without a matching pop")
+        if "title" in query and query["title"].lower() not in row["title"].lower():
+            return False
+        return _combine(stack[0])
 
     def _element(self, libtype, row):
         if libtype == "artist":
             return artist_xml(row)
         if libtype == "album":
-            return album_xml(row)
-        return track_xml(row)
+            return album_xml(row, self.tables)
+        return track_xml(row, self.tables)
 
     # -- one item --------------------------------------------------------
 
@@ -875,9 +1252,10 @@ class FakePlex:
             rating_key = int(key)
         except ValueError:
             raise PlexRefusal(400, "rating key must be an integer") from None
-        if rating_key not in BY_KEY:
+        if rating_key not in self.tables.by_key:
             raise PlexRefusal(404, "no item with that rating key")
-        kind, row = BY_KEY[rating_key]
+        kind, row = self.tables.by_key[rating_key]
+        row = self._rated(row)
 
         if tail == "nearest":
             if kind != "track":
@@ -887,7 +1265,9 @@ class FakePlex:
             ceiling = float(query.get("maxDistance", 1.0))
             chosen = [(k, d) for k, d in pairs if d <= ceiling][:limit]
             body = "".join(
-                track_xml(BY_KEY[k][1], distance=d) for k, d in chosen if BY_KEY[k][0] == "track"
+                track_xml(self.tables.by_key[k][1], self.tables, distance=d)
+                for k, d in chosen
+                if self.tables.by_key[k][0] == "track"
             )
             return _container(body, size=len(chosen))
 
@@ -895,17 +1275,222 @@ class FakePlex:
             raise PlexRefusal(404, f"no such metadata endpoint: {tail}")
 
         check_files = query.get("checkFiles") == "1"
+        return _container(self._item_xml(kind, row, check_files=check_files), size=1)
+
+    def _item_xml(self, kind, row, *, check_files=False, item_id=None):
         if kind == "track":
-            body = track_xml(row, check_files=check_files)
-        elif kind == "album":
-            body = album_xml(row)
-        else:
-            body = artist_xml(row)
-        return _container(body, size=1)
+            return track_xml(row, self.tables, check_files=check_files, item_id=item_id)
+        if kind == "album":
+            return album_xml(row, self.tables)
+        if kind == "movie":
+            return movie_xml(row, item_id=item_id)
+        return artist_xml(row)
 
     def _sessions(self):
-        body = "".join(track_xml(BY_KEY[s["track"]][1], session=s) for s in SESSIONS)
+        body = "".join(
+            track_xml(self.tables.by_key[s["track"]][1], self.tables, session=s) for s in SESSIONS
+        )
         return _container(body, size=len(SESSIONS))
+
+    # -- ratings ---------------------------------------------------------
+
+    def _rate(self, query, method, identity):
+        """``/:/rate``, refusing everything Plex refuses.
+
+        The identifier is required because Plex needs to know whose rating scale
+        is meant, and the range is 0-10 with -1 meaning "unrated". A double that
+        accepted a 0-5 value here would let the star conversion break silently,
+        which is the one bug this endpoint can actually have.
+        """
+        if method != "PUT":
+            raise PlexRefusal(405, f"{method} is not defined for /:/rate")
+        missing = sorted(RATE_PARAMS - set(query))
+        if missing:
+            raise PlexRefusal(400, f"missing parameter(s): {', '.join(missing)}")
+        unknown = sorted(set(query) - RATE_PARAMS - KNOWN_PARAMS)
+        if unknown:
+            raise PlexRefusal(400, f"unknown parameter(s): {', '.join(unknown)}")
+        if query["identifier"] != RATE_IDENTIFIER:
+            raise PlexRefusal(400, "unknown identifier")
+        try:
+            rating_key = int(query["key"])
+            rating = float(query["rating"])
+        except ValueError:
+            raise PlexRefusal(400, "key must be an integer and rating a number") from None
+        if rating != -1 and not 0 <= rating <= 10:
+            raise PlexRefusal(400, "rating must be between 0 and 10, or -1 to clear it")
+        if rating_key not in self.tables.by_key:
+            raise PlexRefusal(404, "no item with that rating key")
+        self.ratings[(identity, rating_key)] = None if rating < 0 else rating
+        return _container("", size=0)
+
+    # -- playlists -------------------------------------------------------
+
+    def _playlists(self, path, query, method, start, size):
+        rest = path[len("/playlists") :].strip("/")
+        if not rest:
+            if method == "POST":
+                return self._create_playlist(query)
+            if method != "GET":
+                raise PlexRefusal(405, f"{method} is not defined for /playlists")
+            return self._list_playlists(query)
+
+        identifier, _, tail = rest.partition("/")
+        playlist = self._playlist(identifier)
+        if not tail:
+            if method == "GET":
+                return _container(playlist_xml(playlist, self.tables), size=1)
+            if method == "DELETE":
+                self.playlists.remove(playlist)
+                return _container("", size=0)
+            raise PlexRefusal(405, f"{method} is not defined for one playlist")
+        if tail == "items":
+            if method == "GET":
+                return self._playlist_items(playlist, start, size)
+            if method == "PUT":
+                return self._add_items(playlist, query)
+            raise PlexRefusal(405, f"{method} is not defined for playlist items")
+        if tail.startswith("items/"):
+            if method == "DELETE":
+                return self._remove_item(playlist, tail[len("items/") :])
+            raise PlexRefusal(405, f"{method} is not defined for one playlist item")
+        raise PlexRefusal(404, f"no such playlist endpoint: {tail}")
+
+    def _playlist(self, identifier):
+        for playlist in self.playlists:
+            if str(playlist["id"]) == str(identifier):
+                return playlist
+        raise PlexRefusal(404, "no playlist with that rating key")
+
+    def _list_playlists(self, query):
+        unknown = sorted(set(query) - KNOWN_PLAYLIST_PARAMS - KNOWN_PARAMS)
+        if unknown:
+            raise PlexRefusal(400, f"unknown parameter(s): {', '.join(unknown)}")
+        rows = self.playlists
+        wanted = query.get("playlistType")
+        if wanted:
+            if wanted not in ("audio", "video", "photo"):
+                raise PlexRefusal(400, f"unknown playlistType {wanted!r}")
+            rows = [row for row in rows if row["type"] == wanted]
+        if query.get("title"):
+            needle = query["title"].lower()
+            rows = [row for row in rows if needle in row["title"].lower()]
+        body = "".join(playlist_xml(row, self.tables) for row in rows)
+        return _container(body, size=len(rows))
+
+    def _create_playlist(self, query):
+        missing = sorted({"uri", "type", "title", "smart"} - set(query))
+        if missing:
+            raise PlexRefusal(400, f"missing parameter(s): {', '.join(missing)}")
+        if query["type"] not in ("audio", "video", "photo"):
+            raise PlexRefusal(400, f"unknown playlist type {query['type']!r}")
+        if query["smart"] != "0":
+            raise PlexRefusal(400, "this double only creates ordinary playlists")
+        keys = self._uri_keys(query["uri"], query["type"])
+        self._next_playlist_id += 1
+        row = {
+            "id": self._next_playlist_id,
+            "title": query["title"],
+            "type": query["type"],
+            "smart": 0,
+            "items": [{"key": key, "item_id": self._item_id()} for key in keys],
+            "updatedAt": 1700001000,
+        }
+        self.playlists.append(row)
+        return _container(playlist_xml(row, self.tables), size=1)
+
+    def _add_items(self, playlist, query):
+        unknown = sorted(set(query) - KNOWN_PLAYLIST_PARAMS - KNOWN_PARAMS)
+        if unknown:
+            raise PlexRefusal(400, f"unknown parameter(s): {', '.join(unknown)}")
+        if "uri" not in query:
+            raise PlexRefusal(400, "missing parameter(s): uri")
+        for key in self._uri_keys(query["uri"], playlist["type"]):
+            playlist["items"].append({"key": key, "item_id": self._item_id()})
+        return _container("", size=0)
+
+    def _remove_item(self, playlist, item_id):
+        for entry in playlist["items"]:
+            if str(entry["item_id"]) == str(item_id):
+                playlist["items"].remove(entry)
+                return _container("", size=0)
+        raise PlexRefusal(404, "no such item in that playlist")
+
+    def _uri_keys(self, uri, playlist_type):
+        """The rating keys inside a ``server://.../library/metadata/<keys>`` uri.
+
+        The prefix is checked rather than skipped: Plex will not add an item
+        from a server it was not told about, and a uri built against the wrong
+        machine identifier is a bug that would otherwise look like success.
+        """
+        prefix = f"server://{MACHINE_ID}/com.plexapp.plugins.library/library/metadata/"
+        if not uri.startswith(prefix):
+            raise PlexRefusal(400, "uri does not name an item on this server")
+        keys = []
+        for raw in uri[len(prefix) :].split(","):
+            try:
+                key = int(raw)
+            except ValueError:
+                raise PlexRefusal(400, f"not a rating key: {raw!r}") from None
+            if key not in self.tables.by_key:
+                raise PlexRefusal(404, f"no item with rating key {key}")
+            kind = self.tables.by_key[key][0]
+            if _LIST_TYPES[kind] != playlist_type:
+                raise PlexRefusal(400, f"a {kind} cannot go in a {playlist_type} playlist")
+            keys.append(key)
+        return keys
+
+    def _playlist_items(self, playlist, start, size):
+        entries = playlist["items"]
+        window = entries[start:] if size is None else entries[start : start + size]
+        body = "".join(
+            self._item_xml(*self.tables.by_key[entry["key"]], item_id=entry["item_id"])
+            for entry in window
+        )
+        return _container(body, size=len(window), total=len(entries))
+
+    # -- plex.tv ---------------------------------------------------------
+
+    def _plex_tv(self, path, headers, method):
+        """The one cloud call this tool makes, and only the owner may make it."""
+        if method != "GET":
+            raise PlexRefusal(405, f"{method} is not defined here")
+        if path != f"/api/servers/{MACHINE_ID}/shared_servers":
+            raise PlexRefusal(404, "not found")
+        if headers.get("X-Plex-Token") != self.token or self.plex_tv_status == 401:
+            raise PlexRefusal(401, '<Response status="Unauthorized"/>')
+        if self.plex_tv_status != 200:
+            raise PlexRefusal(self.plex_tv_status, '<Response status="Refused"/>')
+        body = "".join(
+            "<SharedServer {}/>".format(
+                _attrs(
+                    [
+                        ("id", index + 1),
+                        ("username", user["username"]),
+                        ("email", user["email"]),
+                        ("userID", user["id"]),
+                        ("accessToken", user["token"]),
+                        ("name", SERVER_NAME),
+                        ("owned", 0),
+                    ]
+                )
+            )
+            for index, user in enumerate(self.shared_users)
+        )
+        return _container(body, size=len(self.shared_users))
+
+
+#: What each media kind counts as when a playlist is built from it. Plex holds
+#: one of these per playlist, which is the whole of the mixed-media rule.
+_LIST_TYPES = {"artist": "audio", "album": "audio", "track": "audio", "movie": "video"}
+
+#: Distinguishes "no rating was written" from "the rating was cleared", which
+#: are different states and print differently.
+_ABSENT = object()
+
+
+def _combine(group):
+    return any(group["results"]) if group["mode"] == "or" else all(group["results"])
 
 
 def _split_operator(name):
@@ -928,6 +1513,11 @@ def _sorted(rows, sort, libtype):
         return sorted(rows, key=lambda row: row["title"].lower(), reverse=reverse)
     if field in ("addedAt", "userRating", "year"):
         return sorted(rows, key=lambda row: row.get(field) or 0, reverse=reverse)
+    if field == "random":
+        # Deliberately deterministic, and deliberately not the natural order: a
+        # test asserting on a shuffled answer has to be reproducible, and a
+        # "shuffle" that returned title order would let a missing sort pass.
+        return sorted(rows, key=lambda row: (row["key"] * 7919) % 1009)
     raise PlexRefusal(400, f"unknown sort field {field!r}")
 
 
@@ -942,21 +1532,45 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Stands in for ``requests.Session``, which is all the client library needs."""
+    """Stands in for ``requests.Session``, which is all the client library needs.
+
+    The write verbs are here because the tool can now write. They are separate
+    methods rather than one with a parameter for the same reason the real
+    session has them: the client library reaches for ``session.put`` by name,
+    and a double that only had ``get`` would make every write path untestable.
+    """
 
     def __init__(self, server):
         self.server = server
 
     def get(self, url, headers=None, params=None, timeout=None, **kwargs):
-        return self._request(url, headers, params)
+        return self._request("GET", url, headers, params)
 
-    def _request(self, url, headers, params):
+    def put(self, url, headers=None, params=None, timeout=None, **kwargs):
+        return self._request("PUT", url, headers, params)
+
+    def post(self, url, headers=None, params=None, timeout=None, **kwargs):
+        return self._request("POST", url, headers, params)
+
+    def delete(self, url, headers=None, params=None, timeout=None, **kwargs):
+        return self._request("DELETE", url, headers, params)
+
+    def _request(self, method, url, headers, params):
         parts = urllib.parse.urlsplit(url)
-        query = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
-        for key, value in (params or {}).items():
-            query[key] = str(value)
+        host = parts.hostname or ""
+        if host == "plex.tv" and self.server.plex_tv_unreachable:
+            import requests
+
+            raise requests.exceptions.ConnectionError("plex.tv is not answering")
+        # Ordered *and* mapped: the mapping is what most of the server reads,
+        # and the order is what carries a parenthesised filter expression.
+        pairs = list(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+        pairs.extend((key, str(value)) for key, value in (params or {}).items())
+        query = dict(pairs)
         try:
-            body = self.server.handle(parts.path, query, headers or {})
+            body = self.server.handle(
+                parts.path, query, headers or {}, method=method, pairs=pairs, host=host
+            )
         except PlexRefusal as refusal:
             return FakeResponse(url, refusal.status, refusal.text)
         return FakeResponse(url, 200, body)
@@ -1009,6 +1623,29 @@ def server(monkeypatch):
         return FakeSession(fake)
 
     monkeypatch.setattr(plex, "build_session", _build_session)
+    return fake
+
+
+@pytest.fixture
+def writable_env(plex_env):
+    """The environment of an installation whose operator has opened the gate.
+
+    Separate from :func:`plex_env` on purpose: the default environment a test
+    sees is one where writes are refused, so a command that mutated without
+    being told twice fails somewhere.
+    """
+    from plex_axi import writes
+
+    return {**plex_env, writes.ALLOW_VAR: writes.ALLOW_VALUE}
+
+
+@pytest.fixture
+def spartan_server(monkeypatch):
+    """A server whose filter metadata lacks everything `pick` would like."""
+    from plex_axi import plex
+
+    fake = FakePlex(spartan=True)
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
     return fake
 
 

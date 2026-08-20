@@ -33,6 +33,11 @@ room, player or client. Every command ends at a labelled `media_id`, and dispatc
 whatever owns the speakers where you are. That is a decision enforced by a test, not a missing
 feature — see [AGENTS.md](AGENTS.md).
 
+**Two commands can change your library, and neither runs by accident.** `rate` sets the rating that
+`--rated-min` reads, and `playlist` edits an audio playlist. Both are refused unless the operator
+has exported `PLEX_AXI_ALLOW_WRITES=true`, and even then they preview the change and send nothing
+until `--write` is passed. Every other command reads. See [Writing](#writing).
+
 ## Install
 
 ```sh
@@ -56,6 +61,7 @@ credential for an entire library.
 export PLEX_URL=http://plex.example.com:32400   # the server on your local network
 export PLEX_TOKEN=<a Plex access token>
 export PLEX_SECTION='Example Music'             # only if the server has more than one
+export PLEX_AXI_ALLOW_WRITES=true               # only if `rate` and `playlist` may write
 ```
 
 Point `PLEX_URL` at the server itself rather than at plex.tv, so the tool keeps working when plex.tv
@@ -72,15 +78,39 @@ plex-axi doctor    # exits non-zero when any check fails, so it works as a hook 
 plex-axi                                              # the library at a glance
 plex-axi search --artist "Example Artist" --rated-min 4
 plex-axi search --genre Jazz --type album --limit 10
+plex-axi pick --rated-min 4 --not-played-since 30d --exclude-live
 plex-axi genres                                       # and `moods`, `styles`
 plex-axi track 12345 --check-files
 plex-axi similar 12345 --max-distance 0.1
 plex-axi recent
+plex-axi playlist show "Example Playlist"
 plex-axi sessions
-plex-axi api /library/sections                        # the escape hatch, read-only
+plex-axi api /library/sections                        # the escape hatch, GET only
 ```
 
-Every command takes `--help`, which is the authoritative reference for its flags.
+Every command takes `--help`, which is the authoritative reference for its flags — including an
+`access:` line under the description saying whether that command reads or writes.
+
+`pick` is the "give me something to listen to" command. Every one of its filters is a Plex
+predicate the server evaluates — the rating comparison, the genre, the relative date, the
+compilation/live exclusion — and the shuffle is Plex's own `sort=random` over the whole match set
+rather than a shuffle of one page. A filter this particular server does not offer is reported under
+`unapplied` rather than quietly applied in Python, because a client-side filter fights `--limit`
+exactly as it fights Plex's own `limit`.
+
+### Reading as another account
+
+Ratings and playlists are per account, so `--user <plex-username>` answers the same questions for
+somebody else on the server:
+
+```sh
+plex-axi --user example-friend playlist
+```
+
+It is **admin only** — the per-user tokens are the owner's to read — and it is the one flag here
+that needs a round-trip to **plex.tv**, because the mapping from a username to that user's token for
+this server exists nowhere else. Everything else keeps working with plex.tv down, and a failure here
+says which of the two happened rather than arriving as an unexplained 401.
 
 ### Output
 
@@ -101,6 +131,45 @@ itself in one turn.
   lists the real vocabulary.
 - **`rating_key` is local to one server and moves** when an item is re-matched or the library is
   rebuilt. Keep the `guid` beside it anywhere the value is written down.
+- **A mutating command without `--write` is a useful command, not a nag.** It prints exactly what
+  would change and sends nothing, which is how to check a playlist edit before making it — and how a
+  smart playlist is caught before the server would refuse it.
+
+## Writing
+
+`plex-axi` began as a read-only tool and most of it still is. Two commands are not:
+
+| Command | What it changes |
+|---|---|
+| `rate <rating_key> --stars <0-5>` | your rating on one track, album or artist — per account, not library metadata |
+| `playlist create\|add\|remove` | the contents of an audio playlist |
+
+Both are behind the same two-part gate, and the order matters:
+
+1. **`PLEX_AXI_ALLOW_WRITES=true` in the environment.** This is the gate. It is a variable rather
+   than a flag because of who sets it: the operator, once, outside the invocation. Something
+   composing a command line cannot grant itself a permission it was not given, and the refusal names
+   what to set. With it unset, a mutating command **never contacts the server at all** — the check
+   runs before the connection is opened, so the attempt is not even something the server hears
+   about.
+2. **`--write` on the invocation.** Without it the command still runs: it reads the item or the
+   playlist, prints the change it would make, and sends nothing.
+
+```sh
+$ plex-axi rate 12345 --stars 5
+error: "refusing to rate 12345: writes are disabled (PLEX_AXI_ALLOW_WRITES is not set)"
+code: WRITES_DISABLED
+help[3]:
+  Run `export PLEX_AXI_ALLOW_WRITES=true`, then run the command again with --write
+  ...
+```
+
+`plex-axi api` stays **GET only** whatever the gate says. A raw path that could POST would make the
+gate meaningless — anything a typed command refused could be reissued by hand — and several Plex
+write endpoints are destructive.
+
+There is still no playback, no speaker, no metadata editing and no server administration. Rating a
+track and editing a playlist are not dispatch; playing one is.
 
 ## What `media_id` is, and what consumes it
 

@@ -79,6 +79,43 @@ def test_a_near_miss_noun_is_redirected(cli_run):
     assert "use `track` instead" in result
 
 
+@pytest.mark.parametrize(
+    ("wrong", "right"), [("playlists", "playlist"), ("shuffle", "pick"), ("random", "pick")]
+)
+def test_the_new_nouns_have_the_guesses_an_agent_would_make(cli_run, wrong, right):
+    result = cli_run(wrong)
+    assert result.code == EXIT_USAGE
+    assert f"use `{right}` instead" in result
+
+
+def test_a_noun_that_stopped_being_out_of_scope_is_no_longer_answered_as_such(server, cli_run):
+    """`rate` was refused as "metadata editing" in the first release.
+
+    It is a command now, and leaving it in the out-of-scope table would have been
+    a refusal for something the tool does -- the exact failure this round is
+    meant to avoid in the other direction.
+    """
+    result = cli_run("rate", "--help")
+    assert result.code == EXIT_OK
+    assert "OUT_OF_SCOPE" not in result
+    assert "usage: plex-axi rate" in result
+
+    still_out = cli_run("edit")
+    assert still_out.code == EXIT_USAGE
+    assert "metadata editing" in still_out
+
+
+def test_root_help_lists_every_command_and_the_write_gate(cli_run):
+    from plex_axi import writes
+
+    result = cli_run("--help")
+    assert result.code == EXIT_OK
+    for noun in cli.COMMAND_ORDER:
+        assert noun in result
+    assert writes.ALLOW_VAR in result
+    assert "--write" in result
+
+
 def test_missing_a_required_argument_says_which_one(server, cli_run):
     result = cli_run("track")
     assert result.code == EXIT_USAGE

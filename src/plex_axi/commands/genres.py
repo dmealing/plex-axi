@@ -42,7 +42,6 @@ def _command(name: str) -> Command:
     flags = [Flag("--limit", "<n>", default=DEFAULT_LIMIT)]
     notes = [
         f"the values this library will accept for `search --{field}`, read from the server",
-        "read-only: this command cannot change anything on the server",
     ]
     if fixed:
         notes.insert(

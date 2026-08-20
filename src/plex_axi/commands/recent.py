@@ -44,10 +44,7 @@ COMMAND = Command(
             summary="List recent additions",
         ),
     ),
-    notes=(
-        "scoped to the music library: the server-wide recently-added list spans video too",
-        "read-only: this command cannot change anything on the server",
-    ),
+    notes=("scoped to the music library: the server-wide recently-added list spans video too",),
     examples=(
         "plex-axi recent",
         "plex-axi recent --type track --limit 50",

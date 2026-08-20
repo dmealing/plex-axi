@@ -29,6 +29,8 @@ one is wrong about who is playing.
 
 from __future__ import annotations
 
+import re
+
 from .errors import AxiError, UsageError
 from .plex import MUSIC_SECTION_TYPE, translate
 
@@ -236,6 +238,82 @@ def label_filters(section, described: list, *, libtype: str) -> list:
     return described
 
 
+# ------------------------------------------------- what this server will accept
+#
+# Every one of these reads the section's own filter metadata, which plexapi
+# fetches once (`includeMeta=1`) and caches for the life of the section object.
+# Asking before building a predicate therefore costs no extra round-trip, and it
+# is the difference between a command that degrades with an explanation and one
+# that fails with the client library's validation message.
+
+
+def advertised_fields(section, libtype: str) -> set:
+    """The bare field names this server offers as filters for one libtype."""
+    return {f.key.rsplit(".", 1)[-1] for f in section.listFields(libtype)}
+
+
+def advertised_filters(section, libtype: str) -> set:
+    """The *tag* filters this server offers, which is a smaller set than the fields.
+
+    A tag predicate needs both: the field, to validate the operator, and the
+    filter, because the client library resolves a tag's name to the numeric id
+    Plex actually filters on by listing that filter's choices. A field without
+    its filter raises during value resolution rather than during validation.
+    """
+    return {f.filter for f in section.listFilters(libtype)}
+
+
+def advertised_sorts(section, libtype: str) -> set:
+    return {s.key for s in section.listSorts(libtype)}
+
+
+def offers(section, field: str, *, libtype: str, tag: bool = False) -> bool:
+    """Whether ``<scope>.<name>`` is a filter this server will accept.
+
+    Failures are deliberately not swallowed here. "This server does not offer
+    that field" and "this server would not say what it offers" are different
+    answers, and reporting the second as the first would return an unfiltered
+    result set under a note claiming the filter was merely unavailable. The
+    caller wraps the whole metadata read and translates it once.
+    """
+    scope, _, name = field.rpartition(".")
+    scope = scope or libtype
+    if name not in advertised_fields(section, scope):
+        return False
+    return not tag or name in advertised_filters(section, scope)
+
+
+#: A relative date as Plex spells it: a count and a unit. plexapi normalises a
+#: bare ``30d`` to ``-30d`` and passes it through, so the tool accepts the form
+#: without the sign -- "30d ago" is how a caller says it.
+RELATIVE_DATE = re.compile(r"^-?\d+(mon|[smhdwy])$")
+ABSOLUTE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_relative_date(raw, *, flag: str) -> str:
+    """Validate a relative date before the client library sees it.
+
+    plexapi answers a malformed value with ``BadRequest`` naming its own field
+    key, which is a message about the library rather than about the flag that
+    was typed.
+    """
+    value = str(raw).strip()
+    if RELATIVE_DATE.match(value):
+        # The sign is plexapi's to add: it normalises `30d` to `-30d` and a
+        # caller who wrote the minus meant the same thing.
+        return value.lstrip("-")
+    if ABSOLUTE_DATE.match(value):
+        return value
+    raise UsageError(
+        f"{flag} needs a period like 30d, 6mon or 2y, or a date as YYYY-MM-DD, got {raw!r}",
+        help_lines=[
+            f"Run the command again with `{flag} 30d`",
+            "units: s seconds, m minutes, h hours, d days, w weeks, mon months, y years",
+        ],
+        code="BAD_PERIOD",
+    )
+
+
 def _operator_title(section, field: str, *, libtype: str) -> str:
     """The title the section gives the ``=`` operator on one field's type.
 
@@ -282,10 +360,7 @@ GROUP_BY_TITLE = "title"
 def run_search(section, *, libtype, filters=None, title=None, sort=None, limit=20, group=False):
     """Execute one section-scoped search and return items plus the exact total."""
     call_filters = dict(filters or {})
-    grouped = ""
-    if group:
-        call_filters["group"] = GROUP_BY_TITLE
-        grouped = GROUP_BY_TITLE
+    grouped = GROUP_BY_TITLE if group else ""
 
     try:
         result = _execute(section, libtype, call_filters, title, sort, limit, grouped)
@@ -321,6 +396,15 @@ def _execute(section, libtype, filters, title, sort, limit, grouped):
         kwargs["sort"] = sort
     if filters:
         kwargs["filters"] = filters
+    if grouped:
+        # Passed beside the filter expression rather than inside it. `group` is
+        # a SQL GROUP BY, not a predicate, and plexapi refuses a boolean key
+        # (`and`/`or`) in a filter dictionary that holds anything else -- so a
+        # `group` sitting in `filters` would make a parenthesised OR unbuildable
+        # and, worse, would land the grouping *inside* the parentheses. Routed
+        # through `**kwargs` it is validated by the same field table and emitted
+        # as the same `group=title` parameter, outside any group.
+        kwargs["group"] = grouped
 
     # Build the key with plexapi's own builder so the count and the fetch can
     # never describe different queries, and so a client-side filter is caught

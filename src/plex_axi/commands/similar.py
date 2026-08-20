@@ -51,7 +51,6 @@ COMMAND = Command(
     notes=(
         "distance is the server's own sonic distance: 0 is identical, larger is further away",
         "a seed whose `analysis` is 0 has not been analysed and can return nothing at all",
-        "read-only: this command cannot change anything on the server",
     ),
     examples=(
         "plex-axi similar 12345",

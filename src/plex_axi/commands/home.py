@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 
+from .. import writes
 from ..argspec import Command, Sub
 from ..config import missing_env_vars, setup_help
 from ..errors import AxiError
@@ -59,6 +60,10 @@ def executable_path() -> str:
 
 def run(ctx, name: str, sub: str, parsed):
     doc = {"bin": executable_path(), "description": DESCRIPTION}
+    # Stated before anything else that could fail, because "can this change my
+    # library?" is a fact about the installation rather than about the server,
+    # and an agent that reads it here never has to discover it from a refusal.
+    doc["writes"] = writes.state(ctx.environ)
     missing = missing_env_vars(ctx.environ)
     if missing:
         doc["error"] = f"{' and '.join(missing)} not set in the environment"
@@ -93,6 +98,7 @@ def run(ctx, name: str, sub: str, parsed):
             "Run `plex-axi search --artist '<name>' --track '<title>'` to search field by field",
             "Run `plex-axi genres` (or `moods`, `styles`) for the values this library will accept",
             "Run `plex-axi track <key>` for one item's detail and its media id",
+            "Run `plex-axi pick --rated-min 4` for something to play right now",
             "Run `plex-axi doctor` when something looks wrong",
         ]
     )

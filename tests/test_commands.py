@@ -250,7 +250,12 @@ def test_api_reaches_any_read_path(server, cli_run):
 
 
 def test_api_refuses_a_write_method_rather_than_documenting_that_it_should_not(server, cli_run):
-    """A read-only tool with a POST escape hatch is not a read-only tool."""
+    """A gate a raw POST could walk around is not a gate.
+
+    `rate` and `playlist` write, and both are refused, previewable and specific
+    about what they touch. A raw path that could POST would be none of those and
+    would make the gate meaningless, so `api` stays GET-only whatever is enabled.
+    """
     for method in ("POST", "PUT", "PATCH", "DELETE"):
         result = cli_run("api", method, "/library/sections")
         assert result.code == 2

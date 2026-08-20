@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import UsageError
+from .writes import ACCESS, READ_ONLY
 
 #: Flags accepted on every command, and therefore never reported as unknown.
 GLOBAL_FLAGS = (
@@ -20,6 +21,7 @@ GLOBAL_FLAGS = (
     "--json",
     "--timeout",
     "--section",
+    "--user",
     "--debug",
     "--version",
     "-v",
@@ -28,12 +30,13 @@ GLOBAL_FLAGS = (
 
 #: The globals that consume the next token. Declared once so the parser, the
 #: pre-scan and `--help` detection cannot disagree about where a value ends.
-VALUE_GLOBALS = ("--timeout", "--section")
+VALUE_GLOBALS = ("--timeout", "--section", "--user")
 
 #: How each value-taking global is spelled back in a usage error.
 _GLOBAL_EXAMPLE = {
     "--timeout": "plex-axi --timeout 60 <command>",
     "--section": "plex-axi --section 'Example Music' <command>",
+    "--user": "plex-axi --user '<plex-username>' <command>",
 }
 
 #: Flags an agent might plausibly reach for, mapped to what actually exists.
@@ -98,12 +101,18 @@ class Flag:
 
 @dataclass(frozen=True)
 class Sub:
-    """One subcommand: its positional arguments and its flag set."""
+    """One subcommand: its positional arguments and its flag set.
+
+    ``access`` is empty when the subcommand sits on the same side of the
+    read/write line as the rest of its command, which is the usual case. It is
+    set only where one noun holds both, as ``playlist`` does.
+    """
 
     name: str
     args: tuple = ()
     flags: tuple = ()
     summary: str = ""
+    access: str = ""
 
     def signature(self) -> str:
         return " ".join([self.name, *self.args]) if self.args else self.name
@@ -111,7 +120,13 @@ class Sub:
 
 @dataclass(frozen=True)
 class Command:
-    """A top-level command grouping subcommands under one noun."""
+    """A top-level command grouping subcommands under one noun.
+
+    ``access`` defaults to read-only, and the default is what makes the
+    declaration safe: a command added without anyone thinking about the question
+    is described as the thing it almost certainly is, while a command that
+    mutates has to say so before the gate in :mod:`plex_axi.writes` will run it.
+    """
 
     name: str
     summary: str
@@ -120,12 +135,32 @@ class Command:
     default_sub: str | None = None
     notes: tuple = ()
     usage: str = ""
+    access: str = READ_ONLY
 
     def find(self, name: str) -> Sub | None:
         for sub in self.subs:
             if sub.name == name:
                 return sub
         return None
+
+    def access_for(self, sub: Sub) -> str:
+        return sub.access or self.access
+
+    def access_groups(self) -> list:
+        """``(access, [subcommand names])`` in declaration order.
+
+        One group is the ordinary case and renders as a single line. Two is
+        ``playlist``, where listing is a read and adding is not, and one line
+        for the whole noun would be wrong about half of it.
+        """
+        groups: list = []
+        for sub in self.subs:
+            level = self.access_for(sub)
+            if groups and groups[-1][0] == level:
+                groups[-1][1].append(sub.name)
+            else:
+                groups.append((level, [sub.name]))
+        return groups
 
 
 @dataclass
@@ -286,10 +321,27 @@ def _unknown_flag(name: str, sub: Sub, command: Command):
 # --------------------------------------------------------------------- help
 
 
+def render_access(command: Command) -> list:
+    """The ``access:`` block: whether this command reads or writes, in one line.
+
+    Printed immediately under the description rather than among the notes,
+    because "can this change my library?" is not a footnote, and an agent that
+    has to read to the bottom of the help to find out will not.
+    """
+    groups = command.access_groups()
+    if len(groups) < 2:
+        level = groups[0][0] if groups else command.access
+        return ["access:", f"  {ACCESS[level]}"]
+    lines = [f"access[{len(groups)}]:"]
+    lines.extend(f"  {', '.join(names)}: {ACCESS[level]}" for level, names in groups)
+    return lines
+
+
 def render_command_help(command: Command) -> str:
     """Render one command's concise, complete reference."""
     lines = [command.usage or f"usage: plex-axi {command.name} <subcommand> [flags]"]
     lines.append(f"description: {command.summary}")
+    lines.extend(render_access(command))
 
     if command.subs and not (len(command.subs) == 1 and command.subs[0].name == command.name):
         signatures = [sub.signature() for sub in command.subs]

@@ -138,12 +138,20 @@ def build_session(*, retries: int = 1) -> requests.Session:
     return session
 
 
-def connect(config, *, session=None) -> PlexServer:
-    """Open a connection to the configured server, translating every failure."""
+def connect(config, *, session=None, token: str | None = None) -> PlexServer:
+    """Open a connection to the configured server, translating every failure.
+
+    ``token`` overrides the configured one, which is how ``--user`` re-opens the
+    same connection as somebody else. It is a parameter rather than a second
+    code path so that the hardening, the transport policy and the error
+    translation are the ones every connection gets.
+    """
     harden()
     session = build_session() if session is None else session
     try:
-        server = PlexServer(config.base_url, config.token, session=session, timeout=config.timeout)
+        server = PlexServer(
+            config.base_url, token or config.token, session=session, timeout=config.timeout
+        )
     except Unauthorized as exc:
         raise _auth_error(exc) from None
     except (BadRequest, NotFound) as exc:

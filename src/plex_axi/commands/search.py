@@ -79,7 +79,6 @@ COMMAND = Command(
         f"album fields: {', '.join(available_fields('album'))}",
         f"artist fields: {', '.join(available_fields('artist'))}",
         "identical track titles are collapsed with Plex's own `group=title`; --no-group shows each",
-        "read-only: this command cannot change anything on the server",
     ),
     examples=(
         "plex-axi search --artist 'Example Artist' --track 'Example Track'",

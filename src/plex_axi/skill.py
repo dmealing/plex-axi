@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import writes
+from .argspec import render_access
 from .commands.home import DESCRIPTION
 
 SKILL_NAME = "plex-axi"
@@ -23,9 +25,10 @@ FRONTMATTER_DESCRIPTION = (
     "Search and diagnose a Plex music library through the plex-axi CLI - structured "
     "per-field search on artist, album, track, genre, mood, style, year and rating; "
     "the library's own genre/mood/style vocabulary; track, album and artist detail "
-    "including file availability; and sonically similar tracks. Use whenever a task "
-    "touches a Plex music library: finding a recording, checking why a search found "
-    "nothing, or resolving a title to a media id. It never plays anything."
+    "including file availability; and sonically similar tracks. It can also set a "
+    "rating and edit an audio playlist, but only when the operator has enabled writes. "
+    "Use whenever a task touches a Plex music library: finding a recording, checking why "
+    "a search found nothing, or resolving a title to a media id. It never plays anything."
 )
 
 
@@ -56,6 +59,8 @@ def render(commands) -> str:
                 "export PLEX_URL=http://plex.example.com:32400   # the server on the local network",
                 "export PLEX_TOKEN=<a Plex access token>",
                 "export PLEX_SECTION='Example Music'             # only if there is more than one",
+                f"export {writes.ALLOW_VAR}={writes.ALLOW_VALUE}"
+                "        # only to allow `rate` and `playlist` to write",
             ]
         ),
         "",
@@ -85,8 +90,11 @@ def render(commands) -> str:
         "  whatever owns the speakers.",
         "- **It is music only.** No films, shows, episodes or watchlist. The rest of the Plex",
         "  tooling landscape is video-shaped; this is the half nothing else covers.",
-        "- **It is read-only.** Nothing here changes the library, and `api` refuses write",
-        "  methods rather than documenting that it should not be used for them.",
+        "- **It reads unless it is told twice that it may write.** Only `rate` and",
+        f"  `playlist create|add|remove` change anything. They refuse unless `{writes.ALLOW_VAR}`",
+        f"  is `{writes.ALLOW_VALUE}` in the environment, and even then they preview the change and",
+        "  send nothing until `--write` is passed. Every other command reads, and `api` refuses",
+        "  every method but GET rather than documenting that it should not be used for them.",
         "",
         "## Commands",
         "",
@@ -98,6 +106,14 @@ def render(commands) -> str:
         sections.append(f"### `plex-axi {command.name}`")
         sections.append("")
         sections.append(command.summary + ".")
+        sections.append("")
+        # The same access block `--help` prints, from the same declaration, so a
+        # reader of the skill and a reader of the help cannot be told different
+        # things about whether a command can change the library.
+        sections.extend(
+            f"- **{line.strip()}**" if index == 0 else f"  - {line.strip()}"
+            for index, line in enumerate(_access_bullets(command))
+        )
         sections.append("")
         if command.examples:
             sections.append(_fence(list(command.examples)))
@@ -126,11 +142,20 @@ def render(commands) -> str:
             "  value is written down.",
             "- **A track with `analysis: 0` has never been analysed**, so `similar` has nothing",
             "  to work from and its empty answer is not a statement about the library.",
+            "- **A mutating command run without `--write` is safe and useful.** It prints what",
+            "  would change and sends nothing, which is how to check a playlist edit before",
+            "  making it -- and how a smart playlist is caught before the server refuses.",
             "- Every command supports `--help`, which is the authoritative reference for its flags.",
             "",
         ]
     )
     return "\n".join(sections).rstrip() + "\n"
+
+
+def _access_bullets(command) -> list:
+    """The `access:` lines from the command declaration, without the header."""
+    lines = render_access(command)
+    return list(lines[1:]) or ["access unstated"]
 
 
 def target_path(root: Path) -> Path:
