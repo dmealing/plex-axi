@@ -326,7 +326,7 @@ reaching past the seam makes two systems believe they own the same queue.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~200 tests, a couple of seconds
+pytest                                   # ~400 tests, a couple of seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
@@ -403,7 +403,7 @@ never wrong.
 
 `from __future__ import annotations` stays at the top of every module. It is no longer what makes
 `X | None` safe — that is native from 3.10 — but it keeps annotations lazy and the modules uniform,
-and removing 23 of them is a separate change from moving a floor. Note that nested quotes inside a
+and removing them from every module is a separate change from moving a floor. Note that nested quotes inside a
 multi-line f-string expression need 3.12; the test fixtures use `.format` for that reason.
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
