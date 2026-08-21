@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/dmealing/plex-axi/compare/v0.2.0...v0.2.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* correct filter operators and identifiers for real Plex servers ([#6](https://github.com/dmealing/plex-axi/issues/6)) ([3e8360b](https://github.com/dmealing/plex-axi/commit/3e8360bdd25c1e2c7b02e0eff638ea8637b9b623))
+
 ## [0.2.0](https://github.com/dmealing/plex-axi/compare/v0.1.0...v0.2.0) (2026-08-20)
 
 
