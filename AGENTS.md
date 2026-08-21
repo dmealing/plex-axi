@@ -574,6 +574,53 @@ multi-line f-string expression need 3.12; the test fixtures use `.format` for th
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
 `plex-axi skill` and commit the result; CI fails if the two disagree.
 
+## The README, and the metadata PyPI renders
+
+The README is the landing page for three audiences at once — PyPI, GitHub, and the public AXI
+catalog at <https://axi.md> — and it has to serve **two readers**, which is the thing that erodes
+silently:
+
+- **A stranger, cold, who has never heard of AXI or TOON.** Thirty seconds to learn what this is,
+  whether they want it, and how to start. The first release failed this: it said output was "TOON on
+  stdout" and linked neither <https://toonformat.dev> nor <https://axi.md>, so a reader was left
+  believing the tool emitted an unnamed proprietary format. Both acronyms are now expanded *and*
+  linked in the opening block. Do not un-link them, and do not compress the explanation back to the
+  acronym.
+- **An agent that has the tool and must use it correctly first time.** This half was already strong
+  and must not be traded away to serve the first. The rules of thumb, the `media_id` section and the
+  exit-code semantics are the agent-facing content; edit them for accuracy, never for brevity.
+
+**"It never plays anything" belongs in the opening block.** It is the single most distinctive fact
+about the tool, it is the one thing a reader is most likely to assume wrongly, and it was originally
+four paragraphs down. Anything that pushes it below the fold is a regression, not a tidy-up.
+
+**The "Output format" section is a deliberate port from the sibling AXI CLI**, so that two tools
+built to the same standard describe the same contract in the same words. It carries the TOON link,
+the sample block, the `--human`/`--json` pair, the stdout-errors rule, the exit codes and the
+`help[N]:` deviation. Keep it in step with the sibling rather than rewriting it locally, and state
+the token saving the way the sibling does — *roughly 40% cheaper in tokens than the equivalent
+JSON*. "Roughly 40% of the tokens" is a different and much stronger claim; it is easy to write by
+accident.
+
+**The sample TOON block was generated, not typed.** Feed the document to `toon.encode` and paste
+what comes back, so a reader who copies the shape is copying the real one.
+
+**`[project.urls]` is what PyPI renders as the sidebar links** on the project page, and `Homepage`
+and `Source` alone left a cold reader with no route to the issue tracker or the changelog.
+`Documentation`, `Changelog` and `Issues` are there now. **The toml is not the check** — the wheel's
+`METADATA` is:
+
+```sh
+python -m build --wheel --outdir dist . && unzip -p dist/*.whl '*/METADATA' | head -30
+```
+
+`twine check` validates the rendered long description, and `trove-classifiers` is the authority on
+whether a classifier string exists at all — a misspelled one is not an error, it is simply ignored,
+which is the failure mode worth a thirty-second check.
+
+**Badges are for the human half only.** PyPI version, supported Pythons, licence. An agent reads
+none of them; a drive-by GitHub reader wants exactly those three facts before scrolling.
+
 ## Continuous integration
 
 Three workflows, split by where the work is cheap:
