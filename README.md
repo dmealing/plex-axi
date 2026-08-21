@@ -331,6 +331,16 @@ The TOON encoder is held to the specification's own opinion as well as to this p
 is asserted too, so a fixture that stops being collected fails the suite instead of quietly lowering
 the score, and so are the per-file checksums, so a fixture edited to suit the encoder fails as well.
 
+Commit messages are checked as well as scanned. release-please builds the changelog and the version
+bump from them, and when its parser cannot read one it says so at debug level, drops the commit and
+**exits 0** — a fix merged to `main` that is never published, with a green release run over it. So
+`scripts/commitcheck.py` refuses a message that parser would reject, from the same `commit-msg` hook,
+and the release workflow re-checks every commit since the last tag. Rich commit bodies are the point
+of this history and nothing here restricts them; the one shape to know is that a body line must not
+*begin* with a word run straight into an unclosed or nested parenthesis — `` `Decimal(repr(v))` ``
+at a line start is refused, and the same phrase one word further along the line is fine. Run
+`scripts/commitcheck.py --rules` for the grammar rule and its citation.
+
 Tests never need a live Plex server or a real token, and must not start to.
 
 ## Changelog

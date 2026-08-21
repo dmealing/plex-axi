@@ -733,6 +733,91 @@ means "nothing released yet, the next `feat:` lands 0.1.0". Never "fix" a mismat
 baseline to match the source; that tells release-please the version is already out and it bumps past
 it, permanently skipping a version number PyPI will never let us reuse.
 
+**A commit message release-please cannot parse is dropped silently, and the run stays green.**
+This cost one release: `41bcb73` merged to `main`, the release workflow exited **success** with
+`commit could not be parsed` at debug level and `Considering: 0 commits`, and the fix sat
+unpublished while PyPI stayed on 0.2.2. `parseConventionalCommits` wraps every parse in
+`try { … } catch { logger.debug(…) }`, so an unreadable message costs a commit and reports nothing.
+
+**The rule, established against the parser rather than guessed at.** release-please 17.3.0 parses
+with `@conventional-commits/parser` (`^0.4.1`), whose grammar offers **every physical body line** to
+`<footer> ::= <token> <separator> <whitespace>* <value>`. `<token>` is `<type> ["(" <scope> ")"]`,
+and `<type>` consumes from the line start until whitespace, a newline, `!`, `:`, `(` or `)`. If it
+stops on `(` the parser is committed to a scope: it reads to the next `(`, `)` or newline, and if
+that is not `)` it **throws** (`lib/parser.js:177`) — the only `throw` reachable from the body, and
+the only production that raises rather than returning an `Error` its caller can back out of. So
+
+- `` `Decimal(repr(value))` inside … `` at a line start — **refused**;
+- `… through `Decimal(repr(value))` inside … ` — **fine**, one word further along.
+
+It is not parentheses, not backticks, not the `-` used as a dash, and not position alone: it is the
+interaction. The sibling project's own copy of that paragraph parsed for exactly this reason, which
+is luck, not design. `scripts/commitcheck.py --rules` prints the rule with its citation, and
+`--demo` proves the checker still tells the shapes apart.
+
+**Two engines, and the reason there are two.** `vendor/conventional-commits-parser/` is a
+byte-for-byte copy of the four dependency-free upstream modules (ISC; provenance, checksums,
+refresh recipe and the reason `utils.js` is excluded are in its `PROVENANCE.md`), so `--engine node`
+runs *the* parser with no `npm install` and no network. `--engine python` is a transcription of the
+same grammar, so a machine without `node` gets a verdict rather than a skip. `--engine auto` — the
+default, and what the hooks use — prefers `node`. `tests/test_commit_message.py` runs the whole
+corpus through both and compares the verdict, line, column and token; the transcription is only
+worth anything because that comparison passes, and CI installs `node` so it is never skipped there.
+It has already earned its keep: it caught the node path's error regex failing to match when the
+offending token was a newline, which would have silently downgraded a real rejection.
+
+**Do not solve this by banning rich commit bodies.** The bodies carry the reasoning that makes this
+history worth reading, and a guard that made prose the problem would be answered by writing less of
+it. `DEMO_ACCEPTED` in `commitcheck.py` pins the shapes that must keep working — nested parentheses
+mid-line, markdown bullets, footers, breaking-change notes, a full rich body — and
+`test_the_rule_is_the_interaction_and_not_any_one_ingredient` asserts each ingredient alone is fine.
+A change that makes one of those fail is a regression in the guard, not a discovery about the prose.
+
+**Three layers, and one of them is the real fix.**
+
+- `.githooks/commit-msg` runs `commitcheck.py` after `leakcheck.py`. This is the one that matters:
+  it rejects the message before it can reach `main`, and it names the line, the column and what to
+  change.
+- `.github/workflows/release.yml` has a `commit-audit` job that re-checks every commit since the
+  last release tag. It deliberately does **not** `needs:` the release-please job — it has to fail on
+  its own account, including on a run where release-please itself errored. It exists because a hook
+  cannot see a message typed into GitHub's squash-merge box.
+- `.github/workflows/ci.yml` runs the same audit nightly, so an allowance that has outlived its
+  cause surfaces without waiting for a merge, and installs `node` in the `test` job so the
+  agreement between the engines is enforced rather than skipped.
+
+`hygiene.yml` was deliberately left alone: it is the one cheap PR check by design, and the release
+audit already covers what a PR-time check would.
+
+**The audit reads `--first-parent`, because that is what release-please reads.** It asks GitHub for
+the *merge commits on the branch*, not for everything reachable from it. A plain `git log` would
+report a work-in-progress message inside a merged branch as a commit release-please dropped, and a
+guard that cries wolf gets switched off.
+
+**`KNOWN_UNPARSEABLE` is the `PATH_ALLOWANCES` pattern applied to a commit.** One full SHA, one
+reason, printed by `--rules`, and pinned by the suite: an entry whose commit now parses fails
+`test_every_known_unparseable_entry_is_still_earning_its_place` rather than quietly covering
+something new. It is matched on the **full** SHA — a prefix is not an identifier, and that is the
+same defect the leak scanner's trailing path match had, one layer down. There is one entry today,
+`41bcb73`, and it is there because the audit would otherwise re-report a loss that has been made
+good: its content is restated as a conventional-commit section in the release that followed it, so
+the changelog names the TOON conformance and leak-allowance work even though release-please could
+never read the original.
+
+**Two fidelity gaps worth knowing, neither of them closable from a hook.** release-please replaces
+the whole message with a `BEGIN_COMMIT_OVERRIDE` block from the pull request body when there is one,
+which neither the hook nor `git log` can see; and one commit may carry several conventional commits,
+split on `BEGIN_NESTED_COMMIT` or on a blank line before a new `type:` line. `split_messages`
+transcribes the second so a message that loses only *part* of itself is still refused. The first is
+one more reason the allowance table exists.
+
+**Releasing a fix release-please already dropped.** Landing a parseable commit makes it re-scan the
+range, but the unparseable commit is dropped again and never reaches the changelog — so the release
+notes would omit the very fix being shipped. The route is to restate it: give the new commit message
+a second conventional-commit section for the dropped work, which `splitMessages` turns into its own
+changelog entry. Do not rewrite `main` to fix the original message; a tag or a published sha is not
+worth the history.
+
 ## Licensing
 
 MIT. Two constraints that came out of surveying the landscape and still hold:
