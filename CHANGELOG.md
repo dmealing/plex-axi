@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/dmealing/plex-axi/compare/v0.2.1...v0.2.2) (2026-08-21)
+
+
+### Documentation
+
+* make the README legible to a stranger, and fix published metadata ([#8](https://github.com/dmealing/plex-axi/issues/8)) ([ae51fea](https://github.com/dmealing/plex-axi/commit/ae51fea85d6d408b3439efcc9d7ea8debe6f8a55))
+
 ## [0.2.1](https://github.com/dmealing/plex-axi/compare/v0.2.0...v0.2.1) (2026-08-21)
 
 
