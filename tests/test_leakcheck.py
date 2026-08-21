@@ -188,6 +188,161 @@ def test_the_allow_marker_also_applies_to_the_condensed_pass():
     assert leakcheck.scan_text("f.txt", source) == []
 
 
+# -------------------------------------------------------- path allowances
+#
+# The marker is a comment, so a JSON file cannot carry one. PATH_ALLOWANCES is
+# how vendored data that must stay byte-for-byte is exempted instead, and these
+# tests hold it to the same scope the marker has -- including the part that only
+# shows up at the entry points, where a mode that named the same file differently
+# would apply an exemption the others do not.
+
+
+ALLOWED_PATH = "tests/fixtures/toon-spec/encode/primitives.json"
+TWO_SHAPES = "path " + "/ho" + "me/" + "someone" + "/notes and " + "192." + "168.1.10"
+
+
+def test_a_path_allowance_exempts_only_the_rule_it_names():
+    assert rule_names(leakcheck.scan_text(ALLOWED_PATH, TWO_SHAPES + "\n")) == ["private-ip"]
+
+
+def test_a_path_allowance_exempts_no_other_file():
+    findings = leakcheck.scan_text("src/plex_axi/toon.py", TWO_SHAPES + "\n")
+    assert rule_names(findings) == ["home-path", "private-ip"]
+
+
+def test_an_allowance_matches_only_the_exact_path_it_names():
+    """A path that merely ends with an allowed one -- a shadowing directory, a
+    suffixed twin, a scan rooted elsewhere -- is a different file, and exempting
+    it would grant the entry every directory it is ever copied into."""
+    assert leakcheck.path_allowances(ALLOWED_PATH) == frozenset({"home-path"})
+    assert leakcheck.path_allowances(f"attic/{ALLOWED_PATH}") == frozenset()
+    assert leakcheck.path_allowances(f"/scan/root/{ALLOWED_PATH}") == frozenset()
+    assert leakcheck.path_allowances(f"{ALLOWED_PATH}.bak") == frozenset()
+
+
+#: The exact shapes each exempted file still trips with the allowances switched
+#: off, so a refreshed fixture that changes one -- or grows a second -- fails the
+#: suite instead of quietly widening what the entry covers. Assembled from
+#: fragments like DIRTY, so this file stays clean under its own scanner.
+EXPECTED_SHAPES = {
+    ALLOWED_PATH: frozenset({"C:" + "\\\\" + "Users" + "\\\\" + "path"}),
+}
+
+
+def test_every_expected_shape_entry_names_a_live_allowance():
+    assert sorted(EXPECTED_SHAPES) == sorted(leakcheck.PATH_ALLOWANCES)
+
+
+@pytest.mark.parametrize("path", sorted(leakcheck.PATH_ALLOWANCES))
+def test_every_path_allowance_is_still_earning_its_place(path, monkeypatch):
+    """Stale is as bad as blanket: an exemption outlives what it was granted for.
+
+    Scanning the real file with allowances switched off must fire exactly the
+    rules the entry names -- no fewer, or the entry is dead and should go; no
+    more, or it is covering something nobody agreed to -- and exactly the shapes
+    recorded beside it, so a vendored refresh cannot change what is exempted
+    without the change being visible here.
+    """
+    allowed = leakcheck.PATH_ALLOWANCES[path]
+    assert allowed <= set(leakcheck.RULES_BY_NAME), "allowance names an undeclared rule"
+    expected = EXPECTED_SHAPES[path]
+    target = REPO_ROOT / path
+    assert target.is_file(), "allowance names a file that is no longer here"
+
+    monkeypatch.setattr(leakcheck, "PATH_ALLOWANCES", {})
+    findings = leakcheck.scan_text(path, target.read_text(encoding="utf-8"))
+    assert rule_names(findings) == sorted(allowed)
+    assert {finding.matched for finding in findings} == expected
+
+
+# ------------------------------------- the allowance at every entry point
+#
+# One file, one name, whatever found it. An exemption matched exactly is only
+# as good as the agreement between the modes about what to match: a mode that
+# handed over an absolute name would stop honouring it, and one that matched a
+# trailing fragment would honour it for a decoy the entry never named.
+
+
+#: The decoy: the same exempted content, one directory deeper, under a path that
+#: ends with the allowed one. Trailing-match logic reads this as exempt.
+DECOY_PATH = f"attic/{ALLOWED_PATH}"
+EXEMPT_SHAPE = sorted(EXPECTED_SHAPES[ALLOWED_PATH])[0]
+
+
+def _allowance_repo(tmp_path, *hooks):
+    """A repository carrying the exempted file and a decoy that shadows it."""
+    repo = _hook_repo(tmp_path, *hooks)
+    for name in (ALLOWED_PATH, DECOY_PATH):
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f'{{"input": "{EXEMPT_SHAPE}"}}\n', encoding="utf-8")
+    return repo
+
+
+def _reported(capsys):
+    return {
+        line.strip().split(",")[0]
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("  ") and ",home-path," in line
+    }
+
+
+def _assert_exactly_the_decoy(exit_code, capsys):
+    """The named file is exempt; the one that merely ends with it is not."""
+    assert exit_code == 1
+    assert _reported(capsys) == {DECOY_PATH}
+
+
+def test_the_allowance_holds_for_the_tracked_files_scan(tmp_path, capsys):
+    repo = _allowance_repo(tmp_path)
+    _git(repo, "add", "-A")
+    _assert_exactly_the_decoy(leakcheck.main(["--root", str(repo)]), capsys)
+
+
+def test_the_allowance_holds_for_the_pre_commit_hook(tmp_path):
+    """The hook's own spelling: --staged, with an absolute --root."""
+    repo = _allowance_repo(tmp_path, "pre-commit")
+    _git(repo, "add", "-A")
+    blocked = _git(repo, "commit", "-m", "vendor fixtures", check=False)
+    output = (blocked.stdout + blocked.stderr).decode("utf-8", "replace")
+    assert blocked.returncode != 0
+    assert f"  {DECOY_PATH},1,home-path," in output
+    assert f"  {ALLOWED_PATH},1,home-path," not in output
+
+
+def test_the_allowance_holds_for_explicit_paths_under_a_root(tmp_path, capsys):
+    repo = _allowance_repo(tmp_path)
+    _assert_exactly_the_decoy(leakcheck.main(["--root", str(repo), "tests", "attic"]), capsys)
+
+
+def test_the_allowance_holds_for_an_absolute_target_at_the_default_root(
+    tmp_path, capsys, monkeypatch
+):
+    """`leakcheck.py "$PWD"` names the same files as `leakcheck.py .` does.
+
+    Two spellings of one scan, and the exemption has to survive both: an
+    absolute target against the default root is the mode where a name is most
+    easily reported in a form the table cannot match.
+    """
+    repo = _allowance_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _assert_exactly_the_decoy(leakcheck.main([str(repo)]), capsys)
+
+
+def test_a_file_outside_the_root_keeps_its_name_and_no_exemption(tmp_path, capsys):
+    """The allowance is this repository's, so it cannot follow the shape elsewhere."""
+    repo = _allowance_repo(tmp_path)
+    assert leakcheck.main([str(repo / ALLOWED_PATH)]) == 1
+    assert _reported(capsys) == {str(repo / ALLOWED_PATH)}
+
+
+def test_the_allowance_holds_for_the_walk_fallback(tmp_path, capsys, monkeypatch):
+    """The path taken when git cannot answer: no index, just os.walk."""
+    repo = _allowance_repo(tmp_path)
+    monkeypatch.setattr(leakcheck, "tracked_files", lambda root: None)
+    _assert_exactly_the_decoy(leakcheck.main(["--root", str(repo)]), capsys)
+
+
 # ------------------------------------------------------------------ email
 
 
