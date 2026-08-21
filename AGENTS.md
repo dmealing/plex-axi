@@ -34,6 +34,45 @@ rather than passing silently. If the scanner flags a line that legitimately need
 `leakcheck: allow=<rule>` on that line — scoped to that one rule, never blanket. Do not weaken a
 rule to make a commit pass, and do not bypass the hooks.
 
+**A file that cannot carry a marker** — JSON has no comment syntax, and vendored third-party data
+must stay byte-for-byte — is exempted in `PATH_ALLOWANCES` in `scripts/leakcheck.py` instead, per
+path *and* per rule, and `--rules` prints the table so the exemption is visible where the rules
+are. There is one entry today: the vendored TOON fixture whose backslash-escaping case is a
+synthetic Windows drive path. `tests/test_leakcheck.py` re-scans each exempted file with the table
+switched off and asserts that the rules which fire, and the shapes they match, are exactly the ones
+the entry names — an entry that has outlived its cause fails the suite rather than quietly covering
+something new.
+
+**An allowance is matched against the exact path it names, and every entry point has to agree on
+what that path is.** `path_allowances` is a dictionary lookup: a name that merely *ends with* an
+allowed one — `attic/<allowed>`, `<allowed>.bak`, an absolute name from a scan rooted elsewhere — is
+a different file, and honouring it would grant the entry every directory it is ever copied into. An
+exact comparison is only worth as much as that agreement, so `repo_relative` gives one file one
+name whatever found it: the tracked-files scan and `--staged` get repository-relative names from
+git, and explicit paths and the `os.walk` fallback are normalised against `--root`. Both halves are
+load-bearing and both are tested by mutation: `tests/test_leakcheck.py` runs the whole allowance
+through all four entry points against a repository that also holds a *decoy* under a shadowing
+directory, and asserts the named file is exempt while the decoy is reported.
+
+**The other loose matches in the guard, audited alongside that fix and left as they are.** Three are
+deliberate and one is worth knowing about:
+
+- `_email_allowed` compares the domain with `endswith("." + allowed)`. That is DNS semantics, not a
+  widening — the leading dot anchors it, so `myexample.com` is still reported — and it is what makes
+  `noreply@sub.example.com` legitimate. Keep it.
+- The `leakcheck: allow=` marker is found by `line.find`, anywhere on the physical line, so that it
+  works in any comment syntax. The rule *names* it yields are then compared exactly. The consequence
+  worth remembering: a **misspelled rule name exempts nothing and says nothing**, so a line that
+  reads as protected is not. Fail-safe, and invisible.
+- `SKIP_DIRECTORIES` matches a directory *name at any depth*, not a path, so a directory called
+  `dist`, `build`, `venv` or `node_modules` anywhere in the tree is skipped whole. It only applies to
+  the `os.walk` modes: the tracked-files scan and `--staged` list files from git and never consult
+  it, so nothing tracked escapes the scan this way.
+- `tests/test_no_dispatch.py` skips any line containing the substring `FORBIDDEN_NAMES`, which
+  exempts that whole line from *every* forbidden name. No file under `src/plex_axi/` contains the
+  string today, so it is currently dead, but it is a blanket exemption and the surrounding scan is
+  a security control. Narrow it if that file ever grows one.
+
 **Real content has no shape and the scanner cannot see it.** Artist and album names are the half
 that is convention only. The README says the coverage is bounded; do not restore any claim that the
 guard makes review unnecessary.
@@ -50,9 +89,17 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 
 ## Architecture
 
-- `toon.py` — a strict TOON encoder (spec v4.1), taken unchanged from the sibling AXI project.
-  Encoding happens **only** at the output boundary; command modules return plain JSON-shaped dicts.
-  Do not loosen it to make output prettier.
+- `toon.py` — a strict TOON encoder (spec v4.1), shared with the sibling AXI project. Encoding
+  happens **only** at the output boundary; command modules return plain JSON-shaped dicts. Do not
+  loosen it to make output prettier. Two suites cover it and they are not interchangeable:
+  `tests/test_toon.py` states the behaviour in this project's words, and
+  `tests/test_toon_conformance.py` runs the specification's own encode fixtures — every one of
+  them, vendored byte-for-byte from `toon-format/spec` under `tests/fixtures/toon-spec/` (MIT;
+  provenance, checksums and the refresh recipe live in `PROVENANCE.md` beside them). `CASE_COUNT`
+  there is the only place the case count is written, and it is asserted, so a fixture that stops
+  being collected fails instead of shrinking the score. A rule nobody thought to write a test for
+  reads as passing, which is how 0.2.2 shipped two failing cases while the README claimed
+  strictness.
 - `output.py` — the single place anything reaches stdout, and therefore the only place redaction has
   to hold. `HelpBlock` is the one deliberate departure from strict TOON: `help[N]:` blocks render one
   suggestion per line, matching the AXI standard and the sibling AXI CLIs, because the suggestions
@@ -157,6 +204,23 @@ still correct is `api`, which is GET-only whatever the gate says.
 
 Everything here was paid for once. Most of it is invisible until it is wrong.
 
+- **The canonical decimal range is wider than Python's float repr.** Spec section 2 makes decimal
+  form a MUST for `0` and for `1e-6 <= |n| < 1e21`; `repr` leaves decimal form outside roughly
+  `[1e-4, 1e16)`, so `json.dumps` alone violates that MUST in the band at each end. `_number`
+  formats through `Decimal(repr(value))` inside the range and defers to `json.dumps` outside it,
+  where an exponent is permitted. `Decimal(value)` would be wrong: it expands the exact binary
+  value into a fifty-digit fraction instead of the shortest round-tripping digits. No typed command
+  reaches either band today — `music.stars` yields half-star steps and `similar` rounds a sonic
+  distance to four places — so the guarantee is the encoder's, which is what the README's
+  strictness claim is about, and not any one row shape's.
+- **Tabular form is not available in list-item position.** A tabular header on a hyphen line is a
+  keyless fields-bearing header, which section 6 allows only at the document root, so section 9.4
+  requires list form however uniform the items are. `array()` carries `allow_tabular` and
+  `list_item()` passes `False`; the restriction is the position, not the depth, so a *key* inside a
+  list-item object still reaches tabular form. Nothing here nests an array directly inside an array
+  today — `api` renders XML attributes, which are strings under a key — but the document the
+  encoder emitted before was one a strict decoder must reject, and the encoder is the boundary
+  every command prints through.
 - **There are two `search()` methods and only one of them works.** `Library.search` hits
   `/library/all`, validates nothing, and drops unknown keyword arguments straight into the query
   string; its own docstring says *"This is untested but seems to work. Use library section search
@@ -427,11 +491,15 @@ reaching past the seam makes two systems believe they own the same queue.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~475 tests, a couple of seconds
+pytest                                   # ~690 tests, a couple of seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
 ```
+
+**Do not edit a vendored conformance fixture.** If one fails, the encoder is wrong until proven
+otherwise; the checksum test will catch the edit anyway. Refreshing them from upstream is its own
+commit, separate from any encoder change made to satisfy it, and `PROVENANCE.md` carries the recipe.
 
 **A green suite is not evidence the tool works.** It was green for the whole of 0.2.0, and 0.2.0's
 headline filter did not work against any real Plex server. The suite proves the tool behaves

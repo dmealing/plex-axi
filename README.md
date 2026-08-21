@@ -158,7 +158,9 @@ tracks[2]{key,media_id,title,artist,album}:
 
 One documented deviation: `help[N]:` blocks render one suggestion per line rather than as a
 delimiter-joined TOON array. Suggestions are command lines that routinely contain commas, and this
-is the shape the AXI standard and the sibling AXI CLIs use. Every **data** structure is strict TOON.
+is the shape the AXI standard and the sibling AXI CLIs use. Every **data** structure is strict TOON,
+and "strict" is a test result rather than a claim: the specification's own conformance fixtures are
+vendored into the suite and every one of them has to pass.
 
 ## Rules of thumb
 
@@ -323,6 +325,12 @@ review:** it detects shapes — tokens, addresses, machine identifiers, media pa
 detect a real artist name, which has no shape. Use obviously-synthetic content everywhere, including
 tests and fixtures.
 
+The TOON encoder is held to the specification's own opinion as well as to this project's:
+**every** official encode fixture is vendored byte-for-byte from
+[`toon-format/spec`](https://github.com/toon-format/spec) and runs on every `pytest`. The case count
+is asserted too, so a fixture that stops being collected fails the suite instead of quietly lowering
+the score, and so are the per-file checksums, so a fixture edited to suit the encoder fails as well.
+
 Tests never need a live Plex server or a real token, and must not start to.
 
 ## Changelog
@@ -333,3 +341,7 @@ messages by release-please.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+`tests/fixtures/toon-spec/` vendors the TOON specification's conformance fixtures, which are MIT
+licensed and copyright their authors; the upstream licence, the commit they came from and the
+refresh recipe are recorded beside them in `PROVENANCE.md`.
