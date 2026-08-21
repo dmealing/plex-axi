@@ -210,6 +210,12 @@ view that printed a bare `key` would end one call short of the thing the tool ex
 The `guid` is not in the default row: it is the identifier you write down rather than the one a
 consumer takes, and it is available by name (`--fields key,title,guid`) and in the detail views.
 
+**A playlist has one as well.** `plex-axi playlist list` and `plex-axi playlist show` print a
+`media_id` for the playlist itself, so playing a whole playlist needs no more assembly than playing
+one track does. A playlist's rating key lives in the same `/library/metadata` namespace, so the same
+`plex://<machineIdentifier>/<ratingKey>` form resolves to the playlist — verified on a real server
+and against a real consumer, not assumed.
+
 `plex-axi` does not dispatch it anywhere. Handing it to something that plays is a single call in
 whatever already owns your speakers. In Home Assistant, for example, the `media_player.play_media`
 service takes it directly:

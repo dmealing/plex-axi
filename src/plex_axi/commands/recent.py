@@ -87,7 +87,8 @@ def run(ctx, name: str, sub: str, parsed):
     doc[f"{libtype}s"] = project(rows, fields)
     doc["help"] = HelpBlock(
         [
-            f"Run `plex-axi {libtype} <key>` for one item's detail and its media id",
+            f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
+            "its tags, and the durable guid",
             f"Run `plex-axi recent --limit {limit * 5}` to look further back",
         ]
     )

@@ -140,7 +140,7 @@ def run(ctx, name: str, sub: str, parsed):
     doc["tracks"] = project(rows, fields)
     doc["help"] = HelpBlock(
         [
-            "Run `plex-axi track <key>` for one result's detail and its media id",
+            "Run `plex-axi track <key>` for a result's tags, analysis version and file details",
             "distance is the server's own measure; sort order is the server's, closest first",
         ]
     )

@@ -133,7 +133,7 @@ plex-axi search --style '<value>'
 
 ### `plex-axi track`
 
-Show one track in full, with its media id.
+Show one track in full: the fields a list row leaves out.
 
 - **read-only - this command cannot change anything on the server**
 
@@ -149,7 +149,7 @@ plex-axi search --artist 'Example Artist' --type track
 
 ### `plex-axi album`
 
-Show one album in full, with its media id.
+Show one album in full: the fields a list row leaves out.
 
 - **read-only - this command cannot change anything on the server**
 
@@ -164,7 +164,7 @@ plex-axi search --artist 'Example Artist' --type album
 
 ### `plex-axi artist`
 
-Show one artist in full, with its media id.
+Show one artist in full: the fields a list row leaves out.
 
 - **read-only - this command cannot change anything on the server**
 
@@ -223,7 +223,7 @@ plex-axi playlist create 'Example Playlist' --key 12345 --write
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
 - a playlist is named by its `key` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
 - `items` in a listing is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
-- nothing here plays a playlist: `show` prints the tracks and their media ids
+- nothing here plays a playlist: both `list` and `show` print the playlist's own media_id, and `show` prints one per track as well
 
 ### `plex-axi rate`
 
@@ -312,8 +312,9 @@ plex-axi skill --check
 - **A zero result is an answer.** It names the filters that matched nothing and the
   command that lists the real vocabulary. Drop one flag at a time to find the
   one that was wrong.
-- **Every row carries a `media_id`.** That is the product: a labelled identifier
-  a media consumer accepts, so a list view needs no follow-up call to be useful.
+- **Every row carries a `media_id`, and so does a playlist.** That is the product: a
+  labelled identifier a media consumer accepts, so a list view needs no follow-up
+  call to be useful, and playing a whole playlist needs no id assembled by hand.
 - **`rating_key` is local to one server and moves.** It changes when an item is
   re-matched or the library is rebuilt, so keep the `guid` beside it anywhere the
   value is written down -- *unless* the guid is `local://<rating_key>`, which Plex

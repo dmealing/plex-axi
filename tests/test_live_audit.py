@@ -170,12 +170,38 @@ def test_b2_a_playlist_listing_carries_an_identifier_that_can_be_used(server, cl
     listed = cli_run("playlist", "list")
     assert listed.code == 0
     # Two, not three: the video playlist on this server stays invisible.
-    assert listed.line("playlists[").startswith("playlists[2]{key,title,items,smart,updated}")
+    assert listed.line("playlists[").startswith(
+        "playlists[2]{key,media_id,title,items,smart,updated}"
+    )
 
-    key = re.search(r"^  (\d+),Example Playlist,", listed.out, re.M).group(1)
+    key = re.search(r"^  (\d+),", listed.out, re.M).group(1)
     shown = cli_run("playlist", "show", key)
     assert shown.code == 0
     assert shown.line("playlist:") == "playlist: Example Playlist"
+
+
+def test_b2_a_playlist_has_a_handoff_id_of_its_own(server, cli_run):
+    """B2, the case that started it: playing a *whole playlist*.
+
+    A playlist's rating key lives in the same `/library/metadata` namespace as a
+    track's -- fetching it returns the playlist -- which is exactly what a
+    consumer does when it parses `plex://<machineIdentifier>/<ratingKey>`. So a
+    playlist has a media id like anything else, and printing only `key` left the
+    caller to assemble that string by hand: the hand-assembly the six-forms rule
+    exists to prevent, in the one case where the container is obviously what is
+    wanted rather than a row of it.
+    """
+    listed = cli_run("playlist", "list")
+    assert listed.code == 0
+    assert f'"plex://{MACHINE_ID}/501"' in listed.out
+
+    shown = cli_run("playlist", "show", "Example Playlist")
+    assert shown.code == 0
+    assert shown.line("key:") == "key: 501"
+    assert shown.line("media_id:") == f'media_id: "plex://{MACHINE_ID}/501"'
+    # And the track rows still carry their own, for the case where one song is
+    # what was meant.
+    assert f'"plex://{MACHINE_ID}/111"' in shown.out
 
 
 def test_b2_a_title_that_is_all_digits_still_resolves_by_title(server, cli_run):
@@ -337,7 +363,7 @@ def test_b6_the_two_playlist_commands_do_not_contradict_each_other(server, cli_r
     assert listed.code == 0
     # The listing has only the declared count to print, so it prints it and
     # says which number it is.
-    assert "502,Example Smart Playlist,5," in listed.out
+    assert f'502,"plex://{MACHINE_ID}/502",Example Smart Playlist,5,' in listed.out
     assert "the count this server declares" in listed
 
     shown = cli_run("playlist", "show", "Example Smart Playlist")
@@ -528,6 +554,35 @@ def test_b11_a_suggested_command_has_no_trailing_space_inside_the_backticks(serv
     quoted = re.findall(r"`([^`]*)`", result.out)
     assert quoted
     assert all(text == text.strip() for text in quoted), quoted
+
+
+def test_b2_no_help_line_sends_a_caller_to_fetch_an_id_the_row_already_has(
+    server, cli_run, writable_env
+):
+    """The B12 defect, one release later: advice that costs a round trip for nothing.
+
+    Six list views said "Run `plex-axi track <key>` for one item's detail and
+    its media id" -- true when a row carried only `key`, and an advertised
+    round trip for a value already on the screen once it did not. Advice has to
+    be re-read whenever the output it points away from changes.
+    """
+    for argv in (
+        ("search", "--track", "Example Track", "--no-group"),
+        ("pick",),
+        ("recent",),
+        ("recent", "--type", "track"),
+        ("similar", "111"),
+        ("playlist", "list"),
+        ("playlist", "show", "Example Playlist"),
+        ("sessions",),
+    ):
+        result = cli_run(*argv, env=writable_env)
+        assert result.code == 0, argv
+        advice = [line for line in result.out.splitlines() if line.strip().startswith("Run ")]
+        assert advice, argv
+        for line in advice:
+            assert "media id" not in line, (argv, line)
+            assert "media_id" not in line, (argv, line)
 
 
 # ------------------------------------------------------------- B12: similar's advice

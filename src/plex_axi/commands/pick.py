@@ -418,7 +418,10 @@ def _shuffle(section) -> tuple:
 
 
 def _next_steps(rows, result, limit) -> list:
-    lines = [f"Run `plex-axi track {rows[0]['key']}` for the detail and media id of the first"]
+    lines = [
+        f"Run `plex-axi track {rows[0]['key']}` for the first one's tags, analysis version "
+        "and file details"
+    ]
     lines.append(f"Run `plex-axi similar {rows[0]['key']}` for tracks that sound like it")
     if result.total > len(rows):
         lines.append(f"Run the same command again for a different {len(rows)} of {result.total}")

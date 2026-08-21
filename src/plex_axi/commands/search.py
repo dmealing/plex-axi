@@ -177,7 +177,13 @@ def _next_steps(libtype, rows, result, limit) -> list:
     if len(rows) == 1:
         lines.append(f"Run `plex-axi {libtype} {key}` for the full detail view")
     else:
-        lines.append(f"Run `plex-axi {libtype} <key>` for one item's detail and its media id")
+        # Not "and its media id": every row above carries one. Advice that
+        # sends a caller to fetch what they already have is the same defect as
+        # advice naming a value the tool never prints.
+        lines.append(
+            f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last "
+            "played, its tags, and the durable guid"
+        )
     if libtype == "track":
         lines.append(f"Run `plex-axi similar {key}` for sonically similar tracks with distances")
     if result.total > len(rows):

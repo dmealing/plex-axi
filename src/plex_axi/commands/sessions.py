@@ -61,7 +61,10 @@ def run(ctx, name: str, sub: str, parsed):
 
     if music:
         doc["help"] = HelpBlock(
-            ["Run `plex-axi track <key>` for the detail and media id of one of these"]
+            [
+                "Run `plex-axi track <key>` for one of these in full: tags, analysis version "
+                "and file details"
+            ]
         )
     return doc
 

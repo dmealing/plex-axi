@@ -341,11 +341,40 @@ verbatim. Only the *text* of the fourth varies. The README explains in prose wha
 **`media_id` is in every default row, and `guid` is not.** A list view that printed `key` alone
 under-delivered on the tool's own premise — it ends at a labelled identifier — and cost the caller
 one detail request per row to finish the job. So `search`, `pick`, `recent`, `similar`,
-`playlist show` and `sessions` all carry `media_id` by default, `music.rows_for` takes the machine
-identifier as a **required** argument so a new surface cannot forget it, and `playlist list` carries
-a `key` (a playlist has no media id worth the claim, and its titles carry emoji). The `guid` stays
-in the detail views: it is the identifier a human writes down rather than the one a consumer takes,
-and form 6 means it is not always even that — doubling every row's width for it is a poor trade.
+`playlist show` and `sessions` all carry `media_id` by default, and `music.rows_for` takes the
+machine identifier as a **required** argument so a new surface cannot forget it. The `guid` stays in
+the detail views: it is the identifier a human writes down rather than the one a consumer takes, and
+form 6 means it is not always even that — doubling every row's width for it is a poor trade.
+
+**A playlist has a `media_id` too, and this was checked rather than assumed.** `playlist list` and
+`playlist show` both print one for the playlist *itself*, beside the `key`, because "play this whole
+playlist" is the case where the container is obviously what is wanted — and without it the caller
+had to assemble `plex://<machineIdentifier>/<key>` by hand, which is precisely the hand-assembly the
+six-forms table exists to prevent.
+
+The claim needed evidence, since form 1 is only correct where the key resolves. Two independent
+checks, both against real things:
+
+- **On a real server, a playlist's rating key is in the `/library/metadata` namespace.**
+  `GET /library/metadata/<playlistRatingKey>` answers `200` with a `<Playlist>` element, and
+  `PlexServer.fetchItem(<playlistRatingKey>)` returns a `Playlist`. That is the same namespace and
+  the same call a track's key takes.
+- **A real consumer resolves the form by exactly that call.** Home Assistant's Plex integration
+  parses `plex://<machineIdentifier>/<ratingKey>` into `plex_key`, calls `fetch_item(key)` →
+  `fetchItem`, and does not type-check or reject the result — a `Playlist` comes back and is used.
+
+So the id is form 1, correctly built, resolving to the playlist. Note that the same consumer also
+offers a *playlist-specific* route keyed on the title (form 3, a JSON payload). **Do not emit that**:
+it is one consumer's schema, and naming one in default output is the vendor-specific coupling this
+tool refuses everywhere else. A playlist's own `guid` — `com.plexapp.agents.none://<uuid>` — is not
+a media id either, and is not printed.
+
+**Advice has to be re-read whenever the output it points away from changes.** Six list views said
+"Run `plex-axi track <key>` for one item's detail and its media id". That was true while a row
+carried only `key`, and became an advertised round trip for a value already on the screen the moment
+rows carried `media_id` — the same defect as advice naming a value the tool never prints, arriving
+by a different route. `tests/test_live_audit.py` sweeps every row-bearing surface asserting no `Run`
+line mentions a media id at all. When a row gains a field, grep the help lines for it.
 
 **`rating_key` is not stable.** It is a row number in one server's database and it moves when an
 item is re-matched or the library is rebuilt. Every command that emits one emits the `guid` beside

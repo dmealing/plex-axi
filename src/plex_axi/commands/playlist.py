@@ -32,7 +32,7 @@ from __future__ import annotations
 from .. import writes
 from ..argspec import Command, Flag, Sub
 from ..errors import AxiError, UsageError
-from ..ids import validate_rating_key
+from ..ids import media_id_for, validate_rating_key
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
@@ -108,7 +108,8 @@ COMMAND = Command(
         "case-folded title; on a miss the real keys and titles are handed back",
         "`items` in a listing is the count the server declares, which for a smart "
         "playlist is cached; `playlist show` reports what it actually holds",
-        "nothing here plays a playlist: `show` prints the tracks and their media ids",
+        "nothing here plays a playlist: both `list` and `show` print the playlist's own "
+        "media_id, and `show` prints one per track as well",
     ),
     examples=(
         "plex-axi playlist",
@@ -140,7 +141,8 @@ def run(ctx, name: str, sub: str, parsed):
 
 def _list(ctx, parsed):
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=1000)
-    playlists = _audio_playlists(ctx.server())
+    server = ctx.server()
+    playlists = _audio_playlists(server)
     shown = playlists[:limit]
 
     doc = {"count": f"{len(shown)} of {len(playlists)} audio playlists"}
@@ -154,7 +156,7 @@ def _list(ctx, parsed):
         )
         return doc
 
-    doc["playlists"] = [_playlist_row(p) for p in shown]
+    doc["playlists"] = [_playlist_row(p, server.machineIdentifier) for p in shown]
     # `items` is the count the *server* declares, and on a smart playlist it is
     # a cached figure that drifts from what the saved search currently returns
     # -- seen on a real server as a declared 0 against 81 actual items, and off
@@ -190,6 +192,10 @@ def _show(ctx, parsed):
     doc = {
         "playlist": playlist.title,
         "key": int(playlist.ratingKey),
+        # The playlist's own handoff id, not any track's: this is the one a
+        # caller wants when they mean "play this whole playlist", and the track
+        # rows below carry their own for the case where they mean one song.
+        "media_id": media_id_for(server.machineIdentifier, playlist),
         "count": f"{len(rows)} of {len(items)} items",
         "smart": bool(playlist.smart),
     }
@@ -230,7 +236,8 @@ def _show(ctx, parsed):
         doc["other"] = f"{len(items) - len(tracks)} item(s) that are not tracks"
     doc["help"] = HelpBlock(
         [
-            f"Run `plex-axi track {rows[0]['key']}` for one track's detail and its media id",
+            f"Run `plex-axi track {rows[0]['key']}` for one track's tags, analysis version "
+            "and file details",
             f"Run `plex-axi playlist remove '{playlist.title}' --key {rows[0]['key']}` to preview "
             "removing one",
         ]
@@ -487,16 +494,25 @@ def _item_rows(items: list) -> list:
     ]
 
 
-def _playlist_row(playlist) -> dict:
-    """One playlist row, addressable by something other than its title.
+def _playlist_row(playlist, machine_identifier: str) -> dict:
+    """One playlist row: addressable by this tool, and by whatever plays music.
 
-    The `key` is the point. A playlist could only be named by its exact title,
-    and real titles carry emoji, typographic apostrophes and leading spaces --
-    all of which have to survive a shell before they reach this tool. The rating
-    key is four digits and `show`, `add` and `remove` all take it.
+    Two identifiers, because they answer different questions. The `key` is how
+    *this tool* names a playlist -- a title could only be passed by typing it
+    exactly, and real ones carry emoji, typographic apostrophes and leading
+    spaces, all of which have to survive a shell first.
+
+    The `media_id` is the handoff, and **a playlist has one exactly like a track
+    does**. A playlist's rating key lives in the same `/library/metadata`
+    namespace: fetching it returns the playlist, which is precisely what a
+    consumer does when it parses `plex://<machineIdentifier>/<ratingKey>`.
+    Without it, playing a whole playlist meant assembling that string by hand --
+    the hand-assembly the six-forms rule exists to prevent, in the one case
+    where the caller most obviously wants the container rather than a row of it.
     """
     return {
         "key": int(playlist.ratingKey),
+        "media_id": media_id_for(machine_identifier, playlist),
         "title": playlist.title or "",
         "items": playlist.leafCount,
         "smart": bool(playlist.smart),

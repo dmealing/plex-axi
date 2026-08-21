@@ -55,7 +55,7 @@ def _command(name: str) -> Command:
         notes.insert(0, "analysis is Plex's musicAnalysisVersion; 0 means `similar` has no seed")
     return Command(
         name=name,
-        summary=f"Show one {name} in full, with its media id",
+        summary=f"Show one {name} in full: the fields a list row leaves out",
         usage=f"usage: plex-axi {name} <rating_key> [flags]",
         default_sub=name,
         subs=(
