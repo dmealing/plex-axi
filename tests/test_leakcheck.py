@@ -266,7 +266,7 @@ def test_every_path_allowance_is_still_earning_its_place(path, monkeypatch):
 #: The decoy: the same exempted content, one directory deeper, under a path that
 #: ends with the allowed one. Trailing-match logic reads this as exempt.
 DECOY_PATH = f"attic/{ALLOWED_PATH}"
-EXEMPT_SHAPE = "C:" + "\\\\" + "Users" + "\\\\" + "path"
+EXEMPT_SHAPE = sorted(EXPECTED_SHAPES[ALLOWED_PATH])[0]
 
 
 def _allowance_repo(tmp_path, *hooks):

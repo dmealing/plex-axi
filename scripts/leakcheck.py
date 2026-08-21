@@ -434,15 +434,20 @@ def repo_relative(found, root):
     stop applying an exemption the other modes honour -- the same file reading
     as a leak under `leakcheck.py $PWD/tests` and clean under `leakcheck.py
     tests`. A file genuinely outside the root keeps the name it arrived with.
+
+    The name is spelled the way git spells one, with forward separators and no
+    ``..`` segments, whatever the platform: the git-backed modes emit exactly
+    that, and an entry point that named the same file differently would break
+    the agreement on its own.
     """
-    found = Path(found)
+    found = Path(os.path.normpath(found))
     base = Path(root)
     for candidate, against in ((found, base), (found.resolve(), base.resolve())):
         try:
-            return str(candidate.relative_to(against))
+            return candidate.relative_to(against).as_posix()
         except ValueError:
             continue
-    return str(found)
+    return found.as_posix()
 
 
 def walk_files(target):

@@ -32,17 +32,40 @@ ENCODE_ROOT = FIXTURE_ROOT / "encode"
 CHECKSUMS = FIXTURE_ROOT / "checksums.txt"
 
 #: Total encode cases published by the vendored spec version. Enforcing the
-#: number is what makes "179/179" a test result instead of a claim in a report.
+#: number is what makes the score a test result instead of a claim in a report.
 CASE_COUNT = 179
+
+#: The specification version `encode` implements. A vendored case whose
+#: `minSpecVersion` is newer must fail the suite, not run against an encoder
+#: that never promised it.
+SPEC_VERSION = (4, 1)
 
 #: Fixture option names this runner knows how to apply. An unrecognised one is
 #: a failure, not a skip: silently ignoring an option would run the case with
 #: the wrong settings and report a pass.
 KNOWN_OPTIONS = {"delimiter", "indentSize"}
 
+#: Every case property this runner accounts for, whether it applies it or
+#: refuses it elsewhere in this file. An unrecognised one is a failure for the
+#: same reason an unrecognised option is.
+KNOWN_CASE_KEYS = {
+    "name",
+    "input",
+    "expected",
+    "specSection",
+    "note",
+    "options",
+    "minSpecVersion",
+    "shouldError",
+}
+
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _version(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split("."))
 
 
 def _fixture_files() -> list[Path]:
@@ -114,3 +137,24 @@ def test_no_case_expects_an_error():
     for path in _fixture_files():
         for index, case in enumerate(_load(path)["tests"]):
             assert not case.get("shouldError"), f"{path.name}[{index}]"
+
+
+def test_every_case_property_is_accounted_for():
+    """A property this runner silently ignores is one it may apply wrongly."""
+    for path in _fixture_files():
+        for index, case in enumerate(_load(path)["tests"]):
+            unknown = set(case) - KNOWN_CASE_KEYS
+            assert not unknown, f"{path.name}[{index}]: {sorted(unknown)}"
+
+
+def test_no_case_needs_a_newer_specification_than_the_encoder_implements():
+    """A version-gated case run against an older encoder fails for the wrong reason."""
+    for path in _fixture_files():
+        for index, case in enumerate(_load(path)["tests"]):
+            minimum = case.get("minSpecVersion")
+            if minimum is not None:
+                implemented = ".".join(str(part) for part in SPEC_VERSION)
+                assert _version(minimum) <= SPEC_VERSION, (
+                    f"{path.name}[{index}] needs spec {minimum},"
+                    f" this encoder implements {implemented}"
+                )
