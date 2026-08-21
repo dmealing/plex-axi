@@ -27,7 +27,7 @@ from ..ids import handoff, validate_rating_key
 from ..music import date_only, stars, tag_titles
 from ..output import HelpBlock, truncate
 from ..plex import translate
-from ._common import PREVIEW_CHARS
+from ._common import PREVIEW_CHARS, article
 
 #: What each noun accepts, and the sibling command that lists them.
 NOUNS = ("track", "album", "artist")
@@ -55,7 +55,7 @@ def _command(name: str) -> Command:
         notes.insert(0, "analysis is Plex's musicAnalysisVersion; 0 means `similar` has no seed")
     return Command(
         name=name,
-        summary=f"Show one {name} in full, with its media id",
+        summary=f"Show one {name} in full: the fields a list row leaves out",
         usage=f"usage: plex-axi {name} <rating_key> [flags]",
         default_sub=name,
         subs=(
@@ -102,11 +102,11 @@ def run(ctx, name: str, sub: str, parsed):
     found = getattr(item, "type", "") or "item"
     if found != name:
         raise UsageError(
-            f"{key} is a {found} on this server, not a {name}",
+            f"{key} is {article(found)} {found} on this server, not {article(name)} {name}",
             help_lines=[
                 f"Run `plex-axi {found} {key}` instead"
                 if found in NOUNS
-                else f"Run `plex-axi search --type {name}` to find a {name}",
+                else f"Run `plex-axi search --type {name}` to find {article(name)} {name}",
             ],
             code="WRONG_ITEM_TYPE",
         )

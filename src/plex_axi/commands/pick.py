@@ -11,11 +11,12 @@ filter is applied *after* the server has sliced the result set, so it fights
 and you get however many of the first ten survive, which is not ten and is not a
 random sample of the matches either. So each flag maps to a Plex predicate:
 
-* `--rated-min` to ``track.userRating>`` -- Plex's "is greater than or equals",
-  the same operator `search` uses, never the `field__gte` lookalike.
+* `--rated-min` to ``track.userRating>>`` -- Plex's "is greater than", which
+  is the only inequality a real server offers for an integer, and never the
+  `field__gte` lookalike or the `>=` that Plex does not define.
 * `--genre` to ``artist.genre``, because a Plex music library tags the artist.
 * `--not-played-since` to ``track.lastViewedAt<<=`` with a relative date, ORed
-  server-side with ``track.unplayed`` -- see :func:`_add_last_played`.
+  server-side with ``track.viewCount=0`` -- see :func:`_add_last_played`.
 * `--exclude-live` to ``album.subformat!=Compilation,Live``, which is the shape
   Plex's own popular-tracks query uses.
 * the shuffle to ``sort=random``, evaluated by the server over the whole match
@@ -32,7 +33,7 @@ from ..argspec import Command, Flag, Sub
 from ..errors import AxiError
 from ..ids import handoff
 from ..music import (
-    POINTS_PER_STAR,
+    RATED_MIN_ZERO_NOTE,
     RELATIVE_DATE,
     advertised_sorts,
     available_fields,
@@ -41,6 +42,7 @@ from ..music import (
     offers,
     parse_relative_date,
     parse_stars,
+    rating_predicate,
     rows_for,
     run_search,
     with_track_artist,
@@ -72,12 +74,22 @@ COMMAND = Command(
         Sub(
             name="pick",
             flags=(
-                Flag("--rated-min", "<stars>", note="0-5 stars, the scale ratings print in"),
+                Flag(
+                    "--rated-min",
+                    "<stars>",
+                    note=(
+                        "0-5 stars, the scale ratings print in; 0 filters nothing, so "
+                        "`--rated-min 0.5` is what asks for the rated ones"
+                    ),
+                ),
                 Flag("--genre", "<name>", note="run `plex-axi genres` for this library's list"),
                 Flag(
                     "--not-played-since",
                     "<period>",
-                    note="e.g. 30d, 6mon, 2y; never-played tracks count as well",
+                    note=(
+                        "e.g. 30d, 6mon, 2y; never-played tracks count as well, "
+                        "and the result says so if this server cannot include them"
+                    ),
                 ),
                 Flag(
                     "--exclude-live",
@@ -85,7 +97,11 @@ COMMAND = Command(
                     note="drop pressings Plex tags Compilation or Live",
                 ),
                 Flag("--limit", "<n>", default=DEFAULT_LIMIT, note="how many to pick"),
-                Flag("--fields", "<a,b,c>", note="add columns; see `plex-axi search --help`"),
+                Flag(
+                    "--fields",
+                    "<a,b,c>",
+                    note="replaces the default columns; see `plex-axi search --help`",
+                ),
             ),
             summary="Pick tracks to play now",
         ),
@@ -116,7 +132,8 @@ def run(ctx, name: str, sub: str, parsed):
     # so a malformed flag costs no connection and the message names the flag
     # rather than whatever the server said about the request it never got.
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
-    fields = select_fields(parsed.get("fields"), available_fields("track"), default_fields("track"))
+    chosen = parsed.get("fields")
+    fields = select_fields(chosen, available_fields("track"), default_fields("track"))
     asked = _validate(parsed)
 
     section = ctx.section()
@@ -137,15 +154,19 @@ def run(ctx, name: str, sub: str, parsed):
         group=True,
     )
 
-    rows = rows_for("track", result.items)
+    rows = rows_for("track", result.items, section._server.machineIdentifier)
     described = label_filters(section, described, libtype="track")
-    fields = with_track_artist(fields, rows)
+    if not chosen:
+        fields = with_track_artist(fields, rows)
+    unapplied = [_resolved(row, rows) for row in unapplied]
 
     doc: dict = {"count": count_line(len(rows), result.total), "shuffled": shuffled}
     if result.grouped:
         doc["grouped"] = result.grouped
     if described:
         doc["filters"] = described
+    if asked["stars"] == 0:
+        doc["note"] = RATED_MIN_ZERO_NOTE
     if unapplied:
         # Named before the rows, because it changes what the rows mean.
         doc["unapplied"] = unapplied
@@ -202,18 +223,11 @@ def _build(section, asked) -> tuple:
         )
 
     value = asked["stars"]
-    if value is not None:
-        points = value * POINTS_PER_STAR
-        points = int(points) if float(points).is_integer() else points
+    field, threshold, row = rating_predicate("track", value) if value is not None else (None,) * 3
+    if field is not None:
         if offers(section, "track.userRating", libtype="track"):
-            filters["track.userRating>"] = points
-            described.append(
-                {
-                    "field": "track.userRating",
-                    "operator": ">=",
-                    "value": f"{points} ({value:g} stars)",
-                }
-            )
+            filters[field] = threshold
+            described.append(row)
         else:
             unavailable("--rated-min", "track.userRating")
 
@@ -268,22 +282,28 @@ def _echo_period(period: str) -> str:
 def _add_last_played(section, period, filters, groups, described, unapplied) -> None:
     """ "Not played since 30d" has two halves, and the second one is the point.
 
-    A track Plex has never played carries no ``lastViewedAt`` at all, so the
-    date predicate alone excludes exactly the tracks that most obviously have
-    not been played lately. Plex's ``unplayed`` boolean covers them, and
-    plexapi's ``{'or': [...]}` compiles the pair into ``push=1 ... or=1 ...
-    pop=1`` -- a real parenthesised OR the server evaluates, not two searches
-    merged here.
+    A track Plex has never played carries no ``lastViewedAt`` at all -- the
+    column is null. Whether Plex's own "is before" matches that null is the
+    server's business, it is invisible from the request, and it is not the same
+    answer on every build. So the never-played half is asked for *explicitly*
+    rather than left to it: ``track.viewCount=0`` is exactly "never played", it
+    is a field every scanned music section advertises, and plexapi's
+    ``{'or': [...]}`` compiles the pair into ``push=1 ... or=1 ... pop=1`` -- a
+    real parenthesised OR the server evaluates, not two searches merged here.
+
+    It used to ask for ``track.unplayed``. No real music section advertises such
+    a field, so the predicate degraded on every real server -- while the double,
+    which had invented the field, exercised the good path in every test.
 
     When a server offers only one half, that half runs and the missing one is
     reported, because "played more than 30 days ago" and "not played in the last
     30 days" are different answers and the caller has to know which they got.
     """
     has_date = offers(section, "track.lastViewedAt", libtype="track")
-    has_unplayed = offers(section, "track.unplayed", libtype="track")
+    has_plays = offers(section, "track.viewCount", libtype="track")
 
-    if has_date and has_unplayed:
-        groups.append({"or": [{"track.lastViewedAt<<": period}, {"track.unplayed": True}]})
+    if has_date and has_plays:
+        groups.append({"or": [{"track.lastViewedAt<<": period}, {"track.viewCount": 0}]})
         described.append(
             {
                 "field": "track.lastViewedAt",
@@ -301,15 +321,18 @@ def _add_last_played(section, period, filters, groups, described, unapplied) -> 
             {
                 "filter": "--not-played-since",
                 "reason": (
-                    "applied as a date only: this server does not offer track.unplayed, "
-                    "so tracks it has never played are not included"
+                    "applied as a date only: this server does not offer track.viewCount, "
+                    "so never-played tracks could not be asked for explicitly"
                 ),
+                "_verify": _VERIFY_NEVER_PLAYED,
             }
         )
         return
-    if has_unplayed:
-        filters["track.unplayed"] = True
-        described.append({"field": "track.unplayed", "operator": "is", "value": "true"})
+    if has_plays:
+        filters["track.viewCount"] = 0
+        described.append(
+            {"field": "track.viewCount", "operator": "is", "value": "0 (never played)"}
+        )
         unapplied.append(
             {
                 "filter": "--not-played-since",
@@ -323,9 +346,49 @@ def _add_last_played(section, period, filters, groups, described, unapplied) -> 
     unapplied.append(
         {
             "filter": "--not-played-since",
-            "reason": "this server offers neither track.lastViewedAt nor track.unplayed",
+            "reason": "this server offers neither track.lastViewedAt nor track.viewCount",
         }
     )
+
+
+#: Marks an ``unapplied`` row whose reason is a claim about the *answer* and so
+#: cannot be finished until the rows are in hand. See :func:`_resolved`.
+_VERIFY_NEVER_PLAYED = "never-played"
+
+
+def _resolved(entry: dict, rows: list) -> dict:
+    """Finish an ``unapplied`` reason that is a claim about the result.
+
+    ``--not-played-since`` degraded to a date is the one case. Whether a
+    never-played track survived that predicate is Plex's decision and not this
+    tool's, so the reason is settled by looking at the rows -- the same
+    discipline as :func:`plex_axi.music._verify_grouping`, which reports what the
+    server did rather than what it was asked to do.
+
+    The wording this replaces asserted the opposite outright: that tracks the
+    server had never played "are not included". On a real server they are. The
+    command produced the right answer and explained it wrongly, which is worse
+    than a wrong answer -- a caller who believes it may add a compensating query
+    for tracks that are already in the list.
+    """
+    if entry.pop("_verify", "") != _VERIFY_NEVER_PLAYED:
+        return entry
+    if any(not row.get("plays") for row in rows):
+        entry["reason"] += (
+            "; it returned never-played tracks anyway, so this server's date comparison "
+            "includes them"
+        )
+    elif rows:
+        entry["reason"] += (
+            "; none of these rows is never-played, so whether this server's date comparison "
+            "includes them is unconfirmed here"
+        )
+    else:
+        entry["reason"] += (
+            "; nothing came back, so whether this server's date comparison includes "
+            "never-played tracks could not be observed"
+        )
+    return entry
 
 
 def _metadata_error(exc: Exception):
@@ -355,7 +418,10 @@ def _shuffle(section) -> tuple:
 
 
 def _next_steps(rows, result, limit) -> list:
-    lines = [f"Run `plex-axi track {rows[0]['key']}` for the detail and media id of the first"]
+    lines = [
+        f"Run `plex-axi track {rows[0]['key']}` for the first one's tags, analysis version "
+        "and file details"
+    ]
     lines.append(f"Run `plex-axi similar {rows[0]['key']}` for tracks that sound like it")
     if result.total > len(rows):
         lines.append(f"Run the same command again for a different {len(rows)} of {result.total}")

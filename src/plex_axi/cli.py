@@ -195,7 +195,9 @@ def render_root_help() -> str:
         f"  (none)=home, {names}",
         "flags[8]:",
         "  --human (readable output), --json (raw JSON output), --timeout <seconds> (default 30),",
-        "  --section <title|key> (which music library), --debug (diagnostics on stderr),",
+        "  --section <title|key> (which music library),",
+        "  --debug (on stderr: the connection, every request path and query, the exact",
+        "    filter expression built, and the type of any error),",
         "  --user <plex-user> (read as another account: admin only, and the one flag here",
         "    that needs a plex.tv round-trip), --help, -v/--version",
         "env[4]:",
@@ -426,6 +428,9 @@ def _pick_sub(command: Command, argv: list) -> tuple:
         sub = command.find(argv[0])
         if sub is not None:
             return sub, argv[1:]
+        raise_unknown = _unknown_sub(command, argv[0])
+        if raise_unknown is not None:
+            raise raise_unknown
     if command.default_sub:
         sub = command.find(command.default_sub)
         if sub is not None:
@@ -437,6 +442,36 @@ def _pick_sub(command: Command, argv: list) -> tuple:
             f"Run `plex-axi {command.name} --help` for the full reference",
         ],
         code="MISSING_SUBCOMMAND",
+    )
+
+
+def _unknown_sub(command: Command, token: str):
+    """A word where a subcommand belongs, when it cannot be anything else.
+
+    Only fires when the command has more than one subcommand *and* its default
+    takes no positional arguments -- so the token cannot be a legitimate
+    argument that merely looks like a name. `plex-axi track 12345` is not this;
+    `plex-axi playlist nosuchsub` is.
+
+    Without it the token fell through to the default subcommand and was rejected
+    as an excess positional: "unexpected argument 'nosuchsub' for `playlist
+    list`", which names a subcommand the caller did not type, blames the
+    argument rather than the name, and never lists the five that would have
+    worked -- the one thing needed to recover.
+    """
+    if len(command.subs) < 2 or not command.default_sub:
+        return None
+    default = command.find(command.default_sub)
+    if default is None or default.args:
+        return None
+    return UsageError(
+        f"unknown subcommand {token!r} for `{command.name}`",
+        help_lines=[
+            f"subcommands: {', '.join(sub.signature() for sub in command.subs)}",
+            f"Run `plex-axi {command.name} {command.default_sub}` for the default one",
+            f"Run `plex-axi {command.name} --help` for what each takes",
+        ],
+        code="UNKNOWN_SUBCOMMAND",
     )
 
 
@@ -506,8 +541,19 @@ def main(argv: list | None = None, *, environ=None) -> int:
             section=_resolve_section(globals_.get("section")),
             user=_resolve_user(globals_.get("user")),
         )
+        output.debug(f"command={name} sub={sub_name} mode={mode}")
         doc = module.run(ctx, name, sub_name, parsed)
     except AxiError as exc:
+        # The diagnostic for a *handled* error, which is the error a caller is
+        # most likely to be debugging -- and the one `--debug` said nothing
+        # about until now. The type is the useful half: it says which boundary
+        # produced the refusal, which the message deliberately does not.
+        # The type and the code, not a traceback. A handled error already knows
+        # where it came from; what `--debug` adds is which boundary refused and
+        # -- from `plex.translate` on the way here -- what the library actually
+        # said before the message was replaced. A stack for every NOT_FOUND
+        # would bury that.
+        output.debug(f"{type(exc).__name__} {exc.code or ''} exit={exc.exit_code}".rstrip())
         output.write(_error_document(exc), mode)
         return exc.exit_code
     except KeyboardInterrupt:  # pragma: no cover - interactive interruption

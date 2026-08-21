@@ -45,8 +45,9 @@ def test_every_filter_reaches_the_url_as_a_plex_predicate(server, cli_run):
     )
     assert result.code == 0
     query = _search_queries(server)[-1]
-    # Plex's own operator forms, never the client library's Python lookalikes.
-    assert query["track.userRating>"] == "8"
+    # Plex's own operator forms, never the client library's Python lookalikes
+    # and never the `>=` that no real music section defines for an integer.
+    assert query["track.userRating>>"] == "7"
     assert query["artist.genre"] == "11"  # resolved to the tag id, not the name
     assert query["track.lastViewedAt<<"] == "-30d"
     assert query["album.subformat!"] == "51,52"
@@ -68,17 +69,26 @@ def test_exclude_live_drops_the_pressings_plex_tags_as_such(server, cli_run):
 def test_not_played_since_includes_a_track_that_was_never_played(server, cli_run):
     """The half every other reading of this flag gets wrong.
 
-    A track Plex has never played carries no `lastViewedAt` at all, so the date
-    predicate alone excludes exactly the tracks that most obviously have not
-    been played lately. The command ORs in `unplayed` server-side, which is why
-    "Guest Track" -- never played -- is in this answer.
+    A track Plex has never played carries no `lastViewedAt` at all, and whether
+    the server's own "is before" matches that null is invisible from the
+    request. So the never-played half is asked for explicitly and server-side --
+    `track.viewCount=0`, ORed with the date -- which is why "Guest Track", never
+    played, is in this answer whatever this server does with a null.
+
+    B4: it used to ask for `track.unplayed`, a field no real music section
+    advertises. This assertion is the one that would have caught it, because the
+    double no longer advertises it either.
     """
     result = cli_run("pick", "--not-played-since", "30d")
     assert result.code == 0
     assert "Guest Track" in result
     query = _search_queries(server)[-1]
     assert query["push"] == "1" and query["pop"] == "1" and query["or"] == "1"
-    assert query["track.unplayed"] == "1"
+    assert query["track.viewCount"] == "0"
+    assert "track.unplayed" not in query
+    # The OR ran, so there is nothing to report as unapplied and no note about
+    # what the date predicate did or did not include.
+    assert "unapplied" not in result
 
 
 def test_an_absolute_date_is_echoed_as_the_date_and_not_prefixed(server, cli_run):
@@ -94,7 +104,7 @@ def test_an_absolute_date_is_echoed_as_the_date_and_not_prefixed(server, cli_run
     # than a calendar.
     query = _search_queries(server)[-1]
     assert query["track.lastViewedAt<<"].isdigit()
-    assert query["push"] == "1" and query["or"] == "1" and query["track.unplayed"] == "1"
+    assert query["push"] == "1" and query["or"] == "1" and query["track.viewCount"] == "0"
 
     # The relative form keeps its sign, which is the half the prefix is for.
     assert "-30d" in _echoed_period(cli_run("pick", "--not-played-since", "30d"))
@@ -122,8 +132,8 @@ def test_the_or_is_a_real_parenthesised_expression_on_the_wire(server, cli_run):
     # the OR. The `and` between them is what stops the OR swallowing the rating.
     assert markers == ["push", "and", "push", "or", "pop", "pop"]
     inner = names[names.index("push", names.index("and")) + 1 : names.index("pop")]
-    assert inner == ["track.lastViewedAt<<", "or", "track.unplayed"]
-    assert "track.userRating>" in names and "track.userRating>" not in inner
+    assert inner == ["track.lastViewedAt<<", "or", "track.viewCount"]
+    assert "track.userRating>>" in names and "track.userRating>>" not in inner
     # `group` is a SQL GROUP BY rather than a predicate, so it belongs outside
     # every parenthesis; inside one it would group half the query.
     assert names.index("group") < names.index("push")
@@ -144,7 +154,7 @@ def test_a_filter_this_server_cannot_offer_is_reported_not_dropped(spartan_serve
     assert "--not-played-since" in result
     assert "--exclude-live" in result
     # The one it *can* do still ran, server-side.
-    assert any("track.userRating>" in q for q in _search_queries(spartan_server))
+    assert any("track.userRating>>" in q for q in _search_queries(spartan_server))
 
 
 def test_a_server_without_a_random_sort_says_so_rather_than_failing(spartan_server, cli_run):
@@ -155,28 +165,26 @@ def test_a_server_without_a_random_sort_says_so_rather_than_failing(spartan_serv
     assert all("sort" not in q for q in _search_queries(spartan_server))
 
 
-def test_a_half_available_period_filter_says_which_half_ran(monkeypatch, cli_run):
-    """A server with `lastViewedAt` but no `unplayed` gets the date predicate
-    and a line saying never-played tracks are not in the answer -- because
-    "played more than 30 days ago" is a different question from the one asked."""
-    from conftest import SECTION_FIELDS, FakePlex, FakeSession
-    from plex_axi import plex
+def test_a_half_available_period_filter_says_which_half_ran(date_only_server, cli_run):
+    """A server with `lastViewedAt` but no `viewCount` gets the date predicate
+    alone, and a reason that describes the answer rather than asserting one.
 
-    fake = FakePlex()
-    fake.fields = {
-        **SECTION_FIELDS,
-        "track": [f for f in SECTION_FIELDS["track"] if not f[0].endswith("unplayed")],
-    }
-    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
-
+    B4: the reason used to end "so tracks it has never played are not
+    included", which is false on a real server -- Plex's date comparison matches
+    the null. The command produced the right answer and explained it wrongly,
+    which is worse than a wrong answer, because a caller who believes it adds a
+    compensating query for tracks that are already in the list.
+    """
     result = cli_run("pick", "--not-played-since", "30d")
     assert result.code == 0
-    assert "never played" in result
-    assert "does not offer track.unplayed" in result
-    # The date predicate ran on its own: no OR, and no `unplayed` on the wire.
-    query = _search_queries(fake)[-1]
+    assert "does not offer track.viewCount" in result
+    # The claim is settled by the rows, and "Guest Track" is never played.
+    assert "returned never-played tracks anyway" in result
+    assert "are not included" not in result
+    # The date predicate ran on its own: no OR, and no play count on the wire.
+    query = _search_queries(date_only_server)[-1]
     assert query["track.lastViewedAt<<"] == "-30d"
-    assert "track.unplayed" not in query and "push" not in query
+    assert "track.viewCount" not in query and "push" not in query
 
 
 @pytest.mark.parametrize("value", ["yesterday", "30", "d30", "-", "2020/01/01"])

@@ -18,9 +18,13 @@ Both are translated rather than surfaced, because the difference matters: one
 means "pick a different playlist", the other means "pick different items", and a
 raw ``BadRequest`` says neither.
 
-Resolution is by exact title, case-folded, and nothing else. No stripping of the
-word "playlist", no substring matching, no nearest neighbour: on a miss the
-command hands back every audio playlist on the server and lets the caller choose.
+Resolution is by rating key, or by exact title, case-folded -- and nothing else.
+No stripping of the word "playlist", no substring matching, no nearest
+neighbour: on a miss the command hands back every audio playlist on the server,
+key and title, and lets the caller choose. The key is there because a title is
+not always typeable: real ones carry emoji and typographic apostrophes, and a
+listing that printed no other handle made those playlists a shell-quoting
+exercise before they were a Plex question.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from __future__ import annotations
 from .. import writes
 from ..argspec import Command, Flag, Sub
 from ..errors import AxiError, UsageError
-from ..ids import validate_rating_key
+from ..ids import media_id_for, validate_rating_key
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
@@ -66,10 +70,10 @@ COMMAND = Command(
         ),
         Sub(
             name="show",
-            args=("<title>",),
+            args=("<title-or-key>",),
             flags=(
                 Flag("--limit", "<n>", default=DEFAULT_ITEM_LIMIT),
-                Flag("--fields", "<a,b,c>"),
+                Flag("--fields", "<a,b,c>", note="replaces the default columns"),
             ),
             summary="Show one playlist's tracks",
         ),
@@ -82,14 +86,14 @@ COMMAND = Command(
         ),
         Sub(
             name="add",
-            args=("<title>",),
+            args=("<title-or-key>",),
             flags=(_KEY_FLAG, _WRITE_FLAG),
             summary="Add tracks to an existing playlist",
             access=writes.MUTATING,
         ),
         Sub(
             name="remove",
-            args=("<title>",),
+            args=("<title-or-key>",),
             flags=(_KEY_FLAG, _WRITE_FLAG),
             summary="Remove tracks from a playlist",
             access=writes.MUTATING,
@@ -100,12 +104,17 @@ COMMAND = Command(
         "same server are deliberately invisible here",
         "a smart playlist's contents are a saved search and cannot be edited by adding "
         "items; the command says so rather than letting the server refuse",
-        "titles match exactly, case-folded; on a miss the real titles are handed back",
-        "nothing here plays a playlist: `show` prints the tracks and their media ids",
+        "a playlist is named by its `key` from `playlist list`, or by its exact "
+        "case-folded title; on a miss the real keys and titles are handed back",
+        "`items` in a listing is the count the server declares, which for a smart "
+        "playlist is cached; `playlist show` reports what it actually holds",
+        "nothing here plays a playlist: both `list` and `show` print the playlist's own "
+        "media_id, and `show` prints one per track as well",
     ),
     examples=(
         "plex-axi playlist",
         "plex-axi playlist show 'Example Playlist'",
+        "plex-axi playlist show 501",
         "plex-axi playlist add 'Example Playlist' --key 12345 --key 12346",
         "plex-axi playlist create 'Example Playlist' --key 12345 --write",
     ),
@@ -132,7 +141,8 @@ def run(ctx, name: str, sub: str, parsed):
 
 def _list(ctx, parsed):
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=1000)
-    playlists = _audio_playlists(ctx.server())
+    server = ctx.server()
+    playlists = _audio_playlists(server)
     shown = playlists[:limit]
 
     doc = {"count": f"{len(shown)} of {len(playlists)} audio playlists"}
@@ -146,10 +156,19 @@ def _list(ctx, parsed):
         )
         return doc
 
-    doc["playlists"] = [_playlist_row(p) for p in shown]
+    doc["playlists"] = [_playlist_row(p, server.machineIdentifier) for p in shown]
+    # `items` is the count the *server* declares, and on a smart playlist it is
+    # a cached figure that drifts from what the saved search currently returns
+    # -- seen on a real server as a declared 0 against 81 actual items, and off
+    # by one even on a static list. Fetching the truth costs one request per
+    # playlist; saying which number this is costs one line.
+    doc["note"] = (
+        "items is the count this server declares; a smart playlist's is cached and "
+        "`playlist show` may return a different number, which is the real one"
+    )
     doc["help"] = HelpBlock(
         [
-            f"Run `plex-axi playlist show '{shown[0].title}'` for one playlist's tracks",
+            f"Run `plex-axi playlist show {shown[0].ratingKey}` for one playlist's tracks",
             "Run `plex-axi playlist add '<title>' --key <rating_key>` to preview an addition",
         ]
     )
@@ -164,15 +183,31 @@ def _show(ctx, parsed):
     items = _items(playlist)
 
     tracks = [item for item in items if getattr(item, "type", "") == "track"]
-    rows = rows_for("track", tracks[:limit])
-    fields = select_fields(parsed.get("fields"), available_fields("track"), default_fields("track"))
-    fields = with_track_artist(fields, rows)
+    rows = rows_for("track", tracks[:limit], server.machineIdentifier)
+    chosen = parsed.get("fields")
+    fields = select_fields(chosen, available_fields("track"), default_fields("track"))
+    if not chosen:
+        fields = with_track_artist(fields, rows)
 
     doc = {
         "playlist": playlist.title,
+        "key": int(playlist.ratingKey),
+        # The playlist's own handoff id, not any track's: this is the one a
+        # caller wants when they mean "play this whole playlist", and the track
+        # rows below carry their own for the case where they mean one song.
+        "media_id": media_id_for(server.machineIdentifier, playlist),
         "count": f"{len(rows)} of {len(items)} items",
         "smart": bool(playlist.smart),
     }
+    declared = getattr(playlist, "leafCount", None)
+    if declared is not None and int(declared) != len(items):
+        # The two commands must not contradict each other in silence. `playlist
+        # list` prints the declared count because that is all a listing has;
+        # here the real contents are in hand, so the disagreement is named.
+        doc["declared"] = (
+            f"this server declares {int(declared)} items; the {len(items)} above are what "
+            "it actually returned"
+        )
     if not items:
         doc["tracks"] = "0 items in this playlist"
         return doc
@@ -201,7 +236,8 @@ def _show(ctx, parsed):
         doc["other"] = f"{len(items) - len(tracks)} item(s) that are not tracks"
     doc["help"] = HelpBlock(
         [
-            f"Run `plex-axi track {rows[0]['key']}` for one track's detail and its media id",
+            f"Run `plex-axi track {rows[0]['key']}` for one track's tags, analysis version "
+            "and file details",
             f"Run `plex-axi playlist remove '{playlist.title}' --key {rows[0]['key']}` to preview "
             "removing one",
         ]
@@ -368,17 +404,29 @@ def _find(playlists: list, title: str):
 
 
 def _resolve(server, title: str):
-    """One playlist by exact, case-folded title, or the real list to choose from."""
+    """One playlist by rating key or by exact, case-folded title.
+
+    The rating key is accepted because `playlist list` prints it and a title
+    cannot always be typed: on a real server they contain emoji and typographic
+    apostrophes. It is tried first and only when the argument is all digits, so
+    a playlist actually called "2024" is still reachable by name.
+    """
     playlists = _audio_playlists(server)
+    wanted = str(title).strip()
+    if wanted.isdigit():
+        for playlist in playlists:
+            if str(playlist.ratingKey) == wanted:
+                return playlist
     found = _find(playlists, title)
     if found is not None:
         return found
-    titles = ", ".join(repr(p.title) for p in playlists) or "none"
+    listing = ", ".join(f"{p.ratingKey} {p.title!r}" for p in playlists) or "none"
     raise AxiError(
         f"no audio playlist called {title!r} on this server",
         help_lines=[
-            f"audio playlists: {titles}",
-            "Titles match exactly; pass one of those rather than a description of it",
+            f"audio playlists (key and title): {listing}",
+            "Titles match exactly; pass one of those, or the key beside it, rather than a "
+            "description of it",
             f"Run `plex-axi playlist create '{title}' --key <rating_key> --write` to make it",
         ],
         code="NO_SUCH_PLAYLIST",
@@ -446,8 +494,25 @@ def _item_rows(items: list) -> list:
     ]
 
 
-def _playlist_row(playlist) -> dict:
+def _playlist_row(playlist, machine_identifier: str) -> dict:
+    """One playlist row: addressable by this tool, and by whatever plays music.
+
+    Two identifiers, because they answer different questions. The `key` is how
+    *this tool* names a playlist -- a title could only be passed by typing it
+    exactly, and real ones carry emoji, typographic apostrophes and leading
+    spaces, all of which have to survive a shell first.
+
+    The `media_id` is the handoff, and **a playlist has one exactly like a track
+    does**. A playlist's rating key lives in the same `/library/metadata`
+    namespace: fetching it returns the playlist, which is precisely what a
+    consumer does when it parses `plex://<machineIdentifier>/<ratingKey>`.
+    Without it, playing a whole playlist meant assembling that string by hand --
+    the hand-assembly the six-forms rule exists to prevent, in the one case
+    where the caller most obviously wants the container rather than a row of it.
+    """
     return {
+        "key": int(playlist.ratingKey),
+        "media_id": media_id_for(machine_identifier, playlist),
         "title": playlist.title or "",
         "items": playlist.leafCount,
         "smart": bool(playlist.smart),

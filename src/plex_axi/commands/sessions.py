@@ -12,6 +12,7 @@ anything -- listing what is playing is a read, and this tool does only reads.
 from __future__ import annotations
 
 from ..argspec import Command, Sub
+from ..ids import media_id_for
 from ..music import number, stars
 from ..output import HelpBlock
 from ..plex import translate
@@ -50,7 +51,7 @@ def run(ctx, name: str, sub: str, parsed):
         return doc
 
     if music:
-        doc["music"] = [_row(session) for session in music]
+        doc["music"] = [_row(session, server.machineIdentifier) for session in music]
     else:
         doc["music"] = "0 of the active streams is music"
     if other:
@@ -60,21 +61,44 @@ def run(ctx, name: str, sub: str, parsed):
 
     if music:
         doc["help"] = HelpBlock(
-            ["Run `plex-axi track <key>` for the detail and media id of one of these"]
+            [
+                "Run `plex-axi track <key>` for one of these in full: tags, analysis version "
+                "and file details"
+            ]
         )
     return doc
 
 
-def _row(session) -> dict:
+def _row(session, machine_identifier: str) -> dict:
     player = getattr(session, "player", None)
     album_artist = getattr(session, "grandparentTitle", "") or ""
     performer = getattr(session, "originalTitle", "") or ""
     return {
         "key": number(getattr(session, "ratingKey", None)),
+        "media_id": media_id_for(machine_identifier, session),
         "title": getattr(session, "title", "") or "",
         "artist": performer or album_artist,
         "album": getattr(session, "parentTitle", "") or "",
-        "device": getattr(player, "title", "") or "",
+        "device": _device(player),
         "state": getattr(player, "state", "") or "",
         "rating": stars(getattr(session, "userRating", None)),
     }
+
+
+def _device(player) -> str:
+    """The name of the thing playing, from whichever attribute carries one.
+
+    **A real `<Player>` has no `title`.** It carries `device`, `product` and
+    `platform`, which are three different strings -- "Sonos", "Plex for Sonos",
+    "Sonos" -- and this column read `title` alone, so the one field that says
+    *where the music is playing* was empty on every real session.
+
+    The order is most-specific first: `device` is the name of the box, `product`
+    the application on it, `platform` the family it belongs to. Any of them
+    beats an empty cell, and reporting which is which is not worth a column.
+    """
+    for attribute in ("title", "device", "product", "platform"):
+        value = getattr(player, attribute, "") or ""
+        if value:
+            return value
+    return ""

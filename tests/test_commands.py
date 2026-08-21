@@ -7,6 +7,7 @@ cannot, and each test says which thing that is.
 from __future__ import annotations
 
 from conftest import FakePlex, FakeSession
+from plex_axi.commands import sessions
 
 # ------------------------------------------------------------- M12: vocabulary
 
@@ -122,7 +123,9 @@ def test_album_and_artist_detail_views_link_onward(server, cli_run):
 def test_asking_for_the_wrong_noun_says_what_the_key_actually_is(server, cli_run):
     result = cli_run("track", "110")
     assert result.code == 2
-    assert "is a album on this server, not a track" in result
+    # B14: "a album" reads as carelessness in the message most likely to be
+    # read word by word, and two of the three nouns here begin with a vowel.
+    assert "is an album on this server, not a track" in result
     assert "plex-axi album 110" in result
 
 
@@ -225,8 +228,31 @@ def test_sessions_report_what_the_server_believes_is_playing(server, cli_run):
     result = cli_run("sessions")
     assert result.code == 0
     assert result.line("count:") == "count: 1 active"
-    assert "Example Player" in result
+    # B3: a real `<Player>` carries no `title`, so this column read an attribute
+    # that is never there and was empty on every real session. `device` is the
+    # name of the box; `product` and `platform` are the fallbacks behind it.
+    assert "Example Speaker" in result
     assert "playing" in result
+
+
+def test_a_session_names_the_player_from_whatever_attribute_carries_one():
+    """B3: `device`, `product` and `platform` are three strings, and a real
+    `<Player>` carries no `title` at all.
+
+    Reading `title` alone left the one column that says *where the music is
+    playing* empty on every real session and full on every test, because the
+    double had invented the attribute. The fallback runs most-specific first.
+    """
+
+    class Player:
+        def __init__(self, **attributes):
+            self.__dict__.update(attributes)
+
+    assert sessions._device(Player(device="Box", product="App", platform="OS")) == "Box"
+    assert sessions._device(Player(device="", product="App", platform="OS")) == "App"
+    assert sessions._device(Player(device="", product="", platform="OS")) == "OS"
+    assert sessions._device(Player(device="", product="", platform="")) == ""
+    assert sessions._device(None) == ""
 
 
 def test_no_sessions_is_a_definitive_zero(monkeypatch, cli_run):

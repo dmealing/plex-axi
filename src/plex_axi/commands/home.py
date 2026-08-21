@@ -97,7 +97,7 @@ def run(ctx, name: str, sub: str, parsed):
         [
             "Run `plex-axi search --artist '<name>' --track '<title>'` to search field by field",
             "Run `plex-axi genres` (or `moods`, `styles`) for the values this library will accept",
-            "Run `plex-axi track <key>` for one item's detail and its media id",
+            "Run `plex-axi track <key>` for one item's tags, analysis version and file details",
             "Run `plex-axi pick --rated-min 4` for something to play right now",
             "Run `plex-axi doctor` when something looks wrong",
         ]

@@ -44,7 +44,7 @@ from plexapi.server import PlexServer
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from . import __version__
+from . import __version__, output
 from .errors import ApiError, AuthFailed, ConnectionFailed
 from .errors import NotFound as AxiNotFound
 
@@ -148,6 +148,11 @@ def connect(config, *, session=None, token: str | None = None) -> PlexServer:
     """
     harden()
     session = build_session() if session is None else session
+    # `--debug` earns its advertisement here: the base URL and the timeout are
+    # the two settings behind most connection failures, and both come from the
+    # environment rather than the command line. Redacted like everything else --
+    # a URL can carry userinfo.
+    output.debug(f"connecting to {config.base_url} timeout={config.timeout:g}s")
     try:
         server = PlexServer(
             config.base_url, token or config.token, session=session, timeout=config.timeout
@@ -161,6 +166,7 @@ def connect(config, *, session=None, token: str | None = None) -> PlexServer:
     # Belt and braces: even with the configuration forced off, pin the instance
     # attribute that `url()` actually consults.
     server._showSecrets = False
+    output.debug(f"connected: {server.friendlyName} version {server.version}")
     return server
 
 
@@ -266,8 +272,11 @@ def translate(exc: Exception, *, what: str, help_lines=None):
     """Convert a plexapi exception into the structured error the agent reads.
 
     Nothing from plexapi survives this boundary: not the package name, not the
-    response body, not the traceback.
+    response body, not the traceback -- except on stderr under `--debug`, where
+    the original text is what makes a translated message diagnosable. It goes
+    through the same redactor as stdout.
     """
+    output.debug(f"translating {type(exc).__name__} while reading {what}: {exc}")
     help_lines = list(help_lines or [])
     if isinstance(exc, Unauthorized):
         return _auth_error(exc)

@@ -61,7 +61,7 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   this boundary: not its exceptions, not its response bodies, not its name.
 - `music.py` — the product: section resolution, the per-field filter map, the search, the exact
   count, and the row shapes.
-- `ids.py` — which `plex://` string may be printed. See "The five `plex://` forms" below.
+- `ids.py` — which `plex://` string may be printed. See "The six `plex://` forms" below.
 - `writes.py` — the write gate and the `access` vocabulary. Nothing mutates without going through
   `writes.require`, and every command declares `access=READ_ONLY` or `access=MUTATING` so that
   `--help` and the generated skill are printing the *same declaration* rather than two descriptions
@@ -86,6 +86,17 @@ parameterised one. Adding a noun is still one entry in `COMMAND_ORDER` and one i
 - **Every output path is redacted, stdout and stderr alike.** `output.write`, `output.write_text`,
   `output.debug` and `output.debug_exception` all pass through `redact()`. stderr is not a safe
   channel just because agents ignore it: it reaches terminals, logs and CI output.
+- **`--debug` is wired, and it stays wired.** It was advertised in root help and in the
+  internal-error advice while `output.debug` had *zero* call sites, so the flag wrote nothing on
+  every path — including the errors a caller is most likely to be debugging. It now emits the
+  command and mode, the connection and the server it reached, the **built search key** (the exact
+  resolved predicate, which is the single most useful line this tool can print), the exact total,
+  the raw path and query behind `api`, and, from `plex.translate`, what the client library actually
+  said before its message was replaced. A handled error adds its type, code and exit code — not a
+  traceback, which would bury the line above it; only the last-resort `INTERNAL_ERROR` prints one.
+  A test asserts stderr is non-empty with the flag and **empty without it**, on both a successful
+  command and a handled error. Either wire a diagnostic or stop advertising the flag; advertised and
+  inert is the one state that is not allowed.
 - **`cli.main` has a last-resort `except Exception`** that renders a structured, redacted error on
   **stdout** and names only the exception *type*, never its message. Without it an unexpected
   exception prints a raw traceback on stderr, bypassing redaction entirely and leaving stdout empty.
@@ -155,12 +166,17 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   `userRating__gte=8` through `Library.search` is emitted verbatim into the URL and applied nowhere.
   Through `LibrarySection.search` it becomes a *client-side* post-filter applied after `limit` has
   already sliced the results, so it filters within the slice rather than narrowing the query. Only
-  `filters={"userRating>": 8}` is a real, server-validated Plex predicate. `music._assert_server_side`
+  `filters={"userRating>>": 7}` is a real, server-validated Plex predicate. `music._assert_server_side`
   fails loudly if anything ever lands in the client-side bucket again.
-- **Plex's operator suffixes are not Python's.** `>` normalises to `>=` ("is greater than or
-  equals") and `>>` to `>>=` ("is greater than"). The library validates the operator against the
+- **Plex's operator suffixes are not Python's, and one of the two you would reach for does not
+  exist.** `>` normalises to `>=` ("is greater than or equals") and `>>` to `>>=` ("is greater
+  than") — but **no real music section advertises `>=` for any type**, so the natural spelling of
+  "at least" validates against nothing and is refused. The library checks the operator against the
   field's advertised set and raises listing the valid ones; `music._filter_error` turns that into a
-  usable message rather than letting it escape.
+  usable message rather than letting it escape, and it now says outright that reaching it is a bug
+  in this tool, because every comparison here is built from a flag rather than typed by a caller.
+  Its advice used to name `--rated-min` as "the supported at-least comparison" — recommending the
+  command that had just failed.
 - **`group` is not a field the server advertises — the client library adds it by hand.**
   `FilteringType._manualFields` injects `('group', 'string', 'SQL Group By Statement')` into *every*
   libtype, so `filters={"group": "title"}` validates on any server whatever its metadata says. That
@@ -196,6 +212,17 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
 - **A session element carries a `<User>` child and the library reads it unguarded.** A `/status/sessions`
   response without one raises `AttributeError` inside `PlexSession._loadData` rather than parsing to
   something empty. The test double models the real shape so this is exercised rather than assumed.
+- **A real `<Player>` has no `title`.** It carries `address`, `device`, `machineIdentifier`,
+  `platform`, `product`, `profile`, `state` and `version` — three different names for the thing
+  playing and not one of them `title`. `sessions._device` reads `device`, then `product`, then
+  `platform`, most specific first. Reading `title` alone left the one column that says *where the
+  music is playing* empty on every real session, and full on every test, because the double had
+  invented the attribute.
+- **`playlist.leafCount` is what the server declares, not what the playlist holds.** For a smart
+  playlist it is a cached figure and drifts — 0 declared against 81 actual on a real server — and it
+  is off by one even on a static list. `playlist list` has nothing else to print, so it prints the
+  declared count and names it as such; `playlist show` has the real contents and reports the
+  disagreement. The two commands must never contradict each other in silence.
 - **A boolean key in `filters` may not have a sibling.** `_validateAdvancedSearch` raises
   *"Multiple keys in the same dictionary with and/or is not allowed"* the moment `{'or': [...]}`
   shares a dictionary with anything else, so a parenthesised OR has to be composed as
@@ -204,11 +231,21 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   `_buildSearchKey` validates it against the same field table and emits the same `group=title`
   parameter *outside* any group. A `group` inside the parentheses would be a SQL GROUP BY scoped to
   half the predicate, which is not what anyone means.
-- **A never-played track has no `lastViewedAt` at all.** The column is null rather than zero, so
-  `track.lastViewedAt<<=-30d` excludes exactly the tracks most obviously not played lately. That is
-  why `pick --not-played-since` ORs the date predicate with `track.unplayed` server-side, and why
-  the double models the attribute as absent rather than as `0` — a fixture with a zero there would
-  let the wrong single-predicate version pass.
+- **A never-played track has no `lastViewedAt` at all, and Plex matches the null anyway.** The
+  column is null rather than zero. What a real server does with that in a "before" comparison is the
+  half that was guessed and got it backwards: `track.lastViewedAt<<=-30d` **includes** never-played
+  tracks (9 993 of 10 000 on the library this was measured against), where SQL would say neither
+  true nor false. It is not visible from the request and it is not necessarily the same on every
+  build, so `pick --not-played-since` asks for the never-played half explicitly and server-side —
+  ORed with **`track.viewCount=0`**, which is a field every scanned music section advertises.
+  It used to OR with `track.unplayed`, **which no real music section offers**: the field was in the
+  double's table and nowhere else, so the predicate degraded on every real server while the good
+  path was the one every test took. Where `viewCount` is genuinely absent the date runs alone, and
+  the `unapplied` reason is settled by looking at the rows rather than asserting an answer — the
+  same discipline as `music._verify_grouping`. The previous wording ("tracks it has never played are
+  not included") was false on every real server: the command produced the right answer and explained
+  it wrongly, which is worse, because a caller who believes it adds a compensating query for tracks
+  already in the list.
 - **A tag filter is negated with `!`, and the value should be a list.** `--exclude-live` sends
   `filters={'album.subformat!': ['Compilation', 'Live']}` rather than Plex's own
   `'Compilation,Live'` string, because a list is resolved element by element to the numeric ids Plex
@@ -240,6 +277,23 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
 - **Ratings are stars in both directions.** Plex stores 0–10; `--rated-min` takes 0–5 and every
   rating printed is 0–5, so a value read out of one command can be passed into the next. Breaking
   that symmetry would be a silent trap.
+- **There is no "greater than or equals" for an integer, so "at least N" is "greater than N−1".**
+  A real music section advertises exactly `=`, `!=`, `>>=` and `<<=` for the integer type, and both
+  inequalities are *strict*: `>>=` is "is greater than", `<<=` is "is less than". The `<=` and `>=`
+  under the *string* type are "begins with" and "ends with" — not numeric comparisons, which is how
+  they came to look like the missing pair. `--rated-min N` therefore builds
+  `{libtype}.userRating>>` with `ceil(2N) − 1`, and prints the operator back as `>` because that is
+  what the predicate is. (`ceil` rather than a plain subtraction so a value between the half-stars
+  Plex can store rounds the way the caller meant, and so the URL never carries a fraction.) The
+  server *does* accept `userRating>=8` on the wire and returns the right answer, but it does not
+  advertise it and plexapi validates against what is advertised; do not build on that.
+- **`--rated-min 0` applies no filter, and says so.** Zero is the bottom of the scale, so it
+  constrains nothing. The arithmetic above would make it `userRating > -1`, which quietly means
+  "rated at all" and withholds every unrated item — the overwhelming majority of an ordinary
+  library — behind a flag that reads as "no minimum". "Rated at all" already has an exact spelling,
+  `--rated-min 0.5` (`userRating > 0`), so the vacuous reading is the one kept for the vacuous
+  value. `search` alone with it still exits 2 as `NO_FILTERS`, with the reason its flag did not
+  count.
 - **The exact count comes from a second request with an empty body.**
   `X-Plex-Container-Size: 0` returns the container metadata and no rows. The server-side `limit`
   parameter is deliberately *not* used for the page, because it also caps `totalSize` and would turn
@@ -249,22 +303,31 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   live state — nothing at that rating key, no music library, an ambiguous section — exits 1. A zero
   result from a well-formed search exits **0**: an empty answer is an answer.
 
-### The five `plex://` forms
+### The six `plex://` forms
 
-Five strings are in circulation and they all look like one identifier:
+Six strings are in circulation and they all look like one identifier:
 
 | Form | Produced by | Safe to print as a media id? |
 |---|---|---|
-| `plex://<machineIdentifier>/<ratingKey>` | a media browser | **yes** — the canonical form, and the only one this tool emits |
-| `plex://<ratingKey>` | older integrations | yes, but consumers call it the legacy branch |
-| `plex://{<json>}` | play-queue dispatch | yes, matched before URL parsing |
-| `plex://track/<ratingKey>` | a tool's internal id | **no** — parses as a server named `track` |
-| `plex://track/<24-hex>` | the client library's own `guid` | **no** — raises `ValueError` in a consumer |
+| 1. `plex://<machineIdentifier>/<ratingKey>` | a media browser | **yes** — the canonical form, and the only one this tool emits |
+| 2. `plex://<ratingKey>` | older integrations | yes, but consumers call it the legacy branch |
+| 3. `plex://{<json>}` | play-queue dispatch | yes, matched before URL parsing |
+| 4. `plex://track/<ratingKey>` | a tool's internal id | **no** — parses as a server named `track` |
+| 5. `plex://track/<24-hex>` | the client library's own `guid` | **no** — raises `ValueError` in a consumer |
+| 6. `local://<ratingKey>` | Plex, for an item it never matched | **no** — a guid, and not a durable one |
 
-The last two are the trap: the same shape in two namespaces, one of which is a legitimate Plex
+Forms 4 and 5 are the trap: the same shape in two namespaces, one of which is a legitimate Plex
 identifier handed out under the attribute name `guid`. `ids.media_content_id` builds only the first
 form and refuses anything that is not a decimal rating key; `tests/test_ids.py` sweeps every command
 and asserts none of them ever emits form 4 or 5.
+
+**Form 6 is the one that makes the durability note conditional.** An item Plex never matched to its
+catalogue carries `local://<ratingKey>` — the rating key with a scheme in front of it, so it moves
+exactly when the rating key moves. It is not rare: roughly one track in seven on a real library. The
+note printed beside it used to say "guid is the identifier that survives, so keep them together",
+which is false for exactly those items and is printed at the moment somebody is about to write one
+into a configuration file. `ids.stability_note(guid)` reads the scheme and says which situation the
+caller is in; the double carries a `local://` row so the branch has a fixture rather than a comment.
 
 **Labels are vendor-neutral, and the output stops at the identifier.** The field is `media_id`, not
 the name of any particular consumer: this ships to anyone with a Plex library, and naming one in the
@@ -272,8 +335,46 @@ default output would be wrong for everyone else. There is deliberately no "play 
 and no configuration for one. A template could only ever come from the operator, so printing it back
 tells the caller nothing they did not already know — it was ceremony. The `item:` block is exactly
 four fields — `media_id`, `rating_key`, `guid`, `note` — and `tests/test_ids.py` asserts that list
-verbatim. The README explains in prose what consumes a `media_id`; that belongs in documentation,
-not in output.
+verbatim. Only the *text* of the fourth varies. The README explains in prose what consumes a
+`media_id`; that belongs in documentation, not in output.
+
+**`media_id` is in every default row, and `guid` is not.** A list view that printed `key` alone
+under-delivered on the tool's own premise — it ends at a labelled identifier — and cost the caller
+one detail request per row to finish the job. So `search`, `pick`, `recent`, `similar`,
+`playlist show` and `sessions` all carry `media_id` by default, and `music.rows_for` takes the
+machine identifier as a **required** argument so a new surface cannot forget it. The `guid` stays in
+the detail views: it is the identifier a human writes down rather than the one a consumer takes, and
+form 6 means it is not always even that — doubling every row's width for it is a poor trade.
+
+**A playlist has a `media_id` too, and this was checked rather than assumed.** `playlist list` and
+`playlist show` both print one for the playlist *itself*, beside the `key`, because "play this whole
+playlist" is the case where the container is obviously what is wanted — and without it the caller
+had to assemble `plex://<machineIdentifier>/<key>` by hand, which is precisely the hand-assembly the
+six-forms table exists to prevent.
+
+The claim needed evidence, since form 1 is only correct where the key resolves. Two independent
+checks, both against real things:
+
+- **On a real server, a playlist's rating key is in the `/library/metadata` namespace.**
+  `GET /library/metadata/<playlistRatingKey>` answers `200` with a `<Playlist>` element, and
+  `PlexServer.fetchItem(<playlistRatingKey>)` returns a `Playlist`. That is the same namespace and
+  the same call a track's key takes.
+- **A real consumer resolves the form by exactly that call.** Home Assistant's Plex integration
+  parses `plex://<machineIdentifier>/<ratingKey>` into `plex_key`, calls `fetch_item(key)` →
+  `fetchItem`, and does not type-check or reject the result — a `Playlist` comes back and is used.
+
+So the id is form 1, correctly built, resolving to the playlist. Note that the same consumer also
+offers a *playlist-specific* route keyed on the title (form 3, a JSON payload). **Do not emit that**:
+it is one consumer's schema, and naming one in default output is the vendor-specific coupling this
+tool refuses everywhere else. A playlist's own `guid` — `com.plexapp.agents.none://<uuid>` — is not
+a media id either, and is not printed.
+
+**Advice has to be re-read whenever the output it points away from changes.** Six list views said
+"Run `plex-axi track <key>` for one item's detail and its media id". That was true while a row
+carried only `key`, and became an advertised round trip for a value already on the screen the moment
+rows carried `media_id` — the same defect as advice naming a value the tool never prints, arriving
+by a different route. `tests/test_live_audit.py` sweeps every row-bearing surface asserting no `Run`
+line mentions a media id at all. When a row gains a field, grep the help lines for it.
 
 **`rating_key` is not stable.** It is a row number in one server's database and it moves when an
 item is re-matched or the library is rebuilt. Every command that emits one emits the `guid` beside
@@ -326,11 +427,21 @@ reaching past the seam makes two systems believe they own the same queue.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~400 tests, a couple of seconds
+pytest                                   # ~475 tests, a couple of seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
 ```
+
+**A green suite is not evidence the tool works.** It was green for the whole of 0.2.0, and 0.2.0's
+headline filter did not work against any real Plex server. The suite proves the tool behaves
+correctly *against the double*; whether the double behaves like Plex is a separate question and the
+tests cannot ask it. So a change that touches what the server answers — a filter, an operator, a
+field, an element attribute — is not finished until it has been run against a real server, with the
+commands a user would type. Read-only is enough for almost all of it, and the credentials belong in
+the environment for the length of one shell session and nowhere else. `tests/test_live_audit.py`
+carries one regression per bug the first such audit found; add to it rather than starting another
+file, so the list of "things a real server does that we got wrong" stays in one place.
 
 **Tests never need a live server or a live token, and must not start to.** They run the real client
 library against a Plex double in `tests/conftest.py` that speaks HTTP-shaped XML over a fake
@@ -339,7 +450,7 @@ server-side, that the URL carries the operator Plex actually defines, that a cou
 claims about the request the client library builds, and a double that only agreed with the client
 could not test any of them.
 
-**The double must answer like Plex, not like the client.** Two rules, neither optional:
+**The double must answer like Plex, not like the client.** Three rules, none optional:
 
 - **Model the refusals.** `KNOWN_PARAMS` and `KNOWN_FIELDS` are an explicit allow-list; anything else
   is a `400`. A filter that reached the URL in a spelling Plex does not define — which a permissive
@@ -350,6 +461,60 @@ could not test any of them.
 - **Apply the filters for real.** A request for tracks rated four stars and up returns only those
   tracks, from the double's own predicate code. A double that returned the same rows whatever was
   asked would let a filter that does nothing pass every test.
+- **The double-fidelity rule**, below. It is the third because it is the one that was learned last,
+  and the most expensive.
+
+### The double-fidelity rule: transcribe, never author
+
+**Any table describing what the *server* answers must be transcribed from a real capture. Everything
+the tool *asks* may be invented; nothing the server *answers* may be.**
+
+That covers operator tables, advertised field and filter lists, sort keys, the attributes on an XML
+element, and the *shape* a value arrives in. It does not cover library content, which is invented on
+purpose and must stay that way — this repository is public. Transcribe shapes, never content.
+
+The rule is not a principle somebody liked. The first release was built entirely against this double
+and shipped fourteen bugs, and the two worst were single wrong lines in tables nobody had checked
+against a server:
+
+- `_INT_OPS` carried `<=` ("is less than or equals") and `>=` ("is greater than or equals").
+  **Real Plex defines neither, for any type.** A music section advertises exactly `=`, `!=`, `>>=`
+  and `<<=` for an integer, and both inequalities are strict. `--rated-min` was built on the invented
+  one, so the tool's headline numeric filter failed at *every value on every real server* while
+  passing every test here. The other four operator tables were right, which is what makes the case
+  worth remembering: one guessed line among five correct ones is invisible.
+- `<Player>` carried a `title` attribute. A real one carries `address`, `device`, `machineIdentifier`,
+  `platform`, `product`, `profile`, `state` and `version`, and **no `title`** — so `sessions` read an
+  attribute that is never there and the column naming where the music is playing was empty on every
+  real session and full on every test.
+
+Two more were the same rule in a softer form — the double modelled the *tidy* value where real Plex
+is messy. A never-played `lastViewedAt` was modelled as not matching a "before" comparison, where a
+real server matches it; a playlist's declared `leafCount` was kept in agreement with its contents,
+where a real one drifts (0 declared against 81 actual, and off by one even on a static playlist).
+Both are now modelled as they are, not as they ought to be.
+
+**How to obey it.** Capture the metadata from a real server and copy the values across:
+
+```sh
+curl -s -H "X-Plex-Token: $PLEX_TOKEN" -H 'X-Plex-Container-Size: 0' \
+  "$PLEX_URL/library/sections/<key>/all?type=10&includeMeta=1"
+```
+
+The `<Meta>` element carries every `<Type>`, `<Filter>`, `<Sort>`, `<Field>` and `<FieldType>` the
+section offers; `section.fieldTypes()` and `section.listFields(<libtype>)` read the same thing
+through the client library, which is also what plexapi validates against. Any element the tool reads
+(`<Player>`, `<Part>`, `<Playlist>`) should have its attribute list read off a real response rather
+than recalled. A committed redacted capture would be the strongest form of this and is worth doing
+if the tables grow; either way the standard is the same — if you cannot point at where a value came
+from, it is authored, and it is a bug waiting for a user to find.
+
+Note also that **real Plex is more permissive than this double, not less**, and deliberately so
+here: it silently ignores an unknown *filter field* and returns the unfiltered set, so the production
+failure mode is a plausible whole-library answer rather than an error. The double's `400` is what
+stops a misspelled field ever shipping, and `music.advertised_fields` is what stops one being sent —
+treat that function as load-bearing rather than defensive. (An unknown *operator* is refused on the
+wire, with a 500; the permissiveness is field-name-shaped, not universal.)
 
 The double also models both answers to the open question about grouping (`FakePlex(groupable=…)`):
 a server that collapses repeated titles and one that accepts the parameter and ignores it. Which one

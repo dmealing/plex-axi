@@ -14,8 +14,8 @@ grouped: title
 filters[2]{field,operator,value}:
   artist.title,contains,Example Artist
   track.title,contains,Example Track
-tracks[1]{key,title,artist,album}:
-  111,Example Track,Example Artist,Example Album
+tracks[1]{key,media_id,title,artist,album}:
+  111,"plex://<machineIdentifier>/111",Example Track,Example Artist,Example Album
 item:
   media_id: "plex://<machineIdentifier>/111"
   rating_key: 111
@@ -129,8 +129,18 @@ itself in one turn.
   `plex-axi genres` prints the exact strings the server will accept; pass one of those, not a synonym.
 - **A zero result is an answer.** It names the filters that matched nothing and the command that
   lists the real vocabulary.
+- **Every row carries a `media_id`.** That is what the tool is for: a labelled identifier a media
+  consumer accepts, on every row of every list, so nothing needs a follow-up call to be usable.
+- **`--fields` replaces the default columns**, it does not add to them. The default set is a
+  suggestion and may grow a column when the data warrants one (`track_artist` on a compilation), so
+  name the columns if you need a fixed schema.
+- **`--rated-min` is a minimum in stars, and `0` is not a filter.** Zero is the bottom of the scale
+  and narrows nothing; `--rated-min 0.5` is what asks for everything that carries a rating at all.
 - **`rating_key` is local to one server and moves** when an item is re-matched or the library is
-  rebuilt. Keep the `guid` beside it anywhere the value is written down.
+  rebuilt. Keep the `guid` beside it anywhere the value is written down — **unless** the guid reads
+  `local://<rating_key>`, which is what Plex gives an item it never matched to its catalogue. That
+  one is the rating key with a scheme in front of it, so it moves with it; the detail view says so
+  rather than promising otherwise, and there is nothing durable to write down for those items.
 - **A mutating command without `--write` is a useful command, not a nag.** It prints exactly what
   would change and sends nothing, which is how to check a playlist edit before making it — and how a
   smart playlist is caught before the server would refuse it.
@@ -188,12 +198,23 @@ the server it lives on. That combination is what a media player needs to fetch i
 separately which Plex server you meant, and it is the form most Plex clients and integrations accept
 as a media content id.
 
-It matters that it is *that* form. Five `plex://` strings circulate and they all look alike. Two of
+It matters that it is *that* form. Six `plex://` strings circulate and they all look alike. Two of
 them break a consumer: `plex://track/<ratingKey>` parses the word `track` as a server name and
 resolves to a server that does not exist, and `plex://track/<24-hex>` — which is a perfectly
 legitimate Plex identifier, the one printed here as `guid` — raises an error inside consumers that
 expect a number in that position. `plex-axi` emits only the safe form, and a test sweeps every
 command asserting it never emits the other two.
+
+**Every row of every list carries a `media_id` too**, not just the single-item block above. A list
+view that printed a bare `key` would end one call short of the thing the tool exists to produce.
+The `guid` is not in the default row: it is the identifier you write down rather than the one a
+consumer takes, and it is available by name (`--fields key,title,guid`) and in the detail views.
+
+**A playlist has one as well.** `plex-axi playlist list` and `plex-axi playlist show` print a
+`media_id` for the playlist itself, so playing a whole playlist needs no more assembly than playing
+one track does. A playlist's rating key lives in the same `/library/metadata` namespace, so the same
+`plex://<machineIdentifier>/<ratingKey>` form resolves to the playlist — verified on a real server
+and against a real consumer, not assumed.
 
 `plex-axi` does not dispatch it anywhere. Handing it to something that plays is a single call in
 whatever already owns your speakers. In Home Assistant, for example, the `media_player.play_media`
@@ -214,8 +235,14 @@ where you are.
 
 **Keep the `guid` with the `rating_key` wherever you write one down.** A rating key is a row number
 in one server's database. It changes when an item is re-matched or the library is rebuilt, and the
-same number will then resolve to a different recording — silently. The `guid` is the identifier that
-survives, which is why both are printed together and why the note travels with them.
+same number will then resolve to a different recording — silently. The `guid` is usually the
+identifier that survives, which is why both are printed together and why the note travels with them.
+
+**"Usually", because of one shape.** An item Plex never matched to its catalogue carries
+`local://<rating_key>` — the rating key with a scheme in front of it — and that is common enough to
+matter, roughly one track in seven on a real library. Such a guid moves exactly when the rating key
+moves, so there is nothing durable to record for those items and the note says that instead of
+promising the opposite. Match them by artist and title if you need them to survive a rebuild.
 
 ## Agent integration
 
