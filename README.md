@@ -1,11 +1,31 @@
 # plex-axi
 
-An Agent eXperience Interface (AXI) CLI for a Plex music library.
+[![PyPI](https://img.shields.io/pypi/v/plex-axi.svg)](https://pypi.org/project/plex-axi/)
+[![Python versions](https://img.shields.io/pypi/pyversions/plex-axi.svg)](https://pypi.org/project/plex-axi/)
+[![Licence: MIT](https://img.shields.io/pypi/l/plex-axi.svg)](LICENSE)
 
-**Structured, per-field music search.** Every published Plex CLI, MCP server and LLM wrapper takes a
-single free-text `query` string and hands it to the server as one blob — which is why searching for
-an artist *and* a song title reliably returns nothing. `plex-axi` gives each value its own flag and
-each flag its own Plex field, and lets Plex evaluate the whole predicate server-side.
+**Search a Plex music library field by field, from a command line built for agents.** Every value
+gets its own flag — artist, track, genre, mood, year, minimum rating — and Plex evaluates the whole
+predicate server-side. Every answer ends at a labelled `media_id`, the identifier you hand to
+whatever plays music where you are.
+
+**It never plays anything.** There is no play command and no concept of a speaker, room, player or
+client, and there will not be one: dispatch belongs to the system that already owns your speakers,
+and this tool stops at the identifier. That boundary is enforced by a test, not a missing feature.
+
+It is an [AXI](https://axi.md) tool — an *Agent eXperience Interface*, a convention for command
+lines whose primary user is an LLM agent rather than a person. In practice that means
+token-efficient structured output ([TOON](https://toonformat.dev/) rather than JSON), no interactive
+prompts, a non-zero exit on every failure, and errors that carry the command which fixes them. It
+reads perfectly well in a terminal — `--human` prints aligned tables — it is simply not optimised
+for one.
+
+## Why per-field search
+
+Every published Plex CLI, MCP server and LLM wrapper takes a single free-text `query` string and
+hands it to the server as one blob — which is why searching for an artist *and* a song title
+reliably returns nothing. `plex-axi` gives each value its own flag and each flag its own Plex field,
+and lets Plex evaluate the whole predicate server-side.
 
 ```sh
 $ plex-axi search --artist "Example Artist" --track "Example Track"
@@ -28,10 +48,9 @@ mood and style vocabularies; sonic similarity with the server's own `distance`; 
 version behind an empty "more like this"; and, behind a flag, whether the server can actually read
 the file.
 
-**It deliberately does not play anything.** There is no play command and no concept of a speaker,
-room, player or client. Every command ends at a labelled `media_id`, and dispatch belongs to
-whatever owns the speakers where you are. That is a decision enforced by a test, not a missing
-feature — see [AGENTS.md](AGENTS.md).
+**What it hands back is an identifier, and that is the end of it.** What a `media_id` is and what
+accepts one is [below](#what-media_id-is-and-what-consumes-it); why the tool refuses the step after
+it, and the test that holds the line, are in [AGENTS.md](AGENTS.md).
 
 **Two commands can change your library, and neither runs by accident.** `rate` sets the rating that
 `--rated-min` reads, and `playlist` edits an audio playlist. Both are refused unless the operator
@@ -112,13 +131,36 @@ that needs a round-trip to **plex.tv**, because the mapping from a username to t
 this server exists nowhere else. Everything else keeps working with plex.tv down, and a failure here
 says which of the two happened rather than arriving as an unexplained 401.
 
-### Output
+## Output format
 
-TOON on stdout, exit non-zero on failure. `--human` for a readable table, `--json` for raw JSON.
-Errors are structured on stdout too and carry the command that fixes them, so a wrong flag corrects
-itself in one turn.
+Structured [TOON](https://toonformat.dev/) on stdout by default — Token-Oriented Object Notation, a
+compact encoding of the same data JSON would carry, roughly 40% cheaper in tokens. A header names
+the columns once and each row is one line:
 
-### Rules of thumb
+```
+count: 2 of 47 total
+tracks[2]{key,media_id,title,artist,album}:
+  111,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/111",Example Track,Example Artist,Example Album
+  112,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/112",Second Example,Example Artist,Example Album
+```
+
+- `--human` renders aligned tables for a person.
+- `--json` emits raw JSON, for anything that would rather parse than read.
+- **Errors go to stdout too**, in the same structured shape, and carry the command that fixes them,
+  so a wrong flag corrects itself in one turn. stderr carries only diagnostics (`--debug`), which
+  agents do not read.
+- Exit codes: `0` success — **including a search that matched nothing**, because an empty answer is
+  an answer; `1` the outcome of a lookup against live state (nothing at that rating key, no music
+  library on the server, an ambiguous section); `2` a usage error (unknown command, unknown flag, a
+  rating key that is not a number, a write method on `api`).
+- Unknown flags and extra arguments are **rejected by name** rather than ignored, with that
+  subcommand's valid flags listed inline so the correction takes one turn, not two.
+
+One documented deviation: `help[N]:` blocks render one suggestion per line rather than as a
+delimiter-joined TOON array. Suggestions are command lines that routinely contain commas, and this
+is the shape the AXI standard and the sibling AXI CLIs use. Every **data** structure is strict TOON.
+
+## Rules of thumb
 
 - **Use a flag per field.** `--artist X --track Y` searches two Plex fields; `--query "X Y"` searches
   one string. `--query` exists for the case where there genuinely is only one unstructured string,
@@ -246,7 +288,8 @@ promising the opposite. Match them by artist and title if you need them to survi
 
 ## Agent integration
 
-Install the skill so an agent loads the guidance on demand:
+Install the [Agent Skill](https://agentskills.io) so an agent loads the guidance on demand,
+without paying for it in every session:
 
 ```sh
 npx skills add dmealing/plex-axi --skill plex-axi
@@ -281,6 +324,11 @@ detect a real artist name, which has no shape. Use obviously-synthetic content e
 tests and fixtures.
 
 Tests never need a live Plex server or a real token, and must not start to.
+
+## Changelog
+
+Every release is recorded in [CHANGELOG.md](CHANGELOG.md), generated from Conventional Commit
+messages by release-please.
 
 ## Licence
 
