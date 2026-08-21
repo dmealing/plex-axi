@@ -38,6 +38,16 @@ from .output import register_secret
 #: access token each of them uses against *this* machine. One GET, admin-only.
 SHARED_SERVERS = "https://plex.tv/api/servers/{machine}/shared_servers"
 
+#: Who plex.tv thinks this token belongs to. Asked **only** when the sharing
+#: record has already refused, and asked because plex.tv answers 401 to two very
+#: different failures: a token that belongs to a lesser account, and a token it
+#: never issued at all. The second is not exotic -- a server that permits
+#: unauthenticated access on the local network hands out tokens that work
+#: perfectly against the server and are refused by the cloud -- and conflating
+#: them tells that operator to go and find the owner's account when their token
+#: was never a plex.tv token in the first place.
+WHO_AM_I = "https://plex.tv/api/v2/user"
+
 #: Where the round-trip goes, named in every failure so the cause is never a
 #: mystery when the local server is plainly answering.
 PLEX_TV = "plex.tv"
@@ -137,15 +147,7 @@ def _shared_servers(config, machine_identifier: str) -> list:
 
     status = getattr(response, "status_code", 0)
     if status in (401, 403):
-        raise AuthFailed(
-            f"{PLEX_TV} refused to list this server's shared users",
-            help_lines=[
-                "`--user` is admin-only: only the account that owns the server can read the "
-                "per-user tokens, and PLEX_TOKEN is not that account's",
-                "Run the command without `--user` to read as the account PLEX_TOKEN belongs to",
-            ],
-            code="NOT_SERVER_OWNER",
-        )
+        raise _refusal(config, headers)
     if status != 200:
         # The body is a plex.tv error document and may carry account details, so
         # only the status reaches the caller.
@@ -159,6 +161,53 @@ def _shared_servers(config, machine_identifier: str) -> list:
         )
 
     return _parse(getattr(response, "text", "") or "")
+
+
+def _refusal(config, headers: dict) -> AuthFailed:
+    """Which of the two 401s this was, settled by asking plex.tv one more thing.
+
+    "You are not the owner" and "plex.tv does not accept this token at all" are
+    the same status code with the same body shape, and they have opposite
+    recoveries: the first says use the owner's token, the second says this token
+    is not an account token and no plex.tv call will work with it. Reporting the
+    second as the first sends an operator hunting through sharing settings for a
+    problem that is not there.
+
+    One extra request, on the failure path only.
+    """
+    from .plex import build_session
+
+    try:
+        response = build_session().get(WHO_AM_I, headers=headers, timeout=config.timeout)
+        known = getattr(response, "status_code", 0) == 200
+    except requests.exceptions.RequestException:
+        # plex.tv answered the first call and not the second. Nothing has been
+        # learned, so nothing is claimed: fall back to the older diagnosis.
+        known = True
+
+    if known:
+        return AuthFailed(
+            f"{PLEX_TV} refused to list this server's shared users",
+            help_lines=[
+                "`--user` is admin-only: only the account that owns the server can read the "
+                "per-user tokens, and PLEX_TOKEN is a valid account but not that one",
+                "Run the command without `--user` to read as the account PLEX_TOKEN belongs to",
+            ],
+            code="NOT_SERVER_OWNER",
+        )
+    return AuthFailed(
+        f"{PLEX_TV} does not recognise PLEX_TOKEN as an account token",
+        help_lines=[
+            "This is not about ownership: plex.tv refuses this token outright, so no "
+            "`--user` lookup can succeed with it -- every other command still works, "
+            "because they only ever talk to the server",
+            "A server that allows unauthenticated access on the local network issues tokens "
+            "like this; `--user` needs a token minted by signing in to plex.tv",
+            "Run the command without `--user` to read as whatever account the server "
+            "associates with this token",
+        ],
+        code="PLEX_TV_TOKEN_REJECTED",
+    )
 
 
 def _unreachable(config, exc: Exception) -> ConnectionFailed:

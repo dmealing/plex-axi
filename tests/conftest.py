@@ -22,8 +22,19 @@ sibling AXI project:
   that returned the same rows whatever was asked would let a filter that does
   nothing pass every test.
 
+There is a third rule, and it was paid for by a live audit rather than learned
+from a sibling project:
+
+* **Anything describing what the server *answers* is transcribed, never
+  authored.** Operator tables, field lists, element attributes, the shape of a
+  value: these are copied from a real ``?includeMeta=1`` capture and from real
+  responses. Everything the tool *asks* may be invented; nothing the server
+  *answers* may be. Two of the worst bugs this suite ever missed were a guessed
+  operator and a guessed attribute, and both passed every test here while
+  failing on every real server. See AGENTS.md, "The double-fidelity rule".
+
 Every name, path and identifier in the fixture is invented. Nothing here came
-from a real library.
+from a real library: the *shapes* are transcribed, the *content* never is.
 """
 
 from __future__ import annotations
@@ -230,8 +241,16 @@ TRACKS = [
         "exists": 1,
     },
     {
+        # Locally matched: Plex never found this one in its catalogue, so its
+        # guid is `local://<ratingKey>` -- the rating key with a scheme in front
+        # of it, which is form 6 in AGENTS.md and is *not* durable. Roughly one
+        # track in seven carries this shape on a real library, and the double
+        # emitted none until it printed a durability note that was false for
+        # them. It is the unanalysed track too, which is not a coincidence: an
+        # item Plex could not match is an item Plex did not analyse.
         "key": 122,
         "title": "Anthology Only",
+        "guid": "local://122",
         "album": 120,
         "index": 6,
         "userRating": 10.0,
@@ -324,11 +343,18 @@ PLAYLISTS = [
         "updatedAt": 1700000100,
     },
     {
+        # `leafCount` is what the server *declares*, and on a smart playlist it
+        # is a cached figure that drifts from what the saved search currently
+        # returns -- observed on a real server as a declared 0 against 81 actual
+        # items, and off by one even on a static playlist. The double kept the
+        # two in agreement until `playlist list` and `playlist show` were caught
+        # contradicting each other in the field.
         "id": 502,
         "title": "Example Smart Playlist",
         "type": "audio",
         "smart": 1,
         "items": [111, 211],
+        "leafCount": 5,
         "updatedAt": 1700000200,
     },
     {
@@ -359,7 +385,19 @@ NEIGHBOURS = {
     121: [(111, 0.0100)],
 }
 
-SESSIONS = [{"track": 111, "device": "Example Player", "state": "playing"}]
+#: One active session, shaped like a real one. `device`, `product` and
+#: `platform` are three different strings on a real player and none of them is
+#: `title`, which a real `<Player>` does not carry at all -- so a fixture where
+#: they agreed would hide which of them `sessions` actually reads.
+SESSIONS = [
+    {
+        "track": 111,
+        "device": "Example Speaker",
+        "product": "Plex for Example",
+        "platform": "ExampleOS",
+        "state": "playing",
+    }
+]
 
 SEARCH_TYPES = {"8": "artist", "9": "album", "10": "track"}
 
@@ -448,7 +486,9 @@ KNOWN_FIELDS = {
     "album.addedAt",
     "track.addedAt",
     "track.lastViewedAt",
-    "track.unplayed",
+    "track.viewCount",
+    "track.skipCount",
+    "track.trash",
     "album.subformat",
 }
 
@@ -578,13 +618,24 @@ def track_xml(row, tables, *, check_files=False, distance=None, session=None, it
         # library reads it without guarding -- a session without one raises an
         # AttributeError rather than parsing to something empty. The double
         # models that, so the tool is exercised against the shape it will meet.
+        #
+        # TRANSCRIBED: the `<Player>` attributes are the ones a real
+        # `/status/sessions` sends, and the absence of `title` is the load-
+        # bearing half. This element once carried an invented `title=`, and
+        # `sessions` read it -- so the column naming *where the music is
+        # playing* was empty on every real session and full on every test.
         player = "<User {}/><Player {}/>".format(
             _attrs([("id", 1), ("title", "example-user")]),
             _attrs(
                 [
-                    ("title", session["device"]),
-                    ("state", session["state"]),
+                    ("address", "198.51.100.7"),
+                    ("device", session["device"]),
                     ("machineIdentifier", "example-device-0001"),
+                    ("platform", session["platform"]),
+                    ("product", session["product"]),
+                    ("profile", "Generic"),
+                    ("state", session["state"]),
+                    ("version", "3.0.0"),
                 ]
             ),
         )
@@ -592,7 +643,12 @@ def track_xml(row, tables, *, check_files=False, distance=None, session=None, it
         [
             ("ratingKey", row["key"]),
             ("key", "/library/metadata/{}".format(row["key"])),
-            ("guid", "plex://track/a1b2c3d4e5f60718293c{:04d}".format(row["key"])),
+            # An explicit guid wins, which is how a `local://` row is modelled;
+            # the catalogue form is the default because most tracks carry it.
+            (
+                "guid",
+                row.get("guid") or "plex://track/a1b2c3d4e5f60718293c{:04d}".format(row["key"]),
+            ),
             ("type", "track"),
             ("title", row["title"]),
             ("titleSort", row["title"]),
@@ -666,7 +722,8 @@ def playlist_xml(row, tables):
             ("playlistType", row["type"]),
             ("composite", "/playlist/{}/composite/1".format(row["id"])),
             ("duration", duration or None),
-            ("leafCount", len(row["items"])),
+            # The declared count, which is not always the real one.
+            ("leafCount", row.get("leafCount", len(row["items"]))),
             ("addedAt", 1700000000),
             ("updatedAt", row["updatedAt"]),
         ]
@@ -675,22 +732,37 @@ def playlist_xml(row, tables):
 
 
 # -------------------------------------------------------------- filter metadata
+#
+# TRANSCRIBED, NOT AUTHORED. Every table below is copied from a real
+# `/library/sections/<key>/all?includeMeta=1` response (Plex Media Server
+# 1.42.2). Nothing here may be invented, extended or "obviously" completed:
+# these tables say what the *server* offers, and a guess in one of them builds
+# the tool against a Plex that does not exist. See AGENTS.md, "The
+# double-fidelity rule".
+#
+# The cost of ignoring that is on the record. `_INT_OPS` once carried `<=`
+# ("is less than or equals") and `>=` ("is greater than or equals"), which real
+# Plex does not define for any type, and `--rated-min` was built on one of them.
+# It failed at every value against every real server and passed every test here.
 
 _STRING_OPS = [
     ("=", "contains"),
     ("!=", "does not contain"),
     ("==", "is"),
     ("!==", "is not"),
+    # Plex's "begins with"/"ends with". They are *not* numeric comparisons, and
+    # reading them as such is how the invented integer operators got here.
     ("<=", "begins with"),
     (">=", "ends with"),
 ]
+#: Real Plex offers no "greater than or equal" for an integer at all: `>>=` is
+#: strictly greater and `<<=` is strictly less. "At least N" is therefore
+#: `>>= N-1`, which is what `music.rating_predicate` builds.
 _INT_OPS = [
     ("=", "is"),
     ("!=", "is not"),
     (">>=", "is greater than"),
     ("<<=", "is less than"),
-    ("<=", "is less than or equals"),
-    (">=", "is greater than or equals"),
 ]
 _TAG_OPS = [("=", "is"), ("!=", "is not")]
 _DATE_OPS = [("<<=", "is before"), (">>=", "is after")]
@@ -716,12 +788,19 @@ SECTION_FIELDS = {
         ("album.addedAt", "Date Added", "date"),
     ],
     "track": [
-        ("track.title", "Title", "string"),
-        ("track.mood", "Mood", "tag"),
-        ("track.userRating", "Rating", "integer"),
-        ("track.addedAt", "Date Added", "date"),
-        ("track.lastViewedAt", "Last Played", "date"),
-        ("track.unplayed", "Unplayed", "boolean"),
+        ("track.title", "Track Title", "string"),
+        ("track.mood", "Track Mood", "tag"),
+        ("track.userRating", "Track Rating", "integer"),
+        ("track.addedAt", "Track Added At", "date"),
+        ("track.lastViewedAt", "Track Last Played", "date"),
+        # The never-played half of `--not-played-since`. It is `viewCount`
+        # rather than an `unplayed` boolean because a real music section
+        # advertises no such boolean: `track.unplayed` was in this table once,
+        # nothing on the wire ever accepted it, and `pick` degraded on every
+        # real server while passing here.
+        ("track.viewCount", "Track Plays", "integer"),
+        ("track.skipCount", "Track Skips", "integer"),
+        ("track.trash", "Trash", "boolean"),
     ],
 }
 
@@ -734,8 +813,17 @@ SPARTAN_FIELDS = {
     "artist": SECTION_FIELDS["artist"],
     "album": [f for f in SECTION_FIELDS["album"] if not f[0].endswith("subformat")],
     "track": [
-        f for f in SECTION_FIELDS["track"] if not f[0].endswith(("lastViewedAt", "unplayed"))
+        f for f in SECTION_FIELDS["track"] if not f[0].endswith(("lastViewedAt", "viewCount"))
     ],
+}
+
+#: A server that advertises the date but not the play count, which is the one
+#: `--not-played-since` degradation that still returns an answer: the period
+#: runs and the never-played half cannot be ORed in.
+DATE_ONLY_FIELDS = {
+    "artist": SECTION_FIELDS["artist"],
+    "album": SECTION_FIELDS["album"],
+    "track": [f for f in SECTION_FIELDS["track"] if not f[0].endswith("viewCount")],
 }
 
 #: The tag filters each libtype offers, as ``filter`` name to choices endpoint.
@@ -853,13 +941,19 @@ def _value_for(field, kind, row, tables):
     if name == "addedAt":
         return source.get("addedAt")
     if name == "lastViewedAt":
-        # A track Plex has never played carries no lastViewedAt at all -- the
-        # column is null, not zero -- so a "played before X" predicate does not
-        # match it. That is why `pick` ORs in `unplayed`, and modelling the
-        # attribute as absent is what makes the OR testable.
-        return source.get("lastViewedAt") or None
-    if name == "unplayed":
-        return 0 if source.get("viewCount") else 1
+        # A track Plex has never played carries no lastViewedAt at all: the
+        # column is null, not zero. What Plex *does* with that null in a "before
+        # X" comparison is the part the double got wrong -- it modelled the null
+        # as not matching, and on a real server it matches. Both halves are
+        # modelled now: the attribute is absent from the XML, and `_matches`
+        # treats the absence the way the server does.
+        return source.get("lastViewedAt") or _NEVER_PLAYED
+    if name == "viewCount":
+        return source.get("viewCount") or 0
+    if name == "skipCount":
+        return source.get("skipCount") or 0
+    if name == "trash":
+        return 0
     if name == "genre":
         return source.get("genres", [])
     if name == "style":
@@ -870,6 +964,11 @@ def _value_for(field, kind, row, tables):
         return source.get("subformat", [])
     raise PlexRefusal(400, f"unknown field {field} in this container")
 
+
+#: A date column the server holds as null, which is what a never-played track's
+#: `lastViewedAt` is. Distinct from ``None`` because ``None`` here means "this
+#: field does not apply to this row", and the two compare differently.
+_NEVER_PLAYED = object()
 
 #: Seconds in each unit Plex's relative dates use. `mon` is deliberately not `m`:
 #: minutes are `m`, and getting that pair the wrong way round is a filter that
@@ -906,6 +1005,16 @@ def _matches_date(operator, wanted, value) -> bool:
 
 def _matches(field, operator, wanted, kind, row, tables):
     value = _value_for(field, kind, row, tables)
+    if value is _NEVER_PLAYED:
+        # Measured, not reasoned about: on a real server a null date matches a
+        # "before" comparison and not an "after" one -- 9 993 of 10 000
+        # never-played tracks came back from `track.lastViewedAt<<=-30d`. SQL
+        # would say neither, which is exactly why this had to be transcribed
+        # rather than derived. `pick --not-played-since` was built on the
+        # opposite assumption and described its own result wrongly as a result.
+        # It holds for an absolute threshold as well as a relative one: there is
+        # no date the column is not before.
+        return operator in ("<<", "<")
     if value is None:
         return False
     if isinstance(value, list):
@@ -963,8 +1072,10 @@ class FakePlex:
         spartan=False,
         shared_users=None,
         plex_tv_status=200,
+        plex_tv_account=True,
         plex_tv_unreachable=False,
         refuse_user_token=False,
+        fields=None,
     ):
         self.groupable = groupable
         self.token = token
@@ -974,7 +1085,7 @@ class FakePlex:
         #: `pick` would like to use. It is not a hypothetical: filter metadata is
         #: per-library and moves with the Plex version, and the tool's contract
         #: is to degrade with an explanation rather than fail.
-        self.fields = SPARTAN_FIELDS if spartan else SECTION_FIELDS
+        self.fields = fields or (SPARTAN_FIELDS if spartan else SECTION_FIELDS)
         self.filters = SPARTAN_FILTERS if spartan else SECTION_FILTERS
         self.sorts = SPARTAN_SORTS if spartan else SECTION_SORTS
         self.playlists = copy.deepcopy(PLAYLISTS)
@@ -990,6 +1101,10 @@ class FakePlex:
         self.ratings = {}
         self.shared_users = SHARED_USERS if shared_users is None else shared_users
         self.plex_tv_status = plex_tv_status
+        #: Whether plex.tv recognises this token as an account token at all.
+        #: False models the token that works against the server and is refused
+        #: by the cloud -- which is what a local-only server token is.
+        self.plex_tv_account = plex_tv_account
         self.plex_tv_unreachable = plex_tv_unreachable
         #: A server that no longer accepts the per-user token even though
         #: plex.tv still lists it -- revoked, or a short-lived token that aged
@@ -1460,13 +1575,31 @@ class FakePlex:
     # -- plex.tv ---------------------------------------------------------
 
     def _plex_tv(self, path, headers, method):
-        """The one cloud call this tool makes, and only the owner may make it."""
+        """The cloud calls this tool makes, and only the owner may make the first.
+
+        Two endpoints rather than one, because plex.tv answers **401 to both**
+        halves of a failure that has two very different causes. A token that
+        belongs to a lesser account is refused by ``shared_servers`` and
+        accepted by ``user``; a token plex.tv never issued -- a local-only
+        server token, say, which works perfectly against the server itself -- is
+        refused by both. Told apart, the recovery is different; conflated, the
+        tool tells a user to change accounts when their token was never a
+        plex.tv token at all.
+        """
         if method != "GET":
             raise PlexRefusal(405, f"{method} is not defined here")
+        if path == "/api/v2/user":
+            if headers.get("X-Plex-Token") != self.token or not self.plex_tv_account:
+                raise PlexRefusal(
+                    401,
+                    '<errors><error code="1001" message="User could not be authenticated"/>'
+                    "</errors>",
+                )
+            return '<user id="1" username="example-owner"/>'
         if path != f"/api/servers/{MACHINE_ID}/shared_servers":
             raise PlexRefusal(404, "not found")
         if headers.get("X-Plex-Token") != self.token or self.plex_tv_status == 401:
-            raise PlexRefusal(401, '<Response status="Unauthorized"/>')
+            raise PlexRefusal(401, "<errors><error>Invalid authentication token.</error></errors>")
         if self.plex_tv_status != 200:
             raise PlexRefusal(self.plex_tv_status, '<Response status="Refused"/>')
         body = "".join(
@@ -1653,6 +1786,22 @@ def spartan_server(monkeypatch):
     from plex_axi import plex
 
     fake = FakePlex(spartan=True)
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
+    return fake
+
+
+@pytest.fixture
+def date_only_server(monkeypatch):
+    """A server offering `track.lastViewedAt` but not `track.viewCount`.
+
+    The one `--not-played-since` degradation that still answers: the period
+    runs and the never-played half cannot be ORed in. It needs its own server
+    because the note `pick` prints there is a claim about the result, and a
+    claim nothing runs against is a claim nobody checked.
+    """
+    from plex_axi import plex
+
+    fake = FakePlex(fields=DATE_ONLY_FIELDS)
     monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
     return fake
 

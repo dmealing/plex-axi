@@ -21,6 +21,7 @@ other command prints, so an agent does not have to parse two formats.
 
 from __future__ import annotations
 
+from .. import output
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
 from ..output import HelpBlock
@@ -65,6 +66,7 @@ COMMAND = Command(
         "through a typed command that can validate and preview it, and several Plex write "
         "endpoints are destructive",
         "the token is sent as a header and never appears in the path this prints",
+        "paths are absolute: `library/sections` is refused, `/library/sections` is the path",
     ),
     examples=(
         "plex-axi api /",
@@ -86,6 +88,7 @@ def run(ctx, name: str, sub: str, parsed):
     _reject_token_in_query(query)
 
     server = ctx.server()
+    output.debug(f"{method} {path} query={query or '(none)'}")
     try:
         data = server.query(path, params=query or None)
     except Exception as exc:
@@ -167,6 +170,28 @@ def _reject_token_in_query(query: dict) -> None:
             )
 
 
+def _absolute(path: str) -> str:
+    """Every Plex API path is absolute, and a relative one is the caller's typo.
+
+    It must not be reported as the server's problem. `requests` resolves
+    `library/sections` against the base URL's *directory*, so the server never
+    sees the path that was typed and the failure arrived as "the server stopped
+    answering while reading the path library/sections" with exit 1 -- a sentence
+    about the network, and a lookup exit code, for a missing character in an
+    argument.
+    """
+    if path.startswith("/"):
+        return path
+    raise UsageError(
+        f"a Plex API path begins with a slash, got {path!r}",
+        help_lines=[
+            f"Run `plex-axi api /{path.lstrip('/')}`",
+            "Run `plex-axi api /` to see what this server answers at the root",
+        ],
+        code="RELATIVE_PATH",
+    )
+
+
 def _method_and_path(positionals: list):
     values = [value for value in positionals if value is not None]
     if not values:
@@ -199,11 +224,11 @@ def _method_and_path(positionals: list):
                 help_lines=[f"Run `plex-axi api {head} /library/sections`"],
                 code="MISSING_PATH",
             )
-        return head, values[1]
+        return head, _absolute(values[1])
     if len(values) > 1:
         raise UsageError(
             f"unexpected argument {values[1]!r}",
             help_lines=[f"methods must come first: `plex-axi api GET {values[0]}`"],
             code="UNEXPECTED_ARGUMENT",
         )
-    return "GET", values[0]
+    return "GET", _absolute(values[0])

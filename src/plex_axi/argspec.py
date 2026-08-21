@@ -280,20 +280,30 @@ def _invocation(command: Command, sub: Sub) -> str:
     return f"plex-axi {_label(command, sub)}"
 
 
+def _usage(command: Command, sub: Sub) -> str:
+    """The runnable form of one subcommand, with no trailing space.
+
+    A subcommand that takes no positional arguments used to render as
+    ``Run `plex-axi playlist list ` `` -- a command line with a space inside the
+    backticks, which reads as an argument the author forgot to name.
+    """
+    return " ".join([_invocation(command, sub), *sub.args]).rstrip()
+
+
 def _check_positionals(sub: Sub, command: Command, values: list) -> None:
     required = [a for a in sub.args if a.startswith("<")]
     if len(values) < len(required):
         missing = required[len(values)]
         raise UsageError(
             f"{_invocation(command, sub)} needs {missing}",
-            help_lines=[f"Run `{_invocation(command, sub)} {' '.join(sub.args)}`"],
+            help_lines=[f"Run `{_usage(command, sub)}`"],
             code="MISSING_ARGUMENT",
         )
     if len(values) > len(sub.args):
         extra = values[len(sub.args)]
         raise UsageError(
             f"unexpected argument {extra!r} for `{_label(command, sub)}`",
-            help_lines=[f"Run `{_invocation(command, sub)} {' '.join(sub.args)}`"],
+            help_lines=[f"Run `{_usage(command, sub)}`"],
             code="UNEXPECTED_ARGUMENT",
         )
 

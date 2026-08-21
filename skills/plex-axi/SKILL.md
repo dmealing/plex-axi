@@ -67,9 +67,9 @@ plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,r
 
 - each flag is searched on its own Plex field; that is the whole point of this tool
 - ratings are stars (0-5) in and out, so a rating in a result can be passed to --rated-min
-- track fields: key, title, artist, track_artist, album, year, rating, duration, plays, skips, index, guid
-- album fields: key, title, artist, year, rating, tracks, added, guid
-- artist fields: key, title, rating, added, guid
+- track fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, guid
+- album fields: key, media_id, title, artist, year, rating, tracks, added, guid
+- artist fields: key, media_id, title, rating, added, guid
 - identical track titles are collapsed with Plex's own `group=title`; --no-group shows each
 
 ### `plex-axi pick`
@@ -189,7 +189,7 @@ plex-axi similar 12345 --max-distance 0.1 --limit 5
 ```
 
 - distance is the server's own sonic distance: 0 is identical, larger is further away
-- a seed whose `analysis` is 0 has not been analysed and can return nothing at all
+- a seed with no `analysis` version has not been analysed and can return nothing at all
 
 ### `plex-axi recent`
 
@@ -214,13 +214,15 @@ List, inspect and edit the audio playlists on this server.
 ```sh
 plex-axi playlist
 plex-axi playlist show 'Example Playlist'
+plex-axi playlist show 501
 plex-axi playlist add 'Example Playlist' --key 12345 --key 12346
 plex-axi playlist create 'Example Playlist' --key 12345 --write
 ```
 
 - only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
-- titles match exactly, case-folded; on a miss the real titles are handed back
+- a playlist is named by its `key` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
+- `items` in a listing is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
 - nothing here plays a playlist: `show` prints the tracks and their media ids
 
 ### `plex-axi rate`
@@ -268,6 +270,7 @@ plex-axi api /library/sections/1/all --query type=10 --query limit=5
 - the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render
 - write methods are refused here even when writes are enabled: a mutation goes through a typed command that can validate and preview it, and several Plex write endpoints are destructive
 - the token is sent as a header and never appears in the path this prints
+- paths are absolute: `library/sections` is refused, `/library/sections` is the path
 
 ### `plex-axi doctor`
 
@@ -309,11 +312,22 @@ plex-axi skill --check
 - **A zero result is an answer.** It names the filters that matched nothing and the
   command that lists the real vocabulary. Drop one flag at a time to find the
   one that was wrong.
+- **Every row carries a `media_id`.** That is the product: a labelled identifier
+  a media consumer accepts, so a list view needs no follow-up call to be useful.
 - **`rating_key` is local to one server and moves.** It changes when an item is
   re-matched or the library is rebuilt, so keep the `guid` beside it anywhere the
-  value is written down.
-- **A track with `analysis: 0` has never been analysed**, so `similar` has nothing
-  to work from and its empty answer is not a statement about the library.
+  value is written down -- *unless* the guid is `local://<rating_key>`, which Plex
+  gives an item it never matched. That one moves with the rating key, and the
+  detail view says so rather than promising it will not.
+- **A track whose `analysis` is not a version number has never been analysed**, so
+  `similar` has nothing to work from and its empty answer is not a statement about
+  the library.
+- **`--fields` replaces the default columns**; it does not add to them. The default
+  set is a suggestion and may grow a column when the data warrants one, so a caller
+  that needs a fixed schema should name it.
+- **`--rated-min` is a minimum in stars, and 0 is not a filter.** `--rated-min 0`
+  is the bottom of the scale and narrows nothing; `--rated-min 0.5` is what asks
+  for everything that carries a rating at all.
 - **A mutating command run without `--write` is safe and useful.** It prints what
   would change and sends nothing, which is how to check a playlist edit before
   making it -- and how a smart playlist is caught before the server refuses.

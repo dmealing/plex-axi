@@ -21,6 +21,7 @@ from ..music import (
     build_filters,
     default_fields,
     label_filters,
+    parse_sort,
     rows_for,
     run_search,
     with_track_artist,
@@ -45,7 +46,14 @@ _FLAGS = (
     Flag("--mood", "<name>", note="run `plex-axi moods` for the list"),
     Flag("--style", "<name>", note="run `plex-axi styles` for the list"),
     Flag("--year", "<year>", note="the album's release year"),
-    Flag("--rated-min", "<stars>", note="0-5 stars, the scale ratings print in"),
+    Flag(
+        "--rated-min",
+        "<stars>",
+        note=(
+            "0-5 stars, the scale ratings print in; 0 is the bottom of the scale "
+            "and filters nothing, so `--rated-min 0.5` is what asks for the rated ones"
+        ),
+    ),
     Flag(
         "--query",
         "<text>",
@@ -57,8 +65,16 @@ _FLAGS = (
     ),
     Flag("--type", "<track|album|artist>", default="track", note="what to return"),
     Flag("--limit", "<n>", default=DEFAULT_LIMIT),
-    Flag("--fields", "<a,b,c>", note="add columns; run --help for the list per type"),
-    Flag("--sort", "<field:dir>", note="e.g. addedAt:desc, titleSort, userRating:desc"),
+    Flag(
+        "--fields",
+        "<a,b,c>",
+        note="replaces the default columns; run --help for the list per type",
+    ),
+    Flag(
+        "--sort",
+        "<field:dir>",
+        note="e.g. addedAt:desc, titleSort, userRating:desc; the direction is asc or desc",
+    ),
     Flag(
         "--no-group",
         boolean=True,
@@ -96,12 +112,14 @@ def COMMAND_FOR(name: str) -> Command:
 def run(ctx, name: str, sub: str, parsed):
     libtype = parse_libtype(parsed.get("type"))
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
-    filters, described = build_filters(parsed, libtype)
+    filters, described, note = build_filters(parsed, libtype)
+    sort = parse_sort(parsed.get("sort"))
     query = parsed.get("query")
-    fields = select_fields(parsed.get("fields"), available_fields(libtype), default_fields(libtype))
+    chosen = parsed.get("fields")
+    fields = select_fields(chosen, available_fields(libtype), default_fields(libtype))
 
     if not filters and not query:
-        return _nothing_asked(libtype)
+        return _nothing_asked(libtype, note)
 
     section = ctx.section()
     result = run_search(
@@ -109,16 +127,16 @@ def run(ctx, name: str, sub: str, parsed):
         libtype=libtype,
         filters=filters,
         title=query,
-        sort=parsed.get("sort"),
+        sort=sort,
         limit=limit,
         # Grouping collapses one song appearing on an album, a compilation and a
         # live record into one row. It only means anything for tracks.
         group=libtype == "track" and not parsed.get("no_group"),
     )
 
-    rows = rows_for(libtype, result.items)
+    rows = rows_for(libtype, result.items, section._server.machineIdentifier)
     described = label_filters(section, described, libtype=libtype)
-    if libtype == "track":
+    if libtype == "track" and not chosen:
         fields = with_track_artist(fields, rows)
 
     doc: dict = {"count": count_line(len(rows), result.total)}
@@ -128,6 +146,10 @@ def run(ctx, name: str, sub: str, parsed):
         doc["query"] = query
     if described:
         doc["filters"] = described
+    if note:
+        # A flag that was accepted and deliberately applied nothing has to say
+        # so where the result is, not only in `--help`.
+        doc["note"] = note
 
     if not rows:
         return _empty(doc, libtype, described, query)
@@ -165,12 +187,16 @@ def _next_steps(libtype, rows, result, limit) -> list:
     return lines
 
 
-def _nothing_asked(libtype: str):
+def _nothing_asked(libtype: str, note: str = ""):
     return {
         "error": "search needs at least one field to search on",
         "code": "NO_FILTERS",
         "help": HelpBlock(
             [
+                # First, when it applies: the caller *did* pass a flag, and
+                # being told they passed none without being told why theirs did
+                # not count is the kind of error that gets retried verbatim.
+                note,
                 "Run `plex-axi search --artist '<name>'` to search by artist",
                 "Run `plex-axi search --artist '<name>' --track '<title>'` to combine fields",
                 f"Run `plex-axi search --genre '<genre>' --type {libtype}` after `plex-axi genres`",

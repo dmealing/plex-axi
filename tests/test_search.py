@@ -36,11 +36,20 @@ def test_each_field_is_searched_on_its_own_plex_field(server, cli_run):
 
 
 def test_rating_uses_a_plex_operator_and_never_a_python_one(server, cli_run):
-    """M3: ``userRating>=8`` on the wire, and no ``__gte`` anywhere near it."""
+    """M3/B1: ``userRating>>=7`` on the wire, and no ``__gte`` anywhere near it.
+
+    Three spellings could appear here and only one is a Plex predicate.
+    ``userRating__gte`` is the client library's Python operator and filters
+    nothing; ``userRating>`` normalises to a ``>=`` **no real Plex server
+    defines for an integer**, and is refused; ``userRating>>`` is "is greater
+    than", which is the only inequality on offer -- so "at least four stars" is
+    strictly greater than seven points.
+    """
     result = cli_run("search", "--rated-min", "4")
     assert result.code == 0
     query = _search_requests(server)[0]["query"]
-    assert query["track.userRating>"] == "8"
+    assert query["track.userRating>>"] == "7"
+    assert "track.userRating>" not in query
     assert not any("__" in name for name in query)
 
 
@@ -102,7 +111,7 @@ def test_the_minimum_track_row_carries_the_artist_and_the_album(server, cli_run)
     result = cli_run("search", "--track", "Example Track", "--no-group")
     assert result.code == 0
     header = result.line("tracks[")
-    assert "{key,title,artist,album" in header
+    assert "{key,media_id,title,artist,album" in header
 
 
 def test_a_compilation_reports_the_performer_as_well_as_the_album_artist(server, cli_run):
@@ -178,7 +187,7 @@ def test_the_filter_echo_names_the_operator_the_server_actually_applies(server, 
 
     result = cli_run("search", "--rated-min", "4")
     assert result.code == 0
-    assert "track.userRating,>=,8 (4 stars)" in result.out
+    assert "track.userRating,>,7 (at least 4 stars)" in result.out
 
 
 def test_search_with_no_field_is_a_usage_error_not_a_whole_library_dump(server, cli_run):
@@ -265,7 +274,7 @@ def test_an_out_of_range_rating_is_rejected_in_stars_not_in_plex_points(server, 
 def test_searching_albums_and_artists_uses_their_own_endpoints(server, cli_run):
     albums = cli_run("search", "--artist", "Example Artist", "--type", "album")
     assert albums.code == 0
-    assert albums.line("albums[").startswith("albums[2]{key,title,artist,year}")
+    assert albums.line("albums[").startswith("albums[2]{key,media_id,title,artist,year}")
 
     artists = cli_run("search", "--genre", "Jazz", "--type", "artist")
     assert artists.code == 0

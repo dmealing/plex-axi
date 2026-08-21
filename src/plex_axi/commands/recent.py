@@ -39,7 +39,7 @@ COMMAND = Command(
             flags=(
                 Flag("--type", "<track|album|artist>", default="album"),
                 Flag("--limit", "<n>", default=DEFAULT_LIMIT),
-                Flag("--fields", "<a,b,c>"),
+                Flag("--fields", "<a,b,c>", note="replaces the default columns"),
             ),
             summary="List recent additions",
         ),
@@ -66,13 +66,14 @@ def run(ctx, name: str, sub: str, parsed):
     except Exception as exc:
         raise translate(exc, what=f"recently added {libtype}s") from None
 
-    rows = rows_for(libtype, items)
+    rows = rows_for(libtype, items, section._server.machineIdentifier)
     available = [*available_fields(libtype)]
     default = default_fields(libtype)
     if "added" in available and "added" not in default:
         default = [*default, "added"]
-    fields = select_fields(parsed.get("fields"), available, default)
-    if libtype == "track":
+    chosen = parsed.get("fields")
+    fields = select_fields(chosen, available, default)
+    if libtype == "track" and not chosen:
         fields = with_track_artist(fields, rows)
 
     doc = {"count": f"{len(rows)} most recent", "library": section.title}

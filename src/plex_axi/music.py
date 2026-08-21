@@ -16,10 +16,16 @@ section, and :func:`resolve_section` is the only place a section is chosen.
 reached: through ``Library.search`` it is emitted verbatim into the URL and
 applied nowhere; through ``LibrarySection.search`` it becomes a *client-side*
 post-filter applied after ``limit`` has already sliced the results; and only
-through ``filters={"userRating>": 8}`` is it a real, server-validated Plex
+through ``filters={"userRating>>": 7}`` is it a real, server-validated Plex
 predicate over the whole set. :func:`build_filters` produces only the third
 form, and :func:`_assert_server_side` fails loudly if a client-side filter ever
 sneaks back in.
+
+And the operator in that third form is not a free choice either. ``>>`` is
+Plex's "is greater than" and it is the *only* inequality a real music section
+offers for an integer -- the ``>=`` that looks like the natural spelling of "at
+least" is not defined for any type, so "at least four stars" is written as
+"greater than seven points". See :data:`RATING_OPERATOR`.
 
 **Both artists (S5).** A track carries the album artist in ``grandparentTitle``
 and the performing artist in ``originalTitle``. On a compilation the first is
@@ -29,9 +35,12 @@ one is wrong about who is playing.
 
 from __future__ import annotations
 
+import math
 import re
 
+from . import output
 from .errors import AxiError, UsageError
+from .ids import media_id_for
 from .plex import MUSIC_SECTION_TYPE, translate
 
 #: The three libtypes a music library holds, in the order they are listed.
@@ -155,9 +164,33 @@ FIELD_MAP = {
 #: :func:`label_filters` rather than guessed once for all fields here.
 BARE_OPERATOR = "="
 
-#: ``userRating>`` normalises to ``>=`` -- Plex's "is greater than or equals".
-#: A symbol needs no per-type resolution, so it is printed as it normalises.
-RATING_OPERATOR = ">="
+#: What ``--rated-min`` prints back. Not ``>=``: **real Plex offers no
+#: "greater than or equals" for an integer at all.** A music section advertises
+#: exactly ``=``, ``!=``, ``>>=`` and ``<<=`` for the integer type, and both
+#: inequalities are *strict* -- ``>>=`` is "is greater than", ``<<=`` is "is less
+#: than". The ``<=``/``>=`` that appear under the *string* type are Plex's
+#: "begins with" and "ends with", which is how they came to look like numeric
+#: comparisons.
+#:
+#: This flag was built on the one that does not exist, so it failed at every
+#: value on every real server while passing every test here. "At least N stars"
+#: is therefore ``userRating > (2N - 1)``, and ``>`` is what is printed back
+#: because it is what the predicate actually is.
+RATING_OPERATOR = ">"
+
+#: What ``--rated-min 0`` means, said out loud rather than decided silently.
+#:
+#: Zero is the bottom of the scale, so it constrains nothing, and that is the
+#: reading this tool takes. The alternative -- ``userRating > -1`` -- would
+#: quietly mean "rated at all", which on an ordinary library withholds the
+#: overwhelming majority of it behind a flag that reads as "no minimum". And
+#: "rated at all" already has an exact spelling: ``--rated-min 0.5`` is
+#: ``userRating > 0``. Given one spelling for each idea, the vacuous reading is
+#: the one worth keeping for the vacuous value.
+RATED_MIN_ZERO_NOTE = (
+    "--rated-min 0 is the bottom of the scale, so no rating filter was applied: "
+    "this is every item, rated or not. Run `--rated-min 0.5` for the rated ones"
+)
 
 
 def parse_stars(raw, *, flag: str) -> float:
@@ -181,15 +214,43 @@ def parse_stars(raw, *, flag: str) -> float:
     return value
 
 
+def rating_predicate(libtype: str, value: float) -> tuple:
+    """The Plex predicate for "at least ``value`` stars", and how to echo it.
+
+    Returns ``(field, threshold, described)``, or three ``None``s when the
+    request imposes no constraint -- see :data:`RATED_MIN_ZERO_NOTE`.
+
+    The threshold is ``ceil(points) - 1`` rather than ``points - 1`` so that a
+    value between the half-stars Plex can store rounds the way the caller meant:
+    4.25 stars is 8.5 points, and the largest rating that is *not* at least that
+    is 8, not 7.5 -- and a fractional threshold in the URL is a number the
+    integer field would have to guess at.
+    """
+    if value <= 0:
+        return None, None, None
+    threshold = math.ceil(value * POINTS_PER_STAR) - 1
+    return (
+        f"{libtype}.userRating>>",
+        threshold,
+        {
+            "field": f"{libtype}.userRating",
+            "operator": RATING_OPERATOR,
+            "value": f"{threshold} (at least {value:g} star{'' if value == 1 else 's'})",
+        },
+    )
+
+
 def build_filters(parsed, libtype: str) -> tuple:
     """Turn the per-field flags into Plex filters, and describe what was applied.
 
-    Returns ``(filters, described)`` where ``filters`` is the dictionary handed
-    to ``MusicSection.search`` and ``described`` is the rows printed back so the
-    caller can see the actual predicate rather than guessing it.
+    Returns ``(filters, described, note)`` where ``filters`` is the dictionary
+    handed to ``MusicSection.search``, ``described`` is the rows printed back so
+    the caller can see the actual predicate rather than guessing it, and ``note``
+    is set only when a flag was accepted and deliberately applied nothing.
     """
     filters: dict = {}
     described: list = []
+    note = ""
 
     for flag in ("artist", "album", "track", "genre", "mood", "style", "year"):
         value = parsed.get(flag)
@@ -202,23 +263,20 @@ def build_filters(parsed, libtype: str) -> tuple:
     raw_rating = parsed.get("rated_min")
     if raw_rating not in (None, ""):
         value = parse_stars(raw_rating, flag="--rated-min")
-        points = value * POINTS_PER_STAR
-        points = int(points) if float(points).is_integer() else points
-        # `userRating>` is Plex's "is greater than or equals". The lookalike
-        # `userRating__gte` is not a Plex operator at all: it survives into the
-        # URL untranslated through the weak search path, and becomes a
-        # client-side post-filter through the strong one. Neither filters.
-        field = f"{libtype}.userRating>"
-        filters[field] = points
-        described.append(
-            {
-                "field": f"{libtype}.userRating",
-                "operator": RATING_OPERATOR,
-                "value": f"{points} ({value:g} stars)",
-            }
-        )
+        # `userRating>>` is Plex's "is greater than", and it is the only
+        # inequality a real server offers for an integer. Two lookalikes are
+        # not: `userRating__gte` is not a Plex operator at all -- it survives
+        # into the URL untranslated through the weak search path and becomes a
+        # client-side post-filter through the strong one -- and `userRating>`
+        # normalises to a `>=` the server refuses outright.
+        field, threshold, row = rating_predicate(libtype, value)
+        if field is None:
+            note = RATED_MIN_ZERO_NOTE
+        else:
+            filters[field] = threshold
+            described.append(row)
 
-    return filters, described
+    return filters, described, note
 
 
 def label_filters(section, described: list, *, libtype: str) -> list:
@@ -312,6 +370,55 @@ def parse_relative_date(raw, *, flag: str) -> str:
         ],
         code="BAD_PERIOD",
     )
+
+
+#: The two directions Plex's sort parameter defines. Matched case-insensitively
+#: and normalised, because `--type Track` is already accepted in any case and a
+#: tool that took one and refused the other would be arbitrary about it.
+SORT_DIRECTIONS = ("asc", "desc")
+
+
+def parse_sort(raw, *, flag: str = "--sort"):
+    """Validate ``field[:direction]`` before the client library builds a URL.
+
+    Only the field half was ever checked. plexapi validates that against the
+    section's advertised sorts and :func:`_filter_error` turns the refusal into
+    a usage error naming every sort the server offers -- but the *direction*
+    reached the server untouched, and an unknown one there is not a 400. Plex
+    answers it with a 404 on the result set, which arrived as "the search
+    results was not found on this server": a sentence about the library, exit
+    code 1, for what is a typo in an argument.
+
+    The field is taken from the left of the last colon rather than the first,
+    because a real Plex sort key may itself be a comma-joined list of scoped
+    fields and none of them contains a colon.
+    """
+    if raw in (None, ""):
+        return None
+    value = str(raw).strip()
+    field, separator, direction = value.rpartition(":")
+    if not separator:
+        return value
+    if not field:
+        raise UsageError(
+            f"{flag} needs a field before the direction, got {value!r}",
+            help_lines=[
+                f"Run the command again with `{flag} addedAt:desc`",
+                "Run the same command with a bad field name to see the sorts this server offers",
+            ],
+            code="BAD_SORT",
+        )
+    lowered = direction.strip().lower()
+    if lowered not in SORT_DIRECTIONS:
+        raise UsageError(
+            f"{flag} direction must be {' or '.join(SORT_DIRECTIONS)}, got {direction!r}",
+            help_lines=[
+                f"Run the command again with `{flag} {field}:desc`",
+                "The field half is checked against this server; only the direction is fixed",
+            ],
+            code="BAD_SORT",
+        )
+    return f"{field}:{lowered}"
 
 
 def _operator_title(section, field: str, *, libtype: str) -> str:
@@ -412,7 +519,14 @@ def _execute(section, libtype, filters, title, sort, limit, grouped):
     key, leftover = section._buildSearchKey(libtype=libtype, returnKwargs=True, **kwargs)
     _assert_server_side(leftover)
 
+    # The single most useful diagnostic this tool has: the exact predicate,
+    # already resolved -- tag names turned into ids, operators normalised,
+    # parentheses in place. It is what `--debug` is for, and it is what an
+    # `UNKNOWN_OPERATOR` or an unexpectedly empty result needs beside it.
+    output.debug(f"search key: {key}")
+
     total = count_matches(section, key)
+    output.debug(f"exact total: {total}")
     method = getattr(section, SEARCH_METHODS[libtype])
     # `maxresults` bounds the fetch client-side after one page; the server-side
     # `limit` parameter is deliberately not used, because it would also cap the
@@ -476,11 +590,19 @@ def _filter_error(exc: Exception, libtype: str):
         )
     if "Unknown operator" in text:
         operators = _bracketed(text)
+        # Every comparison in a plex-axi filter is built by this module from a
+        # flag, never typed by a caller, so reaching here means the tool asked
+        # for something this server does not define. The advice has to say that.
+        # It used to name `--rated-min` as "the supported at-least comparison",
+        # which was the flag that produced the error -- structurally valid
+        # recovery text recommending the command that had just failed.
         return AxiError(
             "this server does not offer that comparison for that field",
             help_lines=[
                 f"operators for that field: {operators}" if operators else "",
-                "Run `plex-axi search --rated-min 4` for the supported at-least comparison",
+                "This is a bug in plex-axi: it builds every comparison itself, so one this "
+                "server rejects is a wrong assumption about Plex rather than a wrong argument",
+                "Report it at https://github.com/dmealing/plex-axi/issues",
             ],
             code="UNKNOWN_OPERATOR",
         )
@@ -531,18 +653,27 @@ def _bracketed(text: str) -> str:
 #: Fields each libtype can produce, and the minimal default schema. A track row
 #: without an artist and an album is not a music result -- it is a title and a
 #: number, which is what every prior tool in the landscape returns.
+#:
+#: **``media_id`` is in every default row, and that is the point of the tool.**
+#: plex-axi ends at a labelled identifier, so a list view that printed only
+#: ``key`` under-delivered on its own premise and cost the caller one detail
+#: request per row to finish the job. The ``guid`` stays out of the defaults and
+#: in the detail views: it is the durable identifier a human writes down, not
+#: the actionable one -- and for a locally-matched item it is not even durable
+#: (see :func:`plex_axi.ids.stability_note`), so doubling every row's width for
+#: it would be a poor trade.
 ROW_FIELDS = {
     "track": (
-        "key,title,artist,album",
-        "key,title,artist,track_artist,album,year,rating,duration,plays,skips,index,guid",
+        "key,media_id,title,artist,album",
+        "key,media_id,title,artist,track_artist,album,year,rating,duration,plays,skips,index,guid",
     ),
     "album": (
-        "key,title,artist,year",
-        "key,title,artist,year,rating,tracks,added,guid",
+        "key,media_id,title,artist,year",
+        "key,media_id,title,artist,year,rating,tracks,added,guid",
     ),
     "artist": (
-        "key,title",
-        "key,title,rating,added,guid",
+        "key,media_id,title",
+        "key,media_id,title,rating,added,guid",
     ),
 }
 
@@ -562,12 +693,13 @@ def _seconds(milliseconds):
     return int(milliseconds) // 1000
 
 
-def track_row(item) -> dict:
+def track_row(item, machine_identifier: str) -> dict:
     """One track, with both artists and nothing that costs a second request."""
     album_artist = getattr(item, "grandparentTitle", "") or ""
     performer = getattr(item, "originalTitle", "") or ""
     return {
         "key": number(getattr(item, "ratingKey", None)),
+        "media_id": media_id_for(machine_identifier, item),
         "title": getattr(item, "title", "") or "",
         "artist": album_artist,
         # Reported separately, never merged: on a compilation the album artist
@@ -585,9 +717,10 @@ def track_row(item) -> dict:
     }
 
 
-def album_row(item) -> dict:
+def album_row(item, machine_identifier: str) -> dict:
     return {
         "key": number(getattr(item, "ratingKey", None)),
+        "media_id": media_id_for(machine_identifier, item),
         "title": getattr(item, "title", "") or "",
         "artist": getattr(item, "parentTitle", "") or "",
         "year": number(getattr(item, "year", None)),
@@ -598,9 +731,10 @@ def album_row(item) -> dict:
     }
 
 
-def artist_row(item) -> dict:
+def artist_row(item, machine_identifier: str) -> dict:
     return {
         "key": number(getattr(item, "ratingKey", None)),
+        "media_id": media_id_for(machine_identifier, item),
         "title": getattr(item, "title", "") or "",
         "rating": stars(getattr(item, "userRating", None)),
         "added": date_only(getattr(item, "addedAt", None)),
@@ -630,18 +764,31 @@ def date_only(value) -> str:
         return str(value)
 
 
-def rows_for(libtype: str, items) -> list:
-    return [ROW_BUILDERS[libtype](item) for item in items]
+def rows_for(libtype: str, items, machine_identifier: str) -> list:
+    """Rows for one page of results, each carrying its own media id.
+
+    ``machine_identifier`` is a required argument rather than an optional one so
+    that a new row-bearing surface cannot quietly ship without the identifier
+    this tool exists to hand over. Six of them once did.
+    """
+    return [ROW_BUILDERS[libtype](item, machine_identifier) for item in items]
 
 
 def with_track_artist(fields: list, rows: list) -> list:
-    """Add ``track_artist`` to the schema exactly when it says something.
+    """Add ``track_artist`` to the *default* schema exactly when it says something.
 
     The column earns its tokens when a track's performer differs from its album
     artist, which is the compilation case and the one where reporting only the
     album artist is wrong: every track on a Various Artists disc reports
     "Various Artists" and none of them says who is playing. On an ordinary album
     the two agree, and the column would repeat the artist on every row.
+
+    **Only when the caller did not name the columns.** This once ran
+    unconditionally, so `--fields key` could answer with `{key,track_artist}`
+    and two runs of the same command could return different schemas depending on
+    which rows came back. A caller that names its columns gets those columns;
+    the data-dependent extra belongs to the default, which is a suggestion
+    rather than a contract.
     """
     if "track_artist" in fields:
         return fields

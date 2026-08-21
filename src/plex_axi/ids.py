@@ -1,7 +1,7 @@
 """The handoff: which `plex://` string is safe to print, and which is a bug.
 
 ``plex-axi`` ends at an identifier. It never plays anything, so the identifier
-*is* the product of every command, and there are five strings in circulation
+*is* the product of every command, and there are six strings in circulation
 that all look like one:
 
 ===================================  ==========================  ==============
@@ -20,19 +20,29 @@ Form                                 Produced by                 Consumable?
 ``plex://track/<24-hex>``            plexapi's own ``guid``      **no** - raises
                                                                  ``ValueError``
                                                                  in the consumer
+``local://<ratingKey>``              Plex, for an item it        n/a - a guid,
+                                     never matched               and not a
+                                                                 durable one
 ===================================  ==========================  ==============
 
-The last two are the trap: they are the same *shape* in two different
+Forms four and five are the trap: they are the same *shape* in two different
 namespaces, one of which is a legitimate Plex identifier that plexapi hands out
 under the attribute name ``guid``. Fed to a media player as a content id, one
 resolves to a server that does not exist and the other crashes it.
 
 So this module builds exactly one content id -- the first form -- and every
-command labels it ``media_id``. The ``guid`` is printed too, under
-its own label, because it is the only identifier that survives a re-match: a
+command labels it ``media_id``. The ``guid`` is printed too, under its own
+label, because it is *usually* the only identifier that survives a re-match: a
 ``ratingKey`` is a row number in one server's database and moves when the
-library is rebuilt. :func:`stability_note` is what says so wherever a human
-might copy one into a configuration file.
+library is rebuilt.
+
+**Form six is why "usually".** An item Plex never matched to its catalogue
+carries ``local://<ratingKey>`` -- the rating key with a scheme in front of it,
+so it moves exactly when the rating key moves. Roughly one track in seven on an
+ordinary library is one of these. :func:`stability_note` reads the scheme and
+says which of the two situations the caller is in, because "keep the guid, it
+survives" is advice that is false for those items and is at its most dangerous
+precisely when someone is pasting one into a configuration file.
 """
 
 from __future__ import annotations
@@ -49,13 +59,35 @@ _RATING_KEY = re.compile(r"^\d+$")
 #: A Plex guid for a music item: a namespace and a 24-character hex id.
 _GUID = re.compile(r"^plex://(artist|album|track)/[0-9a-f]{24}$")
 
+#: Form six. Plex hands this out for an item it never matched to its catalogue,
+#: and it is the rating key with a scheme in front of it -- so it is a guid that
+#: is not durable, which is the one combination the note must not get wrong.
+_LOCAL_GUID = re.compile(r"^local://\d+$")
+
 STABILITY_NOTE = (
     "rating_key is local to this server and changes when an item is re-matched or the "
     "library is rebuilt; guid is the identifier that survives, so keep them together"
 )
 
+#: What to say instead when the guid is form six. The rating key still moves;
+#: what has changed is that the guid moves with it, so there is nothing here to
+#: write down -- and saying so is more useful than a durability promise that
+#: happens to be false.
+LOCAL_STABILITY_NOTE = (
+    "rating_key is local to this server and changes when an item is re-matched or the "
+    "library is rebuilt; this item's guid is local:// plus that same rating key, so it "
+    "changes with it -- match this one by artist and title, not by either identifier"
+)
 
-def stability_note() -> str:
+
+def stability_note(guid=None) -> str:
+    """The durability note for one item, chosen by its guid's scheme.
+
+    Called with no argument it gives the ordinary note, which is what every
+    caller wanted before form six turned up.
+    """
+    if guid and _LOCAL_GUID.match(str(guid).strip()):
+        return LOCAL_STABILITY_NOTE
     return STABILITY_NOTE
 
 
@@ -70,6 +102,19 @@ def validate_rating_key(raw: str, *, invocation: str) -> str:
             help_lines=[
                 "A guid names an item in Plex's catalogue; a rating key names a row on this server",
                 "Run `plex-axi search --track '<title>'` to get this server's rating key",
+            ],
+            code="GUID_NOT_RATING_KEY",
+        )
+    if _LOCAL_GUID.match(value):
+        # The one case where the answer is sitting inside the argument: a
+        # `local://` guid *is* the rating key, so naming the number is a
+        # complete recovery rather than a direction to go and look one up.
+        raise UsageError(
+            f"{value!r} is a guid, not a rating key",
+            help_lines=[
+                "Plex gives an item it never matched a `local://` guid, which is this "
+                "server's rating key with a scheme in front of it",
+                f"Run `{invocation} {value[len('local://') :]}`",
             ],
             code="GUID_NOT_RATING_KEY",
         )
@@ -111,6 +156,20 @@ def media_content_id(machine_identifier: str, rating_key) -> str:
     return f"plex://{machine_identifier}/{key}"
 
 
+def media_id_for(machine_identifier: str, item):
+    """The media id for one row, or ``None`` when it cannot be built truthfully.
+
+    A list row is not an error path: an item the server described without a
+    usable rating key must render as a null cell, not abort the command and not
+    -- which is the failure this whole module exists to prevent -- fall back to
+    some other ``plex://`` string that happens to be to hand.
+    """
+    key = str(getattr(item, "ratingKey", "") or "").strip()
+    if not machine_identifier or not _RATING_KEY.match(key):
+        return None
+    return media_content_id(machine_identifier, key)
+
+
 def handoff(machine_identifier: str, item) -> dict:
     """The labelled identifier block every item-producing command prints.
 
@@ -121,9 +180,14 @@ def handoff(machine_identifier: str, item) -> dict:
     information they already had. plex-axi prints identifiers and stops.
     """
     rating_key = getattr(item, "ratingKey", None)
+    guid = getattr(item, "guid", "") or ""
     return {
         "media_id": media_content_id(machine_identifier, rating_key),
         "rating_key": int(rating_key),
-        "guid": getattr(item, "guid", "") or "",
-        "note": STABILITY_NOTE,
+        "guid": guid,
+        # Four fields, and the fourth is the only one whose *text* depends on
+        # the third: a `local://` guid is not durable, and a note promising it
+        # is would be at its most wrong exactly where it is most likely to be
+        # believed.
+        "note": stability_note(guid),
     }

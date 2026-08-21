@@ -22,7 +22,7 @@ from ..errors import UsageError
 from ..music import LIBTYPES
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import parse_libtype, parse_limit
+from ._common import article, parse_libtype, parse_limit
 
 #: Which Plex filter field each noun reads, and the libtype it is carried on.
 #:
@@ -111,7 +111,7 @@ def run(ctx, name: str, sub: str, parsed):
 def _no_such_field(exc: Exception, name: str, field: str, libtype: str):
     if "Unknown filter field" in str(exc):
         return UsageError(
-            f"this library does not tag {libtype}s with a {field}",
+            f"this library does not tag {libtype}s with {article(field)} {field}",
             help_lines=[
                 f"Run `plex-axi {name} --type artist` if this library tags artists instead"
                 if libtype != "artist"

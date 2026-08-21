@@ -79,6 +79,16 @@ def project(rows: list, fields: list) -> list:
     return [{name: row.get(name) for name in fields} for row in rows]
 
 
+def article(word: str) -> str:
+    """``a`` or ``an``, for a noun the server named rather than one we chose.
+
+    Every libtype and item type in this tool is interpolated into a sentence
+    somewhere, and two of the three begin with a vowel -- so a fixed "a" wrote
+    "a album" and "a artist" in the errors most likely to be read closely.
+    """
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
 def plural(count: int, singular: str, many: str = "") -> str:
     word = singular if count == 1 else (many or f"{singular}s")
     return f"{count} {word}"

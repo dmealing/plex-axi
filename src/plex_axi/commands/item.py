@@ -27,7 +27,7 @@ from ..ids import handoff, validate_rating_key
 from ..music import date_only, stars, tag_titles
 from ..output import HelpBlock, truncate
 from ..plex import translate
-from ._common import PREVIEW_CHARS
+from ._common import PREVIEW_CHARS, article
 
 #: What each noun accepts, and the sibling command that lists them.
 NOUNS = ("track", "album", "artist")
@@ -102,11 +102,11 @@ def run(ctx, name: str, sub: str, parsed):
     found = getattr(item, "type", "") or "item"
     if found != name:
         raise UsageError(
-            f"{key} is a {found} on this server, not a {name}",
+            f"{key} is {article(found)} {found} on this server, not {article(name)} {name}",
             help_lines=[
                 f"Run `plex-axi {found} {key}` instead"
                 if found in NOUNS
-                else f"Run `plex-axi search --type {name}` to find a {name}",
+                else f"Run `plex-axi search --type {name}` to find {article(name)} {name}",
             ],
             code="WRONG_ITEM_TYPE",
         )

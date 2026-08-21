@@ -25,6 +25,7 @@ from ..ids import handoff, validate_rating_key
 from ..music import LIBTYPES, POINTS_PER_STAR, parse_stars, stars
 from ..output import HelpBlock
 from ..plex import translate
+from ._common import article
 
 #: Plex's own "no rating", and the value the client library puts in the URL when
 #: it is asked to clear one. It is named here rather than passed: the library
@@ -85,7 +86,7 @@ def run(ctx, name: str, sub: str, parsed):
     libtype = getattr(item, "type", "") or "item"
     if libtype not in LIBTYPES:
         raise UsageError(
-            f"{key} is a {libtype} on this server, and plex-axi rates music only",
+            f"{key} is {article(libtype)} {libtype} on this server, and plex-axi rates music only",
             help_lines=[
                 f"Run `plex-axi search --artist '<name>' --type {LIBTYPES[0]}` to find a music key",
             ],

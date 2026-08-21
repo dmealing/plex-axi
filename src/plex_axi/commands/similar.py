@@ -23,7 +23,7 @@ from ..ids import validate_rating_key
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import parse_limit, project, select_fields
+from ._common import article, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
 
@@ -43,14 +43,14 @@ COMMAND = Command(
                     "<0.0-1.0>",
                     note="smaller is closer; the server's own default is 0.25",
                 ),
-                Flag("--fields", "<a,b,c>"),
+                Flag("--fields", "<a,b,c>", note="replaces the default columns"),
             ),
             summary="Find sonically similar tracks",
         ),
     ),
     notes=(
         "distance is the server's own sonic distance: 0 is identical, larger is further away",
-        "a seed whose `analysis` is 0 has not been analysed and can return nothing at all",
+        "a seed with no `analysis` version has not been analysed and can return nothing at all",
     ),
     examples=(
         "plex-axi similar 12345",
@@ -78,9 +78,10 @@ def run(ctx, name: str, sub: str, parsed):
             help_lines=["Run `plex-axi search --track '<title>'` to find a rating key"],
         ) from None
 
-    if getattr(seed, "type", "") != "track":
+    found = getattr(seed, "type", "") or "item"
+    if found != "track":
         raise UsageError(
-            f"{key} is a {getattr(seed, 'type', 'item')}, and sonic similarity is per track",
+            f"{key} is {article(found)} {found}, and sonic similarity is per track",
             help_lines=[
                 "Run `plex-axi search --artist '<name>' --type track` to find a track key",
             ],
@@ -99,17 +100,19 @@ def run(ctx, name: str, sub: str, parsed):
             ],
         ) from None
 
-    rows = rows_for("track", list(items))
+    rows = rows_for("track", list(items), server.machineIdentifier)
     distances = [_distance(item) for item in items]
     for row, distance in zip(rows, distances):
         row["distance"] = distance
 
+    chosen = parsed.get("fields")
     fields = select_fields(
-        parsed.get("fields"),
+        chosen,
         [*available_fields("track"), "distance"],
         ["distance", *default_fields("track")],
     )
-    fields = with_track_artist(fields, rows)
+    if not chosen:
+        fields = with_track_artist(fields, rows)
 
     doc = {
         "seed": f"{seed.title} - {getattr(seed, 'grandparentTitle', '') or ''}".strip(" -"),
@@ -122,8 +125,13 @@ def run(ctx, name: str, sub: str, parsed):
         doc["tracks"] = "0 sonically similar tracks"
         doc["help"] = HelpBlock(
             [
-                f"Run `plex-axi track {key}` and read `analysis`: 0 means this seed was never "
-                "analysed",
+                # `track` never prints a bare `0` here: an unanalysed item reads
+                # "0 (not analysed: ...)" and one the server said nothing about
+                # reads "not reported by this server". Advice naming a value the
+                # tool cannot emit sends the reader looking for something that
+                # is not there.
+                f"Run `plex-axi track {key}` and read `analysis`: a version number means it "
+                "was analysed, anything else means this seed has nothing to work from",
                 "Run the same command with a larger `--max-distance` to widen the search",
             ]
         )
