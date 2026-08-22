@@ -172,6 +172,28 @@ def test_the_second_latch_holds_even_if_the_dispatcher_did_not(plex_env):
     playback.require({**plex_env, playback.ALLOW_VAR: "TRUE"}, action="play 111")
 
 
+def test_an_open_gate_corrects_a_misspelled_playback_noun_rather_than_refusing_it(
+    server, cli_run, playing_env
+):
+    """`speakers` is `clients` spelled wrong, and that is all it is.
+
+    Answering it "out of scope" in the same error whose `commands:` line lists
+    `clients` would contradict itself -- so with the gate open these nouns take
+    the alias correction every other near miss gets. Closed, they keep the
+    answer that names nothing, which is what the gate owes somebody who has not
+    opted in.
+    """
+    for noun in ("speakers", "player", "client", "speaker"):
+        result = cli_run(noun, env=playing_env)
+        assert result.code == 2
+        assert f"unknown command: {noun}; use `clients` instead" in result.out
+        assert "out of scope" not in result.out
+    for noun in ("speakers", "player"):
+        closed = cli_run(noun)
+        assert closed.code == 2
+        assert "out of scope" in closed.out
+
+
 # ------------------------------------------------------------------ clients
 
 
@@ -467,7 +489,9 @@ def test_the_sonos_route_needs_its_own_credential_and_says_which(monkeypatch, cl
 
     An operator with `PLEX_TOKEN` exported reads a bare 401 as "my token is
     wrong" rather than "my token is the wrong kind", which is the mistake this
-    message exists to prevent.
+    message exists to prevent. The refusal is a fact about one route, so the
+    local clients are still listed and the explanation travels in the row for
+    the route that failed rather than failing the whole answer.
     """
     from plex_axi import plex
 
@@ -475,8 +499,9 @@ def test_the_sonos_route_needs_its_own_credential_and_says_which(monkeypatch, cl
     monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
     env = {**playing_env, playback.ACCOUNT_TOKEN_VAR: "example-token-0000000009"}
     result = cli_run("clients", env=env)
-    assert result.code == 1
-    assert "SONOS_TOKEN_REFUSED" in result
+    assert result.code == 0
+    assert "Example Client" in result.out
+    assert "refused the account token (401)" in result.out
     assert playback.ACCOUNT_TOKEN_VAR in result.out
     assert "broader credential than PLEX_TOKEN" in result.out
 
@@ -504,14 +529,24 @@ def test_the_account_token_is_registered_as_a_secret(server, cli_run, sonos_env)
 def test_the_sonos_service_being_down_does_not_take_the_local_route_with_it(
     monkeypatch, cli_run, sonos_env
 ):
+    """The cloud failing is a fact about the cloud, not about the local clients.
+
+    `clients` still answers with what the server itself can see, the failure is
+    reported beside the row for the route that failed, and the command exits 0
+    because the question it was asked -- what can play -- was answered. The
+    underlying error stays a `--debug` line, like every diagnostic here.
+    """
     from plex_axi import plex
 
     fake = FakePlex(plex_tv_unreachable=True)
     monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
     result = cli_run("clients", env=sonos_env)
-    assert result.code == 1
-    assert "SONOS_UNREACHABLE" in result
-    assert "every local client works without it" in result.out
+    assert result.code == 0
+    assert "Example Client" in result.out
+    assert "sonos.plex.tv could not be reached" in result.out
+    assert result.err == ""
+    debugged = cli_run("clients", "--debug", env=sonos_env)
+    assert "sonos route failed" in debugged.err
 
 
 # ----------------------------------------------------------- the declaration

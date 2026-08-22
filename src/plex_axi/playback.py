@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .errors import AxiError
+from .errors import AuthFailed, AxiError
 from .output import register_secret
 
 #: The operator's standing decision. Prefixed like :data:`writes.ALLOW_VAR`,
@@ -289,7 +289,11 @@ def survey(server, config, environ) -> dict:
 
     Returns the playable targets, the ones that answered but cannot play, and
     one line per route so an empty answer says *which* routes were asked rather
-    than leaving the caller to guess whether the Sonos half ran at all.
+    than leaving the caller to guess whether the Sonos half ran at all. A route
+    that fails does not fail the survey: its row carries the failure instead of
+    its speakers, and the other route's targets are still returned, so a cloud
+    that is unreachable -- or a credential plex.tv refuses -- costs the cloud
+    half alone.
     """
     from . import output
 
@@ -299,16 +303,26 @@ def survey(server, config, environ) -> dict:
     ]
     token = account_token(environ)
     if token:
-        from .cloud import speakers
+        from . import cloud
 
-        cloud = speakers(config, token)
-        found = found + cloud
-        routes.append(
-            {
-                "route": CLOUD,
-                "detail": f"{len(cloud)} speaker(s) linked to this plex.tv account",
-            }
-        )
+        try:
+            speakers = cloud.speakers(config, token)
+        except AxiError as exc:
+            # A route failing is a fact about that route, not about the targets
+            # the other one found. The failure goes where this route's row
+            # already lives, which is also where a later "no target called
+            # that" repeats it -- so a speaker the cloud would have listed
+            # reads as "the route holding it failed", never as plain absence.
+            output.debug(f"sonos route failed ({type(exc).__name__}): {exc.message}")
+            routes.append({"route": CLOUD, "detail": _route_failure(exc)})
+        else:
+            found = found + speakers
+            routes.append(
+                {
+                    "route": CLOUD,
+                    "detail": f"{len(speakers)} speaker(s) linked to this plex.tv account",
+                }
+            )
     else:
         routes.append(
             {
@@ -326,6 +340,21 @@ def survey(server, config, environ) -> dict:
 def route_lines(found: dict) -> list:
     """The route survey as one line each, for a help block."""
     return [f"{row['route']}: {row['detail']}" for row in found["routes"]]
+
+
+def _route_failure(exc: AxiError) -> str:
+    """A failed cloud survey as one routes-row detail.
+
+    An auth refusal keeps the credential explanation from the error itself, so
+    the row says *which kind* of token plex.tv refused rather than a bare
+    status -- the same wording :func:`cloud.speakers` raises with, read from
+    the error rather than restated here. Unreachable and unparseable answers
+    already are their own explanation, and stay short.
+    """
+    detail = f"failed -- {exc.message}"
+    if isinstance(exc, AuthFailed) and exc.help_lines:
+        detail = f"{detail}; {exc.help_lines[0]}"
+    return detail
 
 
 def _local_targets(server) -> list:

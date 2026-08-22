@@ -124,8 +124,9 @@ _OUT_OF_SCOPE = {
 
 #: The playback vocabulary, out of scope while the gate is closed and answered
 #: with exactly the message it has always been answered with. With the gate open
-#: the two that became commands are removed from this table and the rest keep
-#: their refusal, because transport control is still out of scope: `play` starts
+#: the two that became commands -- and, in `_out_of_scope`, the nouns that
+#: merely alias to one -- are left out of this table; the rest keep their
+#: refusal, because transport control is still out of scope: `play` starts
 #: something, and nothing here stops it again.
 _PLAYBACK_OUT_OF_SCOPE = {
     "play": "playback",
@@ -160,9 +161,19 @@ _PLAYBACK_ALIASES = {
 
 def _out_of_scope(environ) -> dict:
     table = dict(_OUT_OF_SCOPE)
+    order = command_order(environ)
+    open_gate = environ is not None and playback.allowed(environ)
     for name, area in _PLAYBACK_OUT_OF_SCOPE.items():
-        if name not in command_order(environ):
-            table[name] = area
+        if name in order:
+            continue
+        if open_gate and _PLAYBACK_ALIASES.get(name) in order:
+            # A noun that merely spells a command this installation has
+            # (`speakers` for `clients`) is a wrong guess to correct, like any
+            # other alias: answering it out of scope in the same error that
+            # lists `clients` would contradict itself. Only while the gate is
+            # open -- closed, these nouns keep the answer that names nothing.
+            continue
+        table[name] = area
     return table
 
 

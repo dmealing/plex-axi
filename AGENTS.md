@@ -881,9 +881,13 @@ silently:
   and must not be traded away to serve the first. The rules of thumb, the `media_id` section and the
   exit-code semantics are the agent-facing content; edit them for accuracy, never for brevity.
 
-**"It never plays anything" belongs in the opening block.** It is the single most distinctive fact
-about the tool, it is the one thing a reader is most likely to assume wrongly, and it was originally
-four paragraphs down. Anything that pushes it below the fold is a regression, not a tidy-up.
+**The never-plays claim belongs in the opening block, in its qualified form.** That out of the box
+the tool plays nothing and has no play command at all — until `PLEX_AXI_ALLOW_PLAYBACK` switches
+one on — is the single most distinctive fact about the tool, it is the one thing a reader is most
+likely to assume wrongly, and it was originally four paragraphs down. Anything that pushes it below
+the fold is a regression, not a tidy-up. The qualification is deliberate, not a hedge: playback
+ships behind the gate, so the old absolute wording ("it never plays anything", full stop) is false
+now, and an edit that restores it is undoing the reversal rather than tidying.
 
 **The "Output format" section is a deliberate port from the sibling AXI CLI**, so that two tools
 built to the same standard describe the same contract in the same words. It carries the TOON link,

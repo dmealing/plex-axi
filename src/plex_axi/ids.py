@@ -1,8 +1,9 @@
 """The handoff: which `plex://` string is safe to print, and which is a bug.
 
-``plex-axi`` ends at an identifier. It never plays anything, so the identifier
-*is* the product of every command, and there are six strings in circulation
-that all look like one:
+``plex-axi`` ends at an identifier: out of the box it plays nothing, so the
+identifier *is* the product of every command -- ``play``, which exists only
+where the operator has opened the playback gate, is the one exception. There
+are six strings in circulation that all look like one:
 
 ===================================  ==========================  ==============
 Form                                 Produced by                 Consumable?
