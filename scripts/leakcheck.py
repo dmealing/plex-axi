@@ -340,10 +340,26 @@ class Finding:
 
     @property
     def key(self):
-        # Keyed on the matched value, not the excerpt: the same secret seen by
-        # the line pass and the condensed pass has different surroundings but
-        # is one leak, and reporting it twice buries the signal.
-        return (self.path, self.rule.name, self.matched)
+        # Keyed on the matched value and the line it sits on.
+        #
+        # The value rather than the excerpt, because the same secret seen by the
+        # line pass and the condensed pass has different surroundings but is one
+        # leak, and reporting it twice buries the signal. Those two passes agree
+        # on the line -- the condensed pass attributes a match to the line its
+        # region starts on -- so the line stays in the key without weakening
+        # that, and the line pass runs first, so the survivor is the one
+        # carrying an offset.
+        #
+        # The LINE, because leaving it out deduplicated by value across the
+        # whole artefact, and one value on nine lines is nine places to edit.
+        # A report that collapsed them named one, and a fixer who scrubbed
+        # exactly what the report named published the other eight. That is not
+        # hypothetical: a sweep of two repositories found eight leaking pull
+        # request bodies, one of them with six separate matches. It converges
+        # either way -- re-running surfaces the next one -- but a guard that
+        # needs one round per occurrence is a guard that gets a partial fix and
+        # a green check.
+        return (self.path, self.rule.name, self.matched, self.line_number)
 
 
 def allowed_rules(line):

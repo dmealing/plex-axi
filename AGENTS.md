@@ -122,6 +122,23 @@ Three things about that scan are load-bearing:
   at all. An attribution trailer is still exempt from the address rule alone, because GitHub's
   squash box offers the body as the commit message.
 
+**A finding is deduplicated per location, not per value, and the difference is one round of
+scrubbing per occurrence.** `Finding.key` carries the line as well as the matched value. Without it
+the same value on nine lines — which is what a capture step pasting the same header nine times
+produces — was reported once, at the first line. Somebody scrubbing exactly what the report named
+published the other eight, and the re-run then named the next one: convergent, but one round per
+occurrence, which in practice means a partial fix and a green check. This was measured, not
+supposed: a sweep of this repository and its sibling found **eight leaking pull request bodies, one
+of them with six separate matches**, and re-scanning this project's own first leaky body reports
+**fifteen** `home-path` locations behind **three** distinct values where the old key reported one.
+
+The half of the old key that was right is kept. Deduplicating on the *value* exists so the line pass
+and the condensed pass do not report one leak twice, and those two passes agree on the line — the
+condensed pass attributes a match to the line its region starts on — so the line joins the key
+without weakening that. The line pass runs first, so the survivor is the one carrying an offset.
+`tests/test_leakcheck.py` pins both halves: every location of a repeated value is reported, on a
+pull request and in a file alike, and one location seen by two passes is still reported once.
+
 `leakcheck.py` borrows `commitcheck.py`'s GitHub reader rather than growing its own — same token
 resolution, same slug resolution, same error taxonomy — and imports it at the point of use so the
 hooks never pay for it. The reuse deliberately runs one way only: `commitcheck.py` is byte-identical

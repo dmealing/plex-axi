@@ -637,6 +637,67 @@ def test_every_field_github_publishes_is_scanned():
     ]
 
 
+def test_every_location_of_one_repeated_value_is_reported():
+    """One value on nine lines is nine places to edit.
+
+    The report used to deduplicate by value across the whole artefact, so a
+    header pasted nine times by a capture step was named once. A fixer who
+    scrubbed exactly what the report named published the other eight, and the
+    re-run then named the next one -- convergent, but one round per occurrence,
+    which in practice means a partial fix and a green check. A sweep of two
+    repositories found eight leaking bodies, one of them with six matches.
+    """
+    body = "".join(f"DIR:  {HOME}/checkout/run-{n}\n" for n in range(1, 10))
+    findings = leakcheck.scan_pull_request((("title", "fix: x"), ("body", body)))
+    assert [f.line_number for f in findings] == list(range(1, 10))
+    assert {f.rule.name for f in findings} == {"home-path"}
+    # One value, nine locations: the matched text is identical every time, which
+    # is exactly what the old key deduplicated on.
+    assert len({f.matched for f in findings}) == 1
+    assert all(f.column is not None for f in findings)
+
+
+def test_the_report_lists_every_location_of_a_repeated_value(monkeypatch, capsys):
+    """The count in the header is the number of places to edit, not the number
+    of distinct values -- and still without printing any of them."""
+    body = "".join(f"DIR:  {HOME}/checkout/run-{n}\n" for n in range(1, 7))
+    _transport(monkeypatch, data={"title": "fix: x", "body": body})
+    assert leakcheck.main(["--pull-request", "7"]) == 1
+    out = capsys.readouterr().out
+    assert "leakcheck[6]" in out
+    for n in range(1, 7):
+        assert f"body,{n},7,home-path,line" in out
+    assert HOME not in out
+
+
+def test_a_repeated_value_in_a_file_is_reported_at_every_line():
+    """The reasoning is not special to a pull request: a file with one secret on
+    four lines is four edits, and the rule set is shared across surfaces."""
+    text = "".join(f"source {HOME}/.env  # {n}\n" for n in range(1, 5))
+    findings = leakcheck.scan_text("f.sh", text)
+    assert [f.line_number for f in findings] == [1, 2, 3, 4]
+
+
+def test_two_passes_seeing_one_location_still_report_it_once():
+    """The half of the old key that was right, kept.
+
+    Deduplicating by value existed to stop the line pass and the condensed pass
+    reporting one leak twice. They agree on the line -- the condensed pass
+    attributes a match to the line its region starts on -- so keeping the line
+    in the key preserves that, and because the line pass runs first the survivor
+    is the one carrying an offset.
+    """
+    split = f'T = (\n    "{HEAD}."\n    "{PAYLOAD}."\n    "{SIGNATURE}"\n)\nwhole = "{JWT}"\n'
+    findings = [f for f in leakcheck.scan_text("f.py", split) if f.rule.name == "jwt"]
+    # Two locations: the value assembled across lines 2-4 (the condensed pass
+    # attributes it to line 2, where the first fragment is), and the whole one
+    # on line 6. Not four, and not one.
+    assert sorted(f.line_number for f in findings) == [2, 6]
+    by_line = {f.line_number: f for f in findings}
+    assert by_line[2].pass_name == "joined" and by_line[2].column is None
+    assert by_line[6].pass_name == "line" and by_line[6].column is not None
+
+
 def test_an_ordinary_pull_request_is_left_alone():
     assert leakcheck.scan_pull_request((("title", CLEAN_TITLE), ("body", CLEAN_BODY))) == []
 
