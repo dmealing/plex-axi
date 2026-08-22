@@ -33,6 +33,23 @@ def test_a_token_shaped_url_parameter_is_redacted_even_if_never_registered():
     assert "X-Plex-Token=<redacted>" in output.redact(text)
 
 
+def test_a_delegation_token_in_a_url_is_redacted_even_if_never_registered():
+    """The other credential a playback command handles, and it arrives from the server.
+
+    `/security/token` mints a short-lived token that lets the client stream, and
+    it travels in a URL under the bare name `token`. It is registered when it
+    arrives, and redacted by shape as well, because the shape is what catches
+    one that arrived by a path nobody thought to register.
+    """
+    output.reset_secrets()
+    url = "http://plex.example.com:32400/player/playback/playMedia?key=/x&token=transient-000001"
+    assert "transient-000001" not in output.redact(url)
+    assert "token=<redacted>" in output.redact(url)
+    # A sentence is not a URL: the pattern is anchored on a query separator so
+    # that prose about tokens survives a guard meant for credentials.
+    assert output.redact("the token is minted per play") == "the token is minted per play"
+
+
 def test_secret_disclosure_is_forced_off_in_every_place_it_is_read():
     """Three switches, and avoiding one call covers none of them."""
     plexapi.CONFIG.data.setdefault("log", {})["show_secrets"] = "true"

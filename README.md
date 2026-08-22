@@ -9,9 +9,15 @@ gets its own flag — artist, track, genre, mood, year, minimum rating — and P
 predicate server-side. Every answer ends at a labelled `media_id`, the identifier you hand to
 whatever plays music where you are.
 
-**It never plays anything.** There is no play command and no concept of a speaker, room, player or
-client, and there will not be one: dispatch belongs to the system that already owns your speakers,
-and this tool stops at the identifier. That boundary is enforced by a test, not a missing feature.
+**It does not play anything unless you switch playback on, and until you do it has no play command
+at all.** Out of the box the tool stops at the identifier, and dispatch belongs to whatever already
+owns your speakers — which is the right answer if you run Home Assistant or anything like it, since
+two things that can both start music means two things that disagree about what is playing. If you
+have Plex and nothing else, that was a dead end, so `PLEX_AXI_ALLOW_PLAYBACK=true` adds two
+commands: `clients`, which lists what can play, and `play`, which starts one track, album, artist
+or playlist on one of them. Without that variable they are not refused — they do not exist, in the
+help, in the skill or in the command table, so an agent cannot pick a path you did not open. There
+is no pause, stop, volume or queue command in either case, and there is not going to be one.
 
 It is an [AXI](https://axi.md) tool — an *Agent eXperience Interface*, a convention for command
 lines whose primary user is an LLM agent rather than a person. In practice that means
@@ -81,6 +87,8 @@ export PLEX_URL=http://plex.example.com:32400   # the server on your local netwo
 export PLEX_TOKEN=<a Plex access token>
 export PLEX_SECTION='Example Music'             # only if the server has more than one
 export PLEX_AXI_ALLOW_WRITES=true               # only if `rate` and `playlist` may write
+export PLEX_AXI_ALLOW_PLAYBACK=true             # only if you want `clients` and `play` to exist
+export PLEX_ACCOUNT_TOKEN=<a plex.tv token>     # only to reach Sonos speakers; see Playback
 ```
 
 Point `PLEX_URL` at the server itself rather than at plex.tv, so the tool keeps working when plex.tv
@@ -108,7 +116,7 @@ plex-axi api /library/sections                        # the escape hatch, GET on
 ```
 
 Every command takes `--help`, which is the authoritative reference for its flags — including an
-`access:` line under the description saying whether that command reads or writes.
+`access:` line under the description saying whether that command reads, writes or starts playback.
 
 `pick` is the "give me something to listen to" command. Every one of its filters is a Plex
 predicate the server evaluates — the rating comparison, the genre, the relative date, the
@@ -222,12 +230,74 @@ help[3]:
 gate meaningless — anything a typed command refused could be reissued by hand — and several Plex
 write endpoints are destructive.
 
-There is still no playback, no speaker, no metadata editing and no server administration. Rating a
-track and editing a playlist are not dispatch; playing one is.
+There is still no metadata editing and no server administration, and no transport control: `play`
+starts one thing on one target and nothing in this tool can pause, skip or stop it.
+
+## Playback
+
+Off by default, and while it is off the commands are not there to be found — not in `--help`, not
+in the generated skill, not in the no-argument view. That is deliberate, and the default is the
+important half.
+
+**If you run Home Assistant, or anything else that already dispatches music, leave this switched
+off.** Your automation owns the speakers — Sonos included, which it reaches by its own path — and
+the shape that works is to use this tool to *find* music and let that system play it. A play issued
+here goes around it, so its state is stale the moment the command succeeds; the problem is not that
+nothing happens, it is that everything downstream is confidently wrong about what is playing. While
+the switch is off an agent cannot see this path at all, which is the only reliable way to stop it
+choosing one.
+
+Switch it on if you have Plex and nothing else doing that job — which is exactly who it is for,
+because without it the tool hands you an identifier and stops.
+
+```sh
+export PLEX_AXI_ALLOW_PLAYBACK=true
+
+plex-axi clients                                        # what can actually play
+plex-axi play 12345 --client 'Living Room'              # says what it would do, sends nothing
+plex-axi play 12345 --client 'Living Room' --now        # starts it
+```
+
+The gate is an environment variable and `--now` is the confirmation, exactly as with writes: the
+variable is your standing decision, the flag is this invocation's. Leaving `--now` off is not a nag,
+it is a cheaper question — it resolves the item and the target and tells you which one it picked and
+why, which is where "I have three clients and named none of them" gets caught before a speaker comes
+on. If there is exactly one target it is used, and the answer says it was the only candidate.
+
+`clients` lists only targets that advertise Plex's `playback` capability; anything else that
+answered is counted, because a client that cannot play will accept the command and do nothing. No
+network address is printed for any target — `--client` takes the exact title, or the `machine_id`
+printed beside it when two targets share a name.
+
+Two routes, and the second has conditions:
+
+| Route | Reached via | Needs |
+|---|---|---|
+| `local` | the server's own `/clients` list | nothing beyond `PLEX_TOKEN`; the client's app must be running on the same network as the server |
+| `sonos` | `sonos.plex.tv` | `PLEX_ACCOUNT_TOKEN`, a Plex Pass, speakers linked to that account, and remote access working |
+
+`PLEX_ACCOUNT_TOKEN` is a **plex.tv account token, which is not the same thing as `PLEX_TOKEN`** — a
+server token is refused by plex.tv outright, and the error says so rather than handing you a bare
+401. The Sonos route is consulted only when that variable is set, and `clients` says which routes it
+asked either way. It goes over Plex's cloud rather than through your server, so anything watching
+your server for a session will lag the command; that matters if you run Home Assistant, and it is
+another reason to leave this gate shut where something else already dispatches.
+
+Starting playback is all `play` does. There is no pause, stop, resume, seek, next, previous, volume
+or queue command, and there is not going to be one: a start button is a handoff, and a transport is
+a second system believing it owns your queue.
+
+**Both routes ship without having started music on real hardware.** Everything up to the final
+request is confirmed against a live Plex Media Server — the play queue is created for a track, an
+album and a playlist, and the empty-client case is handled — but no Plex client advertised to the
+server while this was written, and no plex.tv account token was available for Sonos. If you are the
+first to use it, `--now` is the moment to find out, and a report either way is welcome on the issue
+tracker.
 
 ## What `media_id` is, and what consumes it
 
-Every command that identifies one item prints a block like this and then stops:
+Every command that identifies one item prints a block like this and then stops — `play`, which
+[Playback](#playback) can switch on, prints the same block and then starts the item:
 
 ```
 item:
@@ -260,9 +330,9 @@ one track does. A playlist's rating key lives in the same `/library/metadata` na
 `plex://<machineIdentifier>/<ratingKey>` form resolves to the playlist — verified on a real server
 and against a real consumer, not assumed.
 
-`plex-axi` does not dispatch it anywhere. Handing it to something that plays is a single call in
-whatever already owns your speakers. In Home Assistant, for example, the `media_player.play_media`
-service takes it directly:
+Out of the box `plex-axi` does not dispatch it anywhere. Handing it to something that plays is a
+single call in whatever already owns your speakers. In Home Assistant, for example, the
+`media_player.play_media` service takes it directly:
 
 ```yaml
 service: media_player.play_media
@@ -275,7 +345,8 @@ data:
 
 That is illustrative, not a dependency: nothing in `plex-axi` knows Home Assistant exists, and the
 same id is what Plex's own clients and other integrations consume. Substitute whatever plays music
-where you are.
+where you are — or, if nothing does, [Playback](#playback) switches on a `play` command that takes
+this rating key directly.
 
 **Keep the `guid` with the `rating_key` wherever you write one down.** A rating key is a row number
 in one server's database. It changes when an item is re-matched or the library is rebuilt, and the
@@ -309,6 +380,12 @@ flag that does not exist.
 - Plex's media-query language is documented in the community OpenAPI specification
   (<https://github.com/LukeHagar/plex-api-spec>, MIT), which is the thing to cite rather than
   re-derive.
+- Playback reaches a local client through the server's own remote-control path and a Sonos speaker
+  through one documented `sonos.plex.tv` endpoint parsed with the standard library. It deliberately
+  does **not** use the client library's `PlexClient`/`MyPlexAccount`/`plexapi.sonos` object model,
+  which is asserted by a test: that surface resolves speakers by name and dispatches to them, and
+  keeping it out of the process is what stops "play one thing on one named target" growing into a
+  control plane by accident.
 - Development notes, including every sharp edge behind the code, are in [AGENTS.md](AGENTS.md).
 
 ## Contributing

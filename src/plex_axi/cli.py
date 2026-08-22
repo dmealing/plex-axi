@@ -5,15 +5,17 @@ from __future__ import annotations
 import os
 import sys
 
-from . import __version__, output, writes
+from . import __version__, output, playback, writes
 from . import config as config_module
 from .argspec import GLOBAL_FLAGS, VALUE_GLOBALS, Command, parse, render_command_help
 from .commands import api as api_command
+from .commands import clients as clients_command
 from .commands import doctor as doctor_command
 from .commands import genres as genres_command
 from .commands import home as home_command
 from .commands import item as item_command
 from .commands import pick as pick_command
+from .commands import play as play_command
 from .commands import playlist as playlist_command
 from .commands import rate as rate_command
 from .commands import recent as recent_command
@@ -46,6 +48,15 @@ COMMAND_ORDER = (
     "skill",
 )
 
+#: The nouns that exist only while the playback gate is open, appended to
+#: :data:`COMMAND_ORDER` when it is. They are a separate tuple rather than a
+#: flag on each entry because *every* surface that lists commands has to be able
+#: to leave them out entirely: help, the home view, the generated skill and the
+#: dispatcher all read the order, and a gate that only refused to run them would
+#: still have shown an agent that a second way to play music exists. See
+#: :mod:`plex_axi.playback`.
+PLAYBACK_ORDER = playback.COMMANDS
+
 _MODULES = {
     "search": search_command,
     "genres": genres_command,
@@ -64,6 +75,11 @@ _MODULES = {
     "doctor": doctor_command,
     "skill": skill_command,
     "home": home_command,
+}
+
+_PLAYBACK_MODULES = {
+    "clients": clients_command,
+    "play": play_command,
 }
 
 #: Commands an agent might reach for under a different noun. The video nouns are
@@ -101,6 +117,18 @@ _OUT_OF_SCOPE = {
     "episode": "episodes",
     "episodes": "episodes",
     "watchlist": "the watchlist",
+    "scan": "server administration",
+    "refresh": "server administration",
+    "edit": "metadata editing",
+}
+
+#: The playback vocabulary, out of scope while the gate is closed and answered
+#: with exactly the message it has always been answered with. With the gate open
+#: the two that became commands -- and, in `_out_of_scope`, the nouns that
+#: merely alias to one -- are left out of this table; the rest keep their
+#: refusal, because transport control is still out of scope: `play` starts
+#: something, and nothing here stops it again.
+_PLAYBACK_OUT_OF_SCOPE = {
     "play": "playback",
     "pause": "playback",
     "stop": "playback",
@@ -112,14 +140,69 @@ _OUT_OF_SCOPE = {
     "speakers": "clients and speakers",
     "player": "clients and speakers",
     "room": "clients and speakers",
-    "scan": "server administration",
-    "refresh": "server administration",
-    "edit": "metadata editing",
+}
+
+#: What an agent might type for a playback noun once the gate is open. Empty
+#: while it is closed, so a wrong guess is answered by the out-of-scope table
+#: above and learns nothing about a capability this installation has not opted
+#: into.
+_PLAYBACK_ALIASES = {
+    "speaker": "clients",
+    "speakers": "clients",
+    "player": "clients",
+    "players": "clients",
+    "client": "clients",
+    "target": "clients",
+    "targets": "clients",
+    "playback": "play",
+    "start": "play",
 }
 
 
-def command_specs() -> dict:
-    return {name: module.COMMAND_FOR(name) for name, module in _MODULES.items()}
+def _out_of_scope(environ) -> dict:
+    table = dict(_OUT_OF_SCOPE)
+    order = command_order(environ)
+    open_gate = environ is not None and playback.allowed(environ)
+    for name, area in _PLAYBACK_OUT_OF_SCOPE.items():
+        if name in order:
+            continue
+        if open_gate and _PLAYBACK_ALIASES.get(name) in order:
+            # A noun that merely spells a command this installation has
+            # (`speakers` for `clients`) is a wrong guess to correct, like any
+            # other alias: answering it out of scope in the same error that
+            # lists `clients` would contradict itself. Only while the gate is
+            # open -- closed, these nouns keep the answer that names nothing.
+            continue
+        table[name] = area
+    return table
+
+
+def _aliases(environ) -> dict:
+    if environ is not None and playback.allowed(environ):
+        return {**_ALIASES, **_PLAYBACK_ALIASES}
+    return dict(_ALIASES)
+
+
+def command_order(environ=None) -> tuple:
+    """The nouns this installation has, in dispatch order.
+
+    ``None`` means the base set -- the commands every installation has -- which
+    is what the committed skill is generated from and what the tests that pin
+    the public surface read.
+    """
+    if environ is not None and playback.allowed(environ):
+        return COMMAND_ORDER + PLAYBACK_ORDER
+    return COMMAND_ORDER
+
+
+def modules(environ=None) -> dict:
+    if environ is not None and playback.allowed(environ):
+        return {**_MODULES, **_PLAYBACK_MODULES}
+    return dict(_MODULES)
+
+
+def command_specs(environ=None) -> dict:
+    return {name: module.COMMAND_FOR(name) for name, module in modules(environ).items()}
 
 
 class Context:
@@ -185,31 +268,59 @@ class Context:
 # ----------------------------------------------------------------- help text
 
 
-def render_root_help() -> str:
-    specs = command_specs()
-    names = ", ".join(COMMAND_ORDER)
-    lines = [
-        "usage: plex-axi [command] [subcommand] [args] [flags]",
-        f"description: {home_command.DESCRIPTION}",
-        f"commands[{len(COMMAND_ORDER) + 1}]:",
-        f"  (none)=home, {names}",
-        "flags[8]:",
+def render_root_help(environ=None) -> str:
+    """The root reference for *this* installation.
+
+    Gate-aware, and that is the point rather than a refinement: with the
+    playback gate closed this renders exactly what it rendered before playback
+    existed -- the same commands, the same environment block, the same closing
+    note that the tool ends at a media id. An agent reading it cannot tell the
+    capability is there. See :mod:`plex_axi.playback`.
+    """
+    order = command_order(environ)
+    specs = command_specs(environ)
+    names = ", ".join(order)
+    playing = playback.allowed(environ) if environ is not None else False
+
+    env_lines = [
+        "  PLEX_URL - the server's local address, e.g. http://plex.example.com:32400",
+        "  PLEX_TOKEN - a Plex access token; there is deliberately no --token flag",
+        "  PLEX_SECTION - default music library, when a server has more than one",
+        f"  {writes.ALLOW_VAR} - set to {writes.ALLOW_VALUE} to allow `playlist` and `rate` to"
+        " write; unset, they refuse",
+    ]
+    if playing:
+        env_lines.extend(
+            [
+                f"  {playback.ALLOW_VAR} - set to {playback.ALLOW_VALUE}, which is why `clients`"
+                " and `play` exist here",
+                f"  {playback.ACCOUNT_TOKEN_VAR} - a plex.tv *account* token, needed only to"
+                " reach Sonos speakers",
+            ]
+        )
+
+    flag_lines = [
         "  --human (readable output), --json (raw JSON output), --timeout <seconds> (default 30),",
         "  --section <title|key> (which music library),",
         "  --debug (on stderr: the connection, every request path and query, the exact",
         "    filter expression built, and the type of any error),",
         "  --user <plex-user> (read as another account: admin only, and the one flag here",
         "    that needs a plex.tv round-trip), --help, -v/--version",
-        "env[4]:",
-        "  PLEX_URL - the server's local address, e.g. http://plex.example.com:32400",
-        "  PLEX_TOKEN - a Plex access token; there is deliberately no --token flag",
-        "  PLEX_SECTION - default music library, when a server has more than one",
-        f"  {writes.ALLOW_VAR} - set to {writes.ALLOW_VALUE} to allow `playlist` and `rate` to"
-        " write; unset, they refuse",
-        f"summaries[{len(COMMAND_ORDER)}]:",
     ]
-    width = max(len(name) for name in COMMAND_ORDER)
-    lines.extend(f"  {name.ljust(width)}  {specs[name].summary}" for name in COMMAND_ORDER)
+
+    lines = [
+        "usage: plex-axi [command] [subcommand] [args] [flags]",
+        f"description: {home_command.DESCRIPTION}",
+        f"commands[{len(order) + 1}]:",
+        f"  (none)=home, {names}",
+        "flags[8]:",
+        *flag_lines,
+        f"env[{len(env_lines)}]:",
+        *env_lines,
+        f"summaries[{len(order)}]:",
+    ]
+    width = max(len(name) for name in order)
+    lines.extend(f"  {name.ljust(width)}  {specs[name].summary}" for name in order)
     lines.extend(
         [
             "note:",
@@ -220,10 +331,33 @@ def render_root_help() -> str:
             "  they show the change and send nothing. Every other command only reads, and",
             "  `api` refuses every method but GET. Each command's --help says which it is.",
             "note:",
-            "  It has no play command and no concept of a speaker: it ends at a labelled media",
-            "  id and leaves dispatch to whatever owns the speakers. Video is out of scope by",
-            "  the same decision.",
-            "examples:",
+        ]
+    )
+    if playing:
+        lines.extend(
+            [
+                f"  Playback is enabled here ({playback.ALLOW_VAR}={playback.ALLOW_VALUE}), so"
+                " `clients` and `play`",
+                f"  exist. `play` still needs {playback.CONFIRM_FLAG}; without it, it names the"
+                " target and sends",
+                "  nothing. Starting playback is all it does: no pause, stop, volume, next or",
+                f"  queue. A `{playback.CLOUD}` target is reached through Plex's cloud rather"
+                " than through this",
+                "  server, so anything else watching this server for a session will lag the",
+                "  command. Video is out of scope by a separate decision.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "  It has no play command and no concept of a speaker: it ends at a labelled media",
+                "  id and leaves dispatch to whatever owns the speakers. Video is out of scope by",
+                "  the same decision.",
+            ]
+        )
+    lines.append("examples:")
+    lines.extend(
+        [
             "  plex-axi",
             "  plex-axi search --artist 'Example Artist' --track 'Example Track'",
             "  plex-axi search --genre Jazz --rated-min 4 --limit 10",
@@ -235,6 +369,13 @@ def render_root_help() -> str:
             "  plex-axi doctor",
         ]
     )
+    if playing:
+        lines.extend(
+            [
+                "  plex-axi clients",
+                f"  plex-axi play 12345 --client 'Example Client' {playback.CONFIRM_FLAG}",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -393,20 +534,25 @@ def _wants_version(globals_: dict) -> bool:
     return bool(globals_.get("version") or globals_.get("v") or globals_.get("V"))
 
 
-def _unknown_command(name: str):
+def _unknown_command(name: str, environ=None):
     lowered = name.lower()
-    area = _OUT_OF_SCOPE.get(lowered)
+    order = command_order(environ)
+    if lowered in playback.COMMANDS and environ is not None and playback.misconfigured(environ):
+        # Set, but not to the one value that opens it. There is nothing left to
+        # hide from somebody who has exported this variable, so they are told
+        # what is wrong with it rather than told the command does not exist.
+        return playback.refusal(environ, action=f"run `{name}`")
+    area = _out_of_scope(environ).get(lowered)
     if area:
         return UsageError(
             f"plex-axi has no `{name}` command: {area} are deliberately out of scope",
             help_lines=[
-                "This tool reads a music library and stops at a media id; "
-                "it never dispatches playback",
-                f"commands: {', '.join(COMMAND_ORDER)}",
+                _out_of_scope_reason(environ),
+                f"commands: {', '.join(order)}",
             ],
             code="OUT_OF_SCOPE",
         )
-    suggestion = _ALIASES.get(lowered)
+    suggestion = _aliases(environ).get(lowered)
     if suggestion:
         return UsageError(
             f"unknown command: {name}; use `{suggestion}` instead",
@@ -416,11 +562,27 @@ def _unknown_command(name: str):
     return UsageError(
         f"unknown command: {name}",
         help_lines=[
-            f"commands: {', '.join(COMMAND_ORDER)}",
+            f"commands: {', '.join(order)}",
             "Run `plex-axi --help` for the full reference",
         ],
         code="UNKNOWN_COMMAND",
     )
+
+
+def _out_of_scope_reason(environ) -> str:
+    """Why the refused noun is refused, which is not the same sentence twice.
+
+    With the gate closed this is the sentence it has always been. With it open
+    the tool *does* dispatch, so repeating that sentence would be false for
+    `pause` and `volume` -- which are still refused, for the different and
+    narrower reason that this tool starts playback and does not control it.
+    """
+    if environ is not None and playback.allowed(environ):
+        return (
+            "`play` starts something on a client and that is all it does; pausing, stopping "
+            "and volume belong to whatever the client already answers to"
+        )
+    return "This tool reads a music library and stops at a media id; it never dispatches playback"
 
 
 def _pick_sub(command: Command, argv: list) -> tuple:
@@ -500,16 +662,22 @@ def main(argv: list | None = None, *, environ=None) -> int:
             output.write({"tool": "plex-axi", "version": __version__}, mode)
             return EXIT_OK
 
+        # The command table this installation has, resolved once. With the
+        # playback gate closed it is the base table and `plex-axi play` is an
+        # unknown command -- not a refused one, which would advertise the very
+        # thing the gate hides.
+        available = modules(environ)
+
         if not rest:
             if globals_.get("help") or globals_.get("h"):
-                output.write_text(render_root_help())
+                output.write_text(render_root_help(environ))
                 return EXIT_OK
             command, name, sub_name, sub_argv = home_command.COMMAND, "home", "home", []
         else:
             name = rest[0]
-            module = _MODULES.get(name)
+            module = available.get(name)
             if module is None or name == "home":
-                raise _unknown_command(name)
+                raise _unknown_command(name, environ)
             command = module.COMMAND_FOR(name)
             if globals_.get("help") or globals_.get("h") or _help_requested(command, rest[1:]):
                 output.write_text(render_command_help(command))
@@ -524,7 +692,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
             module = home_command
         else:
             parsed = parse(sub, sub_argv, command=command)
-            module = _MODULES[name]
+            module = available[name]
             globals_.update(parsed.globals)
             mode = _mode(globals_)
             if _wants_version(globals_):

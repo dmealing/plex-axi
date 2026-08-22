@@ -32,6 +32,8 @@ COMMAND = Command(
     ),
     notes=(
         f"writes {SKILL_RELATIVE_PATH}; never hand-edit that file, it is generated",
+        "the skill describes the commands *this installation* has, so a gated command that "
+        "is enabled here is described and one that is not is absent entirely",
         "needs no server and no token: it reads the command table, not the library",
     ),
     examples=("plex-axi skill", "plex-axi skill --check"),
@@ -43,12 +45,15 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    from ..cli import COMMAND_ORDER, command_specs
+    from .. import playback
+    from ..cli import command_order, command_specs
 
-    specs = command_specs()
+    order = command_order(ctx.environ)
+    specs = command_specs(ctx.environ)
     # Each noun appears once, in dispatch order; two nouns sharing a module do
-    # not share a Command, so this is the same list the root help prints.
-    commands = [specs[noun] for noun in COMMAND_ORDER]
+    # not share a Command, so this is the same list the root help prints -- and,
+    # like the root help, it is the list *this installation* has.
+    commands = [specs[noun] for noun in order]
     content = render(commands)
     path = target_path(Path(parsed.get("root") or "."))
 
@@ -70,9 +75,20 @@ def run(ctx, name: str, sub: str, parsed):
     unchanged = existed and path.read_text(encoding="utf-8") == content
     if not unchanged:
         path.write_text(content, encoding="utf-8")
-    return {
+    doc = {
         "skill": str(path),
         "status": "unchanged" if unchanged else ("updated" if existed else "created"),
         "bytes": len(content.encode("utf-8")),
-        "help": HelpBlock(["Run `plex-axi skill --check` in CI to catch a stale copy"]),
     }
+    if playback.allowed(ctx.environ):
+        # Said out loud, because it is the one way this generated file can end
+        # up describing the author's shell rather than the project. The
+        # repository's own copy is generated with the gate closed, and CI's
+        # `--check` runs with it closed too, so a copy written here and
+        # committed will fail that check rather than ship.
+        doc["scope"] = (
+            f"this installation: {playback.ALLOW_VAR}={playback.ALLOW_VALUE}, so the playback "
+            "commands are described; the copy committed to this repository is not"
+        )
+    doc["help"] = HelpBlock(["Run `plex-axi skill --check` in CI to catch a stale copy"])
+    return doc

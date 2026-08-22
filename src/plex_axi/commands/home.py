@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from .. import writes
+from .. import playback, writes
 from ..argspec import Command, Sub
 from ..config import missing_env_vars, setup_help
 from ..errors import AxiError
@@ -64,6 +64,12 @@ def run(ctx, name: str, sub: str, parsed):
     # library?" is a fact about the installation rather than about the server,
     # and an agent that reads it here never has to discover it from a refusal.
     doc["writes"] = writes.state(ctx.environ)
+    # Stated only when it is on. "playback: disabled" would be the one line in
+    # this document that advertises a capability to the reader who must not see
+    # it -- an agent in a house where something else owns the speakers. With the
+    # gate closed this view is the one it has always been.
+    if playback.allowed(ctx.environ):
+        doc["playback"] = playback.state(ctx.environ)
     missing = missing_env_vars(ctx.environ)
     if missing:
         doc["error"] = f"{' and '.join(missing)} not set in the environment"
@@ -100,6 +106,11 @@ def run(ctx, name: str, sub: str, parsed):
             "Run `plex-axi track <key>` for one item's tags, analysis version and file details",
             "Run `plex-axi pick --rated-min 4` for something to play right now",
             "Run `plex-axi doctor` when something looks wrong",
+            *(
+                ["Run `plex-axi clients` for what this server can start music on"]
+                if playback.allowed(ctx.environ)
+                else []
+            ),
         ]
     )
     return doc

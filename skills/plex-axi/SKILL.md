@@ -298,6 +298,7 @@ plex-axi skill --check
 ```
 
 - writes skills/plex-axi/SKILL.md; never hand-edit that file, it is generated
+- the skill describes the commands *this installation* has, so a gated command that is enabled here is described and one that is not is absent entirely
 - needs no server and no token: it reads the command table, not the library
 
 ## Rules of thumb

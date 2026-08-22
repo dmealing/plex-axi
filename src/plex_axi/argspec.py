@@ -11,7 +11,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import UsageError
-from .writes import ACCESS, READ_ONLY
+from .playback import ACCESS as PLAYBACK_ACCESS
+from .writes import ACCESS as WRITE_ACCESS
+from .writes import READ_ONLY
+
+#: What every access level means, in one line. Each gate owns its own entry --
+#: :mod:`plex_axi.writes` the two that describe what a command does to the
+#: library, :mod:`plex_axi.playback` the one that describes what it does to a
+#: speaker -- and they are merged here, where `--help` and the generated skill
+#: both read them, rather than one module naming the other's variable.
+ACCESS = {**WRITE_ACCESS, **PLAYBACK_ACCESS}
 
 #: Flags accepted on every command, and therefore never reported as unknown.
 GLOBAL_FLAGS = (

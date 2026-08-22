@@ -34,6 +34,15 @@ _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
 # that never passed through `register_secret` because it never passed through
 # this process's own configuration.
 _PLEX_TOKEN_PARAM = re.compile(r"(?i)(X-Plex-Token=)[A-Za-z0-9._~-]{4,}")
+
+# The short-lived delegation token `/security/token` mints, which a playback
+# command hands to the client so it can stream. It travels in a URL under the
+# bare name `token`, so it is redacted by shape as well as by the literal
+# registered when it arrives -- the same belt-and-braces the parameter above
+# gets, and for the same reason: a credential that never passed through this
+# process's own configuration is exactly the one no literal will catch. Anchored
+# on a query separator so an ordinary sentence containing the word cannot match.
+_DELEGATION_PARAM = re.compile(r"(?i)([?&]token=)[A-Za-z0-9._~-]{8,}")
 _PLEX_TOKEN_HEADER = re.compile(r"(?i)(X-Plex-Token['\"]?\s*[:=]\s*['\"]?)[A-Za-z0-9._~-]{8,}")
 
 _secrets: set = set()
@@ -67,6 +76,7 @@ def redact(text: str) -> str:
         text = text.replace(secret, REDACTED)
     text = _BEARER.sub(lambda m: m.group(1) + REDACTED, text)
     text = _PLEX_TOKEN_PARAM.sub(lambda m: m.group(1) + REDACTED, text)
+    text = _DELEGATION_PARAM.sub(lambda m: m.group(1) + REDACTED, text)
     text = _PLEX_TOKEN_HEADER.sub(lambda m: m.group(1) + REDACTED, text)
     return _JWT.sub(REDACTED, text)
 
