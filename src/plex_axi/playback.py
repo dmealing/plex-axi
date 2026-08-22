@@ -199,6 +199,22 @@ def account_token(environ) -> str:
 
 # ------------------------------------------------------------------- targets
 
+#: The capability a client must advertise for `play` to be willing to address
+#: it. A client that offers `timeline` and `navigation` but not this one will
+#: accept the command and do nothing.
+PLAYBACK_CAPABILITY = "playback"
+
+
+def capabilities(raw) -> tuple:
+    """``protocolCapabilities`` as a tuple, from either route's element.
+
+    One function because both routes spell the attribute the same way and
+    neither may parse it its own way: `play` refuses a target that does not
+    advertise :data:`PLAYBACK_CAPABILITY`, and a second parser is a second
+    chance to disagree about what the server said.
+    """
+    return tuple(part.strip() for part in (raw or "").split(",") if part.strip())
+
 
 @dataclass(frozen=True)
 class Target:
@@ -219,12 +235,9 @@ class Target:
     device: str
     route: str
     capabilities: tuple = ()
-    #: The raw element, kept only so the local route can hand it to the client
-    #: library rather than reassembling what it already parsed. Never printed.
-    element: object = None
 
     def can_play(self) -> bool:
-        return "playback" in self.capabilities
+        return PLAYBACK_CAPABILITY in self.capabilities
 
     def row(self) -> dict:
         return {
@@ -269,11 +282,6 @@ PROVIDER = "com.plexapp.plugins.library"
 #: everywhere else in this tool; the remote-control API calls it ``music``, and
 #: sending the wrong one is a silent no-op on some clients.
 MEDIA_TYPE = "music"
-
-#: The capability a client must advertise for `play` to be willing to address
-#: it. A client that offers `timeline` and `navigation` but not this one will
-#: accept the command and do nothing.
-PLAYBACK_CAPABILITY = "playback"
 
 
 def survey(server, config, environ) -> dict:
@@ -349,19 +357,13 @@ def _local_target(element) -> Target:
     attributes (``host``, ``address``, ``port``) are deliberately not read at
     all, because nothing here needs them and this repository is public.
     """
-    capabilities = tuple(
-        part.strip()
-        for part in (element.get("protocolCapabilities") or "").split(",")
-        if part.strip()
-    )
     return Target(
         title=element.get("title") or element.get("name") or "",
         machine_identifier=element.get("machineIdentifier") or "",
         product=element.get("product") or "",
         device=element.get("deviceClass") or element.get("platform") or "",
         route=LOCAL,
-        capabilities=capabilities,
-        element=element,
+        capabilities=capabilities(element.get("protocolCapabilities")),
     )
 
 
@@ -376,12 +378,23 @@ def resolve(found: dict, wanted, *, flag: str) -> tuple:
     targets = found["targets"]
     if wanted:
         needle = str(wanted).strip().casefold()
-        for target in targets:
-            if needle in (
+        matched = [
+            target
+            for target in targets
+            if needle
+            in (
                 target.title.strip().casefold(),
                 target.machine_identifier.strip().casefold(),
-            ):
-                return target, f"named by {flag}"
+            )
+        ]
+        if len(matched) == 1:
+            return matched[0], f"named by {flag}"
+        if matched:
+            # Two targets with the same title is not exotic -- two phones set up
+            # by the same person, or one device the server sees on both routes.
+            # Picking the first would put music in a room nobody named, which is
+            # the failure this whole resolution path exists to avoid.
+            raise _shared_title(matched, wanted, flag=flag)
         raise _no_such_target(found, wanted, flag=flag)
     if not targets:
         raise _nothing_to_play_to(found)
@@ -417,6 +430,18 @@ def _no_such_target(found: dict, wanted, *, flag: str) -> AxiError:
         f"no target called {str(wanted)!r} is available to this server",
         help_lines=lines,
         code="NO_SUCH_TARGET",
+    )
+
+
+def _shared_title(matched: list, wanted, *, flag: str) -> AxiError:
+    return AxiError(
+        f"{len(matched)} targets are called {str(wanted)!r}, so the name does not name one",
+        help_lines=[
+            "machine_id: " + ", ".join(f"{t.machine_identifier} ({t.route})" for t in matched),
+            f"Run `plex-axi play <rating_key> {flag} '<machine_id>'` with one of those",
+            "Run `plex-axi clients` to see them side by side",
+        ],
+        code="AMBIGUOUS_TARGET",
     )
 
 

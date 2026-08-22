@@ -51,7 +51,7 @@ import xml.etree.ElementTree as ElementTree
 import requests
 
 from .errors import ApiError, AuthFailed, ConnectionFailed
-from .playback import CLOUD, MEDIA_TYPE, PLAYQUEUE_PATH, PROVIDER, Target
+from .playback import CLOUD, MEDIA_TYPE, PLAYQUEUE_PATH, PROVIDER, Target, capabilities
 
 #: Plex's Sonos service. It emulates the player control API closely, which is
 #: why the playback parameters below are the local ones with three additions.
@@ -217,17 +217,11 @@ def _target(element) -> Target:
     on the operator's own network, nothing here needs it, and this repository is
     public.
     """
-    capabilities = tuple(
-        part.strip()
-        for part in (element.get("protocolCapabilities") or "").split(",")
-        if part.strip()
-    )
     return Target(
         title=element.get("title") or "",
         machine_identifier=element.get("machineIdentifier") or "",
         product=element.get("product") or "",
         device=element.get("deviceClass") or element.get("platform") or "",
         route=CLOUD,
-        capabilities=capabilities,
-        element=element,
+        capabilities=capabilities(element.get("protocolCapabilities")),
     )

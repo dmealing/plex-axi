@@ -289,6 +289,34 @@ def test_a_target_can_be_named_by_machine_id(server, cli_run, playing_env):
     assert [row["client"] for row in server.played] == ["Example Client"]
 
 
+def test_two_targets_with_one_name_is_a_refusal_rather_than_a_coin_toss(
+    monkeypatch, cli_run, playing_env
+):
+    """Two phones set up by the same person is not exotic.
+
+    Picking the first would put music in a room nobody named, which is the
+    failure the whole resolution path exists to avoid.
+    """
+    import copy
+
+    from plex_axi import plex
+
+    twin = copy.deepcopy(CLIENTS[0])
+    twin["machineIdentifier"] = "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    fake = FakePlex(clients=[CLIENTS[0], twin])
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
+
+    result = cli_run("play", "111", "--client", "Example Client", "--now", env=playing_env)
+    assert result.code == 1
+    assert "AMBIGUOUS_TARGET" in result
+    assert fake.played == []
+    # ...and the machine id, which is what does name one, still resolves.
+    assert (
+        cli_run("play", "111", "--client", twin["machineIdentifier"], "--now", env=playing_env).code
+        == 0
+    )
+
+
 def test_a_target_that_cannot_play_is_named_as_such_rather_than_as_absent(
     server, cli_run, playing_env
 ):
