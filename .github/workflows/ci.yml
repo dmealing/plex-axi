@@ -65,10 +65,21 @@ jobs:
   # and the version bump while the release workflow exits 0. `release.yml` fails
   # on that too, but it only runs on `main`; here it also runs nightly, so an
   # allowance that has outlived its cause surfaces without waiting for a merge.
+  #
+  # Nightly matters more than it looks, because the artefact this audits is
+  # partly mutable: a pull request body can be edited after the merge, and the
+  # body is what release-please reads whenever it names the commit-override
+  # marker. An edit made a week later would otherwise change what the next
+  # release contains with nothing having run in between.
   commits:
     name: commit messages are readable
     runs-on: [self-hosted, linux]
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # A pull request body can replace a commit message entirely, so the audit
+      # reads it. Read-only.
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,7 +94,9 @@ jobs:
       - name: Self-test the checker
         run: python3 scripts/commitcheck.py --demo
       - name: Audit every commit since the last release
-        run: python3 scripts/commitcheck.py --since-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/commitcheck.py --since-release --pull-requests require
 
   # EVERY job that needs third-party packages installs into a fresh `.venv` and
   # calls the tools by path out of it. That is not ceremony. This runner runs as
