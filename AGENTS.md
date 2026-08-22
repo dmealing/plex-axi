@@ -37,11 +37,13 @@ rule to make a commit pass, and do not bypass the hooks.
 **A file that cannot carry a marker** — JSON has no comment syntax, and vendored third-party data
 must stay byte-for-byte — is exempted in `PATH_ALLOWANCES` in `scripts/leakcheck.py` instead, per
 path *and* per rule, and `--rules` prints the table so the exemption is visible where the rules
-are. There is one entry today: the vendored TOON fixture whose backslash-escaping case is a
-synthetic Windows drive path. `tests/test_leakcheck.py` re-scans each exempted file with the table
-switched off and asserts that the rules which fire, and the shapes they match, are exactly the ones
-the entry names — an entry that has outlived its cause fails the suite rather than quietly covering
-something new.
+are. There are three entries today: the vendored TOON fixture whose backslash-escaping case is a
+synthetic Windows drive path, and the two commit-message fixtures transcribed from this
+repository's own history, which must stay byte-for-byte the commits they pin and whose co-author
+trailers carry no-reply addresses. `tests/test_leakcheck.py` re-scans each exempted file with the
+table switched off and asserts that the rules which fire, and the shapes they match, are exactly
+the ones the entry names — an entry that has outlived its cause fails the suite rather than
+quietly covering something new.
 
 **An allowance is matched against the exact path it names, and every entry point has to agree on
 what that path is.** `path_allowances` is a dictionary lookup: a name that merely *ends with* an
@@ -696,8 +698,10 @@ Three workflows, split by where the work is cheap:
 - **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests.
-- **`.github/workflows/hygiene.yml`** — the leak scan alone, on `ubuntu-latest`, on `pull_request`.
-  Exactly one GitHub-hosted check per PR, and it takes seconds.
+- **`.github/workflows/hygiene.yml`** — the leak scan and the pull-request-body check, on
+  `ubuntu-latest`, on `pull_request`. Exactly one GitHub-hosted job per PR, and it takes seconds;
+  the body check is the one deliberate exception to keeping this workflow thin, and the reason for
+  it is under "Releasing".
 - **`.github/workflows/release.yml`** — GitHub-hosted, and to stay that way: OIDC trusted publishing
   needs `id-token: write` on a GitHub-hosted runner.
 
