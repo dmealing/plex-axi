@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/dmealing/plex-axi/compare/v0.2.2...v0.2.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **ci:** fail a release that silently dropped a commit, and reject the message that causes it ([#11](https://github.com/dmealing/plex-axi/issues/11)) ([b1f9bb1](https://github.com/dmealing/plex-axi/commit/b1f9bb18ea7d6d9dffc1d44e17c90bd6fc0cd5d3))
+* **toon:** satisfy both TOON spec MUST violations and exact-match leak allowances ([b1f9bb1](https://github.com/dmealing/plex-axi/commit/b1f9bb18ea7d6d9dffc1d44e17c90bd6fc0cd5d3))
+
 ## [0.2.2](https://github.com/dmealing/plex-axi/compare/v0.2.1...v0.2.2) (2026-08-21)
 
 
