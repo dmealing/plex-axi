@@ -24,6 +24,7 @@ things: real artist and album names, absolute paths into somebody's collection, 
 scripts/leakcheck.py                     # every tracked file
 scripts/leakcheck.py --staged            # what a commit would record (pre-commit hook)
 scripts/leakcheck.py --commit-msg PATH   # the message itself (commit-msg hook)
+scripts/leakcheck.py --pull-request N    # a pull request's title and body (hygiene.yml)
 scripts/leakcheck.py --rules             # the live rule list
 scripts/leakcheck.py --demo              # self-test: proves every rule still fires
 scripts/install-hooks.sh                 # sets core.hooksPath to .githooks
@@ -77,6 +78,77 @@ deliberate and one is worth knowing about:
   docstring-blindness is what lets `cloud.py` explain at length why it does *not* use
   `plexapi.sonos` without that paragraph being the offence -- a rule the prose could trip would be
   answered by deleting the prose, which is the opposite of what it is for.
+
+**There are three surfaces, and the third one is not a file.** A pull request title and body are
+published the moment they are written, are in no checkout, pass under no hook, and can be edited
+after every other check has run — so neither the tracked-file scan nor `--commit-msg` has ever seen
+one. That is not theoretical: the pipeline's own document step writes into the body, embedding an
+evidence script that assigns the checkout it ran from and pasting captured pytest output whose
+header carries a `rootdir:` line. Both are absolute home paths, and between this repository and the
+sibling that mechanism published a home directory **three times in one day**, with every check green
+each time — because the only check that read the body at all, `commitcheck --pull-request`, was
+reading it for a different question and answering that one correctly. **The rules were never the
+problem; the reach was**, which is why `--pull-request` reuses `RULES` and `scan_text` outright
+rather than growing a second pattern list. A rule added later covers all three surfaces with nobody
+remembering to wire it up.
+
+**Captured tool output was the leak source twice over, and one of the two was the scanner's own
+self-test.** `--demo` printed what each rule caught to prove the rules fire — and those samples are
+leak-shaped by construction, so pasting the demo's output into a body as evidence fails the very
+check it opens, which is what happened to the sibling's pull request that introduced that check. The
+demo therefore reports every finding without the value, the way the pull request reporter already
+did, and `tests/test_leakcheck.py` pins that the demo's output passes the pull request scan.
+
+Three things about that scan are load-bearing:
+
+- **`edited` in `hygiene.yml`'s trigger list is the whole mechanism.** The document step writes the
+  evidence into the body *after* the pull request is opened, so a check firing only on `opened` and
+  `synchronize` would scan the empty original body and pass. This repository already carried
+  `edited` for release-please's sake; the leak scan rides the same trigger, so two separate guards
+  now depend on it, and `tests/test_leakcheck.py` asserts it is still there by parsing the workflow
+  rather than matching it as text.
+- **It fails closed, in both directions.** No token, no `owner/name`, a fetch that does not answer,
+  an answer that is not a pull request, or an empty `RULES` — every one of them fails the check
+  rather than reporting a clean it cannot support. `0 findings` from a guard that never saw the
+  artefact converts an unknown risk into a false assurance, which is worse than not running.
+- **The report names the field, line, rule and offset, and never the match.** A pull request check
+  runs on a public log; printing the excerpt the file report prints would republish the leak to a
+  wider audience than the pull request page. The offset is printed only when the finding's pass read
+  the text as written — one surfaced in a percent-decoded or joined view indexes a string that
+  exists nowhere the reader can open, so it prints `-` and the pass column instead. For the same
+  reason a pull request cannot carry a `leakcheck: allow=` marker: in a file that marker is
+  committed, diffed and reviewed, and in a body it is an off-switch anyone can add after every check
+  has run, on the one artefact whose being editable-after-the-fact is why the surface needs a guard
+  at all. An attribution trailer is still exempt from the address rule alone, because GitHub's
+  squash box offers the body as the commit message.
+
+**A finding is deduplicated per location, not per value, and the difference is one round of
+scrubbing per occurrence.** `Finding.key` carries the line as well as the matched value. Without it
+the same value on nine lines — which is what a capture step pasting the same header nine times
+produces — was reported once, at the first line. Somebody scrubbing exactly what the report named
+published the other eight, and the re-run then named the next one: convergent, but one round per
+occurrence, which in practice means a partial fix and a green check. This was measured, not
+supposed: a sweep of this repository and its sibling found **eight leaking pull request bodies, one
+of them with six separate matches**, and re-scanning this project's own first leaky body reports
+**fifteen** `home-path` locations behind **three** distinct values where the old key reported one.
+
+The half of the old key that was right is kept. Deduplicating on the *value* exists so the line pass
+and the condensed pass do not report one leak twice, and those two passes agree on the line — the
+condensed pass attributes a match to the line its region starts on — so the line joins the key
+without weakening that. The line pass runs first, so the survivor is the one carrying an offset.
+`tests/test_leakcheck.py` pins both halves: every location of a repeated value is reported, on a
+pull request and in a file alike, and one location seen by two passes is still reported once.
+
+`leakcheck.py` borrows `commitcheck.py`'s GitHub reader rather than growing its own — same token
+resolution, same slug resolution, same error taxonomy — and imports it at the point of use so the
+hooks never pay for it. The reuse deliberately runs one way only: `commitcheck.py` is byte-identical
+with the sibling project's copy and must stay that way.
+
+**Writing a report that says where without saying what is a constraint on the prose too.** The help
+text under a pull request finding must not contain the words a leaked path is made of: an assertion
+that the leaked value never reaches the log is a substring check, and advice that happened to use
+the word `checkout` tripped it. Describe the *source* of a leak (a worktree variable, a pytest
+header) rather than the shape of one.
 
 **Real content has no shape and the scanner cannot see it.** Artist and album names are the half
 that is convention only. The README says the coverage is bounded; do not restore any claim that the
@@ -722,7 +794,7 @@ one; read its module docstring before touching it.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~870 tests, a few seconds
+pytest                                   # ~900 tests, a few seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
@@ -932,9 +1004,10 @@ Three workflows, split by where the work is cheap:
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests.
 - **`.github/workflows/hygiene.yml`** — the leak scan and the pull-request-body check, on
-  `ubuntu-latest`, on `pull_request`. Exactly one GitHub-hosted job per PR, and it takes seconds;
-  the body check is the one deliberate exception to keeping this workflow thin, and the reason for
-  it is under "Releasing".
+  `ubuntu-latest`, on `pull_request` (including `edited`). It scans the tracked tree *and* the pull
+  request's own title and body. Exactly one GitHub-hosted job per PR, and it takes seconds; the two
+  steps that read the pull request are the one deliberate exception to keeping this workflow thin,
+  and the reasons for them are under "There are three surfaces" above and "Releasing" below.
 - **`.github/workflows/release.yml`** — GitHub-hosted, and to stay that way: OIDC trusted publishing
   needs `id-token: write` on a GitHub-hosted runner.
 
@@ -1028,7 +1101,8 @@ A change that makes one of those fail is a regression in the guard, not a discov
   to the one cheap job". It is not coverage for its own sake: it checks the pull request body, which
   exists *only* on a pull request, never passes under a hook, and can replace the merged commit
   message outright. Its trigger list carries `edited` for the same reason. Still one job, still
-  seconds.
+  seconds. The leak scan of the same two fields rides the same trigger, for the same reason from the
+  other direction — see "There are three surfaces" above.
 
 The claim that used to sit here — "`hygiene.yml` was deliberately left alone; the release audit
 already covers what a PR-time check would" — was false, and cost the second release. The release
