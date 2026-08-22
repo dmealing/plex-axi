@@ -654,6 +654,82 @@ def test_the_audit_fails_on_a_perfect_message_whose_body_replaces_it(tmp_path, c
     assert "release-please would consider: 0" in out
 
 
+def test_the_audit_fails_when_the_replacing_text_parses(tmp_path, capsys, monkeypatch):
+    """The quiet variant of the hijack, which the parse cannot see at all.
+
+    An unclosed block whose text happens to parse leaves every count healthy --
+    release-please really can read *something* -- and the something is an
+    accidental paragraph. The fault lives in the body, not the parse, so the
+    post-merge audit applies the same rule the pull request check does.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    body = (
+        "A paragraph explaining that a body naming "
+        f"{commitcheck.OVERRIDE_START}\n"
+        "\n"
+        "fix: the paragraph after the mention, which parses\n"
+    )
+    _with_bodies(monkeypatch, {head: body})
+    assert not commitcheck.check("fix: a real fix\n\nbody text\n", pull_request_body=body)
+    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    out = capsys.readouterr().out
+    assert "silently dropped:              0" in out
+    assert "messages replaced by an unclosed override block: 1" in out
+    assert "the body silently replaced this message" in out
+
+
+def test_an_allowance_never_covers_a_replaced_message(tmp_path, capsys, monkeypatch):
+    """KNOWN_UNPARSEABLE exempts a loss that is accounted for, and nothing else.
+
+    The entry says the *message's* content was restated elsewhere. A body that
+    replaces the message with an accidental paragraph is a different,
+    unaccounted loss, and honouring the allowance for it would put the blind
+    spot back one layer up.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _with_bodies(monkeypatch, {head: f"prose {commitcheck.OVERRIDE_START} block from the body"})
+    original = commitcheck.KNOWN_UNPARSEABLE.copy()
+    try:
+        commitcheck.KNOWN_UNPARSEABLE[head] = "the message is accounted for elsewhere"
+        assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    finally:
+        commitcheck.KNOWN_UNPARSEABLE.clear()
+        commitcheck.KNOWN_UNPARSEABLE.update(original)
+    out = capsys.readouterr().out
+    assert "known-unparseable, accounted for: 1" in out
+    assert "the body silently replaced this message" in out
+
+
+def test_commit_audit_reports_a_replacement_even_when_it_parses(tmp_path, capsys, monkeypatch):
+    """`--commit` answers the factual question, so an allowance is not the whole answer.
+
+    The single-commit audit honours no allowances at all, and the replacement
+    fault is not a parse question: a readable block that was never meant to be
+    the message is still the wrong string becoming the changelog entry.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    body = (
+        "A paragraph explaining that a body naming "
+        f"{commitcheck.OVERRIDE_START}\n"
+        "\n"
+        "fix: the paragraph after the mention, which parses\n"
+    )
+    _with_bodies(monkeypatch, {head: body})
+    assert commitcheck.audit_commit(head, engine="python", root=root) == 1
+    out = capsys.readouterr().out
+    assert "verdict: readable" not in out
+    assert "closes the block" in out
+
+
 def test_the_audit_says_so_when_it_could_not_read_the_bodies(tmp_path, capsys, offline):
     """A reduced check that reads as a full one is how this failed the first time."""
     root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
@@ -759,23 +835,202 @@ def test_the_command_line_reports_a_missing_credential_rather_than_passing(tmp_p
 # ---------------------------------------------------------------------------
 
 
+def _strip_comment(line):
+    """One YAML line without its comment: `#` at the start or after whitespace.
+
+    Quoted text keeps its `#`, and one glued to a word is content -- both YAML's
+    own rules, not generosity. Stripping before anything else is parsed is the
+    point of these helpers: these workflows explain their wiring in prose, and
+    prose quoting a command satisfied the first version of the tests below with
+    the wiring deleted.
+    """
+    kept = []
+    quote = None
+    for index, char in enumerate(line):
+        if quote is not None:
+            kept.append(char)
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+            kept.append(char)
+        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+            break
+        else:
+            kept.append(char)
+    return "".join(kept)
+
+
+def _scalar(text):
+    """A flow list as a list, a quoted string without its quotes, else the text."""
+    text = text.strip()
+    if text.startswith("[") and text.endswith("]"):
+        return [_scalar(item) for item in text[1:-1].split(",") if item.strip()]
+    if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
+        return text[1:-1]
+    return text
+
+
+def _parse_node(lines, start, indent):
+    """The list, mapping or scalar beginning at `start`, and the index after it."""
+    text = lines[start][1]
+    if text == "-" or text.startswith("- "):
+        return _parse_items(lines, start, indent)
+    if ":" not in text:
+        return text, start + 1
+    return _parse_mapping(lines, start, indent)
+
+
+def _parse_items(lines, start, indent):
+    items = []
+    index = start
+    while (
+        index < len(lines)
+        and lines[index][0] == indent
+        and (lines[index][1] == "-" or lines[index][1].startswith("- "))
+    ):
+        rest = lines[index][1][2:].strip()
+        index += 1
+        if not rest:
+            if index < len(lines) and lines[index][0] > indent:
+                item, index = _parse_node(lines, index, lines[index][0])
+            else:
+                item = None
+        else:
+            # The item begins on the dash line, and everything deeper belongs to
+            # it until the next dash at this indent -- which is how YAML scopes it.
+            item_lines = [(indent + 2, rest)]
+            while index < len(lines) and lines[index][0] > indent:
+                item_lines.append(lines[index])
+                index += 1
+            item, _ = _parse_node(item_lines, 0, indent + 2)
+        items.append(item)
+    return items, index
+
+
+def _parse_mapping(lines, start, indent):
+    mapping = {}
+    index = start
+    while index < len(lines) and lines[index][0] == indent:
+        key, separator, value = lines[index][1].partition(":")
+        index += 1
+        if not separator:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if value in ("|", "|-", "|+"):
+            block = []
+            while index < len(lines) and lines[index][0] > indent:
+                block.append(lines[index][1])
+                index += 1
+            mapping[key] = "\n".join(block)
+        elif value:
+            mapping[key] = _scalar(value)
+        elif index < len(lines) and lines[index][0] > indent:
+            mapping[key], index = _parse_node(lines, index, lines[index][0])
+        else:
+            mapping[key] = None
+    return mapping, index
+
+
+def _parse_workflow(path):
+    """A workflow file as the mappings and lists GitHub's evaluator reads.
+
+    Written for the subset these first-party workflows use -- nested mappings,
+    `- ` items, `[a, b]` flow lists and `|` blocks -- rather than a YAML
+    dependency for a handful of wiring assertions; a workflow that grows a
+    construct outside the subset has to grow this with it.
+    """
+    lines = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = _strip_comment(raw).rstrip()
+        if line.strip():
+            lines.append((len(line) - len(line.lstrip(" ")), line.strip()))
+    workflow, _ = _parse_node(lines, 0, 0)
+    return workflow
+
+
+def _workflow(name):
+    """One of this repository's workflow files, as what GitHub would evaluate."""
+    return _parse_workflow(REPO_ROOT / ".github" / "workflows" / name)
+
+
+def _audit_steps(workflow):
+    """Every step that runs the commit checker.
+
+    Gathered across jobs rather than within one, because the wiring under test
+    is which command the workflow runs, not which job it runs in.
+    """
+    steps = []
+    for job in (workflow.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            tokens = (step.get("run") or "").split()
+            if any(token.endswith("commitcheck.py") for token in tokens):
+                steps.append(step)
+    return steps
+
+
 def test_the_release_audit_requires_the_pull_request_bodies():
     """Wired with `require`, or the workflow silently checks the wrong string.
 
     `auto` would degrade to git's copy of the messages the moment a token went
     missing, and report success -- which is the exact failure this change fixes.
+    Asserted on the parsed step rather than the file: both workflows also carry
+    a comment quoting the command, and prose is not wiring.
     """
     for name in ("release.yml", "ci.yml"):
-        workflow = (REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
-        assert "--since-release --pull-requests require" in workflow, name
-        assert "GITHUB_TOKEN" in workflow, name
+        audits = [
+            step
+            for step in _audit_steps(_workflow(name))
+            if "--since-release" in step["run"].split()
+        ]
+        assert audits, f"{name} runs no audit over the release range"
+        for step in audits:
+            tokens = step["run"].split()
+            assert "--pull-requests" in tokens, name
+            following = tokens[tokens.index("--pull-requests") + 1 :][:1]
+            assert following == ["require"], name
+            assert "GITHUB_TOKEN" in (step.get("env") or {}), name
 
 
 def test_a_pull_request_is_checked_before_it_can_be_merged():
-    """The body can be edited after every other check has run, so `edited` counts."""
-    workflow = (REPO_ROOT / ".github" / "workflows" / "hygiene.yml").read_text(encoding="utf-8")
-    assert "--pull-request" in workflow
-    assert "edited" in workflow
+    """The body can be edited after every other check has run, so `edited` counts.
+
+    The word also appears in this workflow's own header comment, which is why
+    the assertion reads the parsed trigger list rather than the file.
+    """
+    workflow = _workflow("hygiene.yml")
+    assert "edited" in workflow["on"]["pull_request"]["types"]
+    assert any("--pull-request" in step["run"].split() for step in _audit_steps(workflow))
+
+
+def test_the_workflow_view_reads_the_configuration_not_the_prose(tmp_path):
+    """A comment naming a setting is not the setting.
+
+    This is the mutation the substring tests could not catch: hygiene.yml's own
+    header says `edited` is in the trigger list, so deleting the type left them
+    green with the backstop gone. Here a comment mentions a type that is not in
+    the list and quotes a command no step runs, and neither may count.
+    """
+    synthetic = tmp_path / "mentioned.yml"
+    synthetic.write_text(
+        "# The `edited` trigger is deliberately absent from the list below, and\n"
+        "# no step runs the command the next line quotes.\n"
+        "# run: python3 scripts/commitcheck.py --pull-request 7\n"
+        "name: synthetic\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    types: [opened, synchronize]\n"
+        "jobs:\n"
+        "  one:\n"
+        "    steps:\n"
+        "      - name: not an audit\n"
+        "        run: python3 scripts/leakcheck.py\n",
+        encoding="utf-8",
+    )
+    workflow = _parse_workflow(synthetic)
+    assert workflow["on"]["pull_request"]["types"] == ["opened", "synchronize"]
+    assert _audit_steps(workflow) == []
 
 
 def test_the_commit_msg_hook_runs_this_check():
