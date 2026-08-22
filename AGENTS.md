@@ -115,6 +115,13 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   `writes.require`, and every command declares `access=READ_ONLY` or `access=MUTATING` so that
   `--help` and the generated skill are printing the *same declaration* rather than two descriptions
   that can drift. See "The write gate" below.
+- `playback.py` — the playback gate and the one seam that addresses a player. It holds the gate
+  variable, the `dispatching` access level, the target model, target resolution across both routes,
+  and the local dispatch itself. Deliberately not the client library's `PlexClient`/`playMedia`
+  object model; see "The playback gate" below.
+- `cloud.py` — the Sonos route: one `sonos.plex.tv` call with `requests`, parsed with the standard
+  library, on the same pattern as `users.py` and for the same reason. Imported lazily, and only
+  when `PLEX_ACCOUNT_TOKEN` is set.
 - `users.py` — `--user`: one plex.tv call, parsed with the standard library. Deliberately not the
   client library's own user switch; see the sharp edge below.
 - `argspec.py` — per-subcommand flag declarations, and the `access:` block `--help` prints under the
@@ -129,6 +136,15 @@ filter field — `genres`/`moods`/`styles`, and `track`/`album`/`artist` — so 
 `COMMAND_FOR(noun)` instead. Three near-identical files per group would have been worse than one
 parameterised one. Adding a noun is still one entry in `COMMAND_ORDER` and one in `_MODULES` in
 `cli.py`; root help, `SKILL.md` and the parametrised test sweeps all derive from those.
+
+**A second deviation, and it is the playback gate's doing.** `COMMAND_ORDER` and `_MODULES` are no
+longer the whole table. `cli.command_order(environ)` and `cli.modules(environ)` append
+`PLAYBACK_ORDER` and `_PLAYBACK_MODULES` when the gate is open, and *everything that lists commands
+reads the function rather than the constant* — the dispatcher, root help, the home view and
+`skill.py`. That is what makes a closed gate invisible rather than merely refusing. A surface that
+reaches for `COMMAND_ORDER` directly is describing the base installation, which is correct for the
+committed `SKILL.md` and for the tests that pin the public surface, and wrong for anything a caller
+sees. Adding a playback noun is one entry in each of those two, plus its module.
 
 ### Security invariants — do not regress these
 
@@ -170,8 +186,159 @@ parameterised one. Adding a noun is still one entry in `COMMAND_ORDER` and one i
 - **A per-user token is registered as a secret the moment it arrives.** `--user` receives a bearer
   credential from plex.tv that never passed through this process's own configuration, so
   `users.access_token` calls `register_secret` on it before returning.
+- **Playback handles two more credentials and both are registered where they arrive.**
+  `PLEX_ACCOUNT_TOKEN` is read by `playback.account_token`, which calls `register_secret` before
+  returning it; the short-lived delegation token `/security/token` mints is registered by
+  `playback._delegation_token` the moment the server hands it over. The delegation one also has a
+  shape-based backstop in `redact()` — it travels in a URL under the bare name `token`, so
+  `[?&]token=` is redacted like `X-Plex-Token=` is, anchored on a query separator so prose about
+  tokens survives.
+- **A refused *dispatch* reaches the server zero times, and it is two latches rather than one.**
+  With the gate closed `cli` will not route a playback noun at all, and `playback.require` runs at
+  the top of `run()` ahead of `ctx.server()` anyway. `tests/test_playback.py` asserts on
+  `server.requests` and `server.played`, not on the exit code, for the same reason
+  `tests/test_writes.py` does.
+- **No network address reaches any output stream.** A `/clients` element carries `host`, `address`
+  and `port` and a Sonos resource carries `lanIP`; none of them is read into a row or a message,
+  and the double carries them so that withholding them is a test rather than an assumption.
 - Tests for all of this live in `tests/test_credentials.py`, which asserts `capsys` **stderr** is
-  clean as often as stdout.
+  clean as often as stdout, and in `tests/test_playback.py`.
+
+## The playback gate, and the reversal it records
+
+**The first two releases could not play music, and this file said so in three places.** That
+decision is now reversed under a gate. It is worth reading the reasoning before touching any of it,
+because the reversal is narrower than it looks and the thing that makes it safe is not the same
+thing that makes the write gate safe.
+
+**Why the old rule was right, and for whom it still is.** It was never "playing music is
+dangerous". It was that this repository's own operator runs Home Assistant, HA owns dispatch, and a
+second tool that could also start music lets an agent pick the path that bypasses it — leaving HA
+and a downstream assistant believing something different is playing. That reasoning is intact for
+anyone who has such a system. It is simply irrelevant to somebody who has a Plex library and
+nothing else, and for them the tool dead-ended at an identifier with nothing to do with it.
+
+**What was surrendered, permanently.** `tests/test_no_dispatch.py` used to prove the capability was
+not *reachable* — no command, no flag, no code path. Once playback code exists that proof is gone
+and it cannot come back: the strongest available claim is that the capability is *gated*, never
+that it is *absent*. The file's docstring says exactly that, and lists what it guarantees instead.
+Do not add a test asserting the absence of a command that ships; it would have to be deleted the
+first time anyone ran it, and a deleted test protects nothing.
+
+### Two conjuncts, and one extra requirement the write gate does not have
+
+1. **`PLEX_AXI_ALLOW_PLAYBACK=true` in the environment is the gate**, matched case-insensitively
+   after stripping — the same shape and the same reasoning as `PLEX_AXI_ALLOW_WRITES`.
+2. **`--now` on the invocation is the confirmation, and it is not a second gate.** With the gate
+   open and the flag absent, `play` resolves the item, resolves the target, prints which one it
+   picked and why, and sends nothing. That is where "three clients and you named none of them" and
+   "that rating key is a film" are caught, cheaply, before a speaker in somebody's house comes on.
+   It is `--now` rather than `--play` because `plex-axi play 12345 --play` reads as ceremony,
+   where `--now` says what its absence means.
+3. **When the gate is closed the commands do not exist.** This is the requirement that is *not*
+   shared with the write gate, and it is the one that keeps the original reasoning working.
+   Refusing is not enough: if `play` appeared in `--help`, in the home view or in the generated
+   skill, an agent in a house that also runs a home-automation CLI would see two ways to start
+   music and would sometimes choose the wrong one. So `cli.command_order(environ)` and
+   `cli.modules(environ)` are gate-aware and the *dispatcher* reads them: with the gate closed,
+   `plex-axi play` is an unknown command answered by `_OUT_OF_SCOPE` with exactly the message it
+   has always been answered with, root help lists the commands it always did, the home view prints
+   no `playback:` line, and the skill is byte-for-byte the one this repository commits.
+   `tests/test_playback.py` sweeps every one of those surfaces for every string that would betray
+   the capability — including the names of both environment variables, because an agent that saw
+   the name of the gate would know there was a gate.
+
+**The one place it is deliberately less secretive.** A gate variable that is *set* but is not
+`true` refuses **by name**, exactly as the write gate does. Invisibility is owed to somebody who has
+not opted in; somebody who has exported the variable has typed the capability's name, so there is
+nothing left to hide from them, and answering "unknown command" would send them hunting for a
+variable they had already set. The commands still do not appear in help — they are not enabled —
+but the refusal explains itself. `playback.misconfigured` is that distinction.
+
+**Why it is a separate variable from the write gate, and not a value of it.** Playing is not a
+write: a write changes library or account state that persists and that somebody reads back later,
+where playback changes what is coming out of a speaker until somebody presses stop. But the
+stronger reason is that the two gates answer different questions. `PLEX_AXI_ALLOW_WRITES` answers
+"may this tool change my library"; `PLEX_AXI_ALLOW_PLAYBACK` answers "does anything *else* in this
+house own the speakers". An operator who wanted `rate` has said nothing about the second question,
+and folding them together would mean opening one silently granted the other — which is the exact
+coupling this gate exists to prevent. `tests/test_playback.py` asserts both directions.
+
+### The access vocabulary grew a third level
+
+`READ_ONLY` and `MUTATING` were the whole vocabulary while the tool could only read and write the
+library. Starting playback is neither, and describing it as either would be a lie in one direction
+or the other, so `playback.ACCESS` adds `dispatching`. Each gate module owns its own entry and
+`argspec.ACCESS` merges them, rather than `writes.py` naming the playback variable — the two gates
+stay independent in code as well as in prose. `clients` is declared `READ_ONLY`, because listing
+targets genuinely cannot start anything and an access block that overstated it would stop being
+read.
+
+### The two routes, and what each costs
+
+- **`local`** — `/clients`, which is the server's own list of what has announced itself to it.
+  Verifiable against a real client on the network.
+- **`sonos`** — `sonos.plex.tv`, which is how Plex reaches a Sonos speaker linked to a plex.tv
+  account. Plex for Sonos is a current product, not a discontinued one, and for somebody with Sonos
+  and no home-automation system it is the only thing that makes a `media_id` useful. Two things it
+  needs and both are handled explicitly: a **plex.tv account token** in `PLEX_ACCOUNT_TOKEN`, which
+  is a broader credential than `PLEX_TOKEN` and not interchangeable with it (a server token gets a
+  flat 401 from plex.tv — measured, not assumed), registered as a secret the moment it is read; and
+  a statement, in `--help` and here, that the command goes over Plex's cloud, so a house running
+  Home Assistant will find HA's state stale. That is information for the operator, not a refusal.
+
+**Why Sonos is implemented here rather than through `plexapi.sonos`, and what that preserves.**
+`plexapi.sonos` reaches `PlexSonosClient` through `MyPlexAccount.sonos_speakers()`, and the account
+object is the thing this package has never let into its process: it resolves speakers by name, it
+dispatches playback, and it is one attribute access away from every module here. So `cloud.py` does
+what `users.py` does for `--user` — asks the one documented endpoint with `requests`, parses the
+answer with `xml.etree`. The consequence is the part of the old rule that survived **intact**:
+`plexapi.sonos`, `PlexSonosClient`, `sonos_speakers`, `MyPlexAccount`, `switchUser` and their
+relatives are still named nowhere in this package's code and still never enter the process, gate
+open or closed. That is a weaker claim than "the Sonos route is unreachable" and it is the strongest
+one that survives implementing the route; do not let the two be confused.
+
+**The Sonos route has not been verified against a live speaker.** No plex.tv account token was
+available when it was written — the credential to hand was a server token, and plex.tv answered it
+401, which is the failure the route's own error message describes. It is exercised end to end
+against the double, including the two-credential split, but the double's shapes for
+`sonos.plex.tv` are transcribed from `plexapi.sonos` rather than from a live capture. Treat it as
+unverified until somebody has played to a real speaker with it, and say so in any release note.
+
+### Sharp edges paid for by the live audit of this feature
+
+- **`PlexServer.clients()` reaches plex.tv.** When a client fails to advertise a port it calls
+  `myPlexAccount().devices()` to look one up — which would pull the account object, and with it the
+  Sonos dispatch surface, into a process that has no other reason to hold it. `playback._local_targets`
+  reads `/clients` and parses it here instead. The double carries a portless client so that this is
+  a test rather than a comment.
+- **`/security/token` answered `403` on a real server.** The client library's `PlexClient.playMedia`
+  calls `createToken()` unconditionally and lets the failure propagate, so its play path fails
+  outright on any server whose token is not a plex.tv account token — which is exactly what a
+  server permitting unauthenticated access on the local network hands out. `playback._delegation_token`
+  notes the refusal and plays without one, and the double refuses to mint one *by default* so that
+  the path every test takes is the path a real installation takes.
+- **`POST /playQueues` needs the `X-Plex-*` identity headers.** A bare `curl` with only
+  `X-Plex-Token` gets `400 Bad Request` with an HTML body; the same request through the client
+  library's session succeeds. Anything hand-testing a playback endpoint has to send the headers
+  `plex.harden()` sets, or it will diagnose a working implementation as broken.
+- **A play queue is created with one POST and only its `playQueueID` is read.** Not
+  `createPlayQueue`: that builds a whole `PlayQueue` object, which indexes its own contents to find
+  the selected item — so a ten-thousand-track playlist is parsed in full to hand back a number.
+- **`item.key` differs by kind and both forms work.** A track or album is `/library/metadata/<n>`;
+  a playlist fetched from that same namespace is `/playlists/<n>` (the client library strips the
+  `/items` suffix). The `uri` is `server://<machineIdentifier>/com.plexapp.plugins.library<item.key>`
+  either way, and Plex expands an album or a playlist to its tracks — verified live for track,
+  album and playlist.
+- **Plexamp and Plex for Android answer a successful playback command with `OK`, not XML.** The
+  status code is read before the body is parsed, so a parse failure after a 200 is success. The
+  double models exactly that for the client that plays, which means the ordinary test path is the
+  awkward one rather than a tidier one that does not exist.
+- **A `/clients` entry is a `<Server>` element and carries the player's name under `name`**, not
+  `title` — the mirror image of the `<Player>`/`title` trap under "Sharp edges". It also carries
+  `host`, `address` and `port`, and a Sonos resource carries `lanIP`. **None of them is printed**:
+  nothing needs them to address a target, and this repository is public. The double carries them so
+  that withholding them is a test rather than an assumption.
 
 ## The write gate
 
@@ -466,6 +633,8 @@ PR must say what. The current set, each with its reason:
 | `playlist` | pass `playlistType='audio'` (without it `playlists()` returns films and photos too), and tell the two `BadRequest`s apart — smart playlist means pick a different playlist, mixed media means pick different items |
 | `rate` | convert stars to Plex's 0-10 in the same place the read path converts back, refuse a no-op, and read the result back rather than echoing the request |
 | `doctor` | check four things in the order they fail, and exit non-zero |
+| `clients` | read `protocolCapabilities` and say which targets can actually play, ask the Sonos route only when its credential exists, and report which routes it consulted — and print no network address from either |
+| `play` | create the play queue at all (`api` is GET-only, so it cannot), resolve a target explicitly across two routes, and step over a server that will not mint a delegation token |
 
 **Demotion.** If a typed command's body reduces to flag-mapping plus a request, delete it — the
 measure is the diff, not the intention.
@@ -478,22 +647,25 @@ silent.
 
 **`queue create` (W11) is still out.** A playqueue id is not universally accepted — Sonos rejects
 Plex playqueues outright — so shipping one without naming which platforms take it only moves the
-discovery to a 500.
+discovery to a 500. `play` creates a queue and hands the *client* its id in the same command, which
+is a different thing from publishing one as a result a caller has to find a use for.
 
-**What is deliberately absent, and will stay absent.** No playback of any kind, no speaker, room,
-player, client or target concept, no video, no server administration, no *metadata* editing (a user
-rating is per-account state, not library metadata, which is why `rate` is in and `edit` is not), no
-second Plex client library, and no semantic name resolution by regex or substring. The first is enforced by
-`tests/test_no_dispatch.py`; read its module docstring before touching it. The rule is not that the
-tool *cannot* play music — the client library can, over a live cloud path to a Sonos and over a
-local one to a Chromecast, and both are one attribute access away. It is that it *must not*, because
-reaching past the seam makes two systems believe they own the same queue.
+**What is deliberately absent, and will stay absent.** No transport control of any kind — no pause,
+stop, resume, seek, next, previous, volume or queue management — no video, no server
+administration, no *metadata* editing (a user rating is per-account state, not library metadata,
+which is why `rate` is in and `edit` is not), no second Plex client library, and no semantic name
+resolution by regex or substring. `play` starts one item on one named target and that is the whole
+of it: the thing that was missing from a tool ending at an identifier was a way to *use* the
+identifier, and the rest was never missing. A control surface is where two systems start believing
+they own the same queue, which is why the line is drawn after the start button rather than before
+it. `tests/test_no_dispatch.py` enforces it, on the playback commands as well as on every other
+one; read its module docstring before touching it.
 
 ## Build, test, lint
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~690 tests, a couple of seconds
+pytest                                   # ~870 tests, a few seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting

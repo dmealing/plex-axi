@@ -401,6 +401,109 @@ SESSIONS = [
 
 SEARCH_TYPES = {"8": "artist", "9": "album", "10": "track"}
 
+#: The plex.tv **account** token, which is a different and broader credential
+#: than :data:`TOKEN`: the server accepts one and plex.tv accepts the other, and
+#: the whole point of the Sonos route's own variable is that they are not
+#: interchangeable. Measured against a real installation: a server token gets a
+#: flat 401 from plex.tv.
+ACCOUNT_TOKEN = "example-token-0000000003"
+
+#: The delegation token `/security/token` mints, on a server that will mint one.
+DELEGATION_TOKEN = "example-token-0000000004"
+
+#: Machine identifiers for the things that can be played to. On their own lines
+#: and obviously synthetic, like :data:`MACHINE_ID`.
+CLIENT_ID = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"
+SCREEN_ID = "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+PORTLESS_ID = "4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d"
+SPEAKER_ID = "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+
+#: What `/clients` answers with.
+#:
+#: **Shape transcribed, with one caveat that has to be said out loud.** A
+#: `/clients` entry is a ``<Server>`` element, and this attribute list is the one
+#: the client library reads off one -- ``name`` (not ``title``),
+#: ``machineIdentifier``, ``product``, ``deviceClass``, ``protocolVersion``,
+#: ``protocolCapabilities``, plus the ``host``/``address``/``port`` trio -- taken
+#: from ``plexapi.client.PlexClient._loadData`` and ``PlexServer.clients``, which
+#: are the only public description of it. It is **not** copied from a live
+#: capture: no client was advertising on the server this was written against, and
+#: the honest thing is to say so rather than to imply a capture that does not
+#: exist. See AGENTS.md, "The double-fidelity rule".
+#:
+#: The three rows are three different answers on purpose:
+#:
+#: * one that can play, and answers a playback command with the bare ``OK`` that
+#:   Plexamp and Plex for Android send rather than with XML;
+#: * one that answers but advertises no ``playback`` capability, so a tool that
+#:   read the list without reading the capabilities would address it and watch
+#:   nothing happen;
+#: * one that advertises no ``port``, which is the case that makes
+#:   ``PlexServer.clients()`` reach plex.tv for the missing number. Nothing here
+#:   uses that helper, and this row is what proves it.
+CLIENTS = [
+    {
+        "name": "Example Client",
+        "machineIdentifier": CLIENT_ID,
+        "host": "203.0.113.11",
+        "address": "203.0.113.11",
+        "port": "32500",
+        "product": "Example Player",
+        "deviceClass": "phone",
+        "version": "4.0.0",
+        "protocol": "plex",
+        "protocolVersion": "1",
+        "protocolCapabilities": "timeline,playback,playqueues",
+        "answers": "OK",
+    },
+    {
+        "name": "Example Screen",
+        "machineIdentifier": SCREEN_ID,
+        "host": "203.0.113.12",
+        "address": "203.0.113.12",
+        "port": "32500",
+        "product": "Example Display",
+        "deviceClass": "stb",
+        "version": "2.0.0",
+        "protocol": "plex",
+        "protocolVersion": "1",
+        "protocolCapabilities": "timeline,navigation",
+        "answers": "xml",
+    },
+    {
+        "name": "Example Portless",
+        "machineIdentifier": PORTLESS_ID,
+        "host": "203.0.113.13",
+        "address": "203.0.113.13",
+        "port": "",
+        "product": "Example Player",
+        "deviceClass": "pc",
+        "version": "1.0.0",
+        "protocol": "plex",
+        "protocolVersion": "1",
+        "protocolCapabilities": "timeline,playback",
+        "answers": "xml",
+    },
+]
+
+#: What ``sonos.plex.tv/resources`` answers with. Attributes transcribed from
+#: ``plexapi.sonos.PlexSonosClient.__init__``, which is the only public
+#: description of the element; ``lanIP`` is on it and is deliberately never read,
+#: which is what the row shape has to prove.
+SONOS_SPEAKERS = [
+    {
+        "title": "Example Speaker",
+        "machineIdentifier": SPEAKER_ID,
+        "product": "Sonos",
+        "platform": "Sonos",
+        "platformVersion": "80.0",
+        "deviceClass": "speaker",
+        "protocol": "plex",
+        "protocolCapabilities": "timeline,playback,playqueues,provider-playback",
+        "lanIP": "203.0.113.21",
+    }
+]
+
 
 class Tables:
     """One server's own copy of the fixture.
@@ -496,6 +599,39 @@ KNOWN_FIELDS = {
 #: anything not here is a 400, so a write that reached the URL misspelled fails
 #: the suite rather than being quietly absorbed.
 KNOWN_PLAYLIST_PARAMS = {"playlistType", "sectionID", "title", "sort", "type", "smart", "uri"}
+
+#: What ``/playQueues`` defines. Same rule as everywhere else: anything not here
+#: is a 400, so a play queue built with a parameter Plex does not know fails the
+#: suite rather than being quietly absorbed.
+PLAYQUEUE_PARAMS = {
+    "type",
+    "uri",
+    "playlistID",
+    "key",
+    "shuffle",
+    "repeat",
+    "continuous",
+    "includeChapters",
+    "includeRelated",
+}
+
+#: What ``/player/playback/playMedia`` requires. ``containerKey`` is the one
+#: that matters: it names the play queue, and a playback command that points at
+#: a queue this server never created is refused rather than answered with a
+#: cheerful 200.
+PLAY_REQUIRED = {
+    "providerIdentifier",
+    "machineIdentifier",
+    "protocol",
+    "address",
+    "port",
+    "offset",
+    "key",
+    "type",
+    "containerKey",
+    "commandID",
+}
+PLAY_OPTIONAL = {"token"}
 
 #: What `/:/rate` requires. `identifier` is not decoration: without it Plex does
 #: not know which agent's rating is being set.
@@ -729,6 +865,48 @@ def playlist_xml(row, tables):
         ]
     )
     return f"<Playlist {head}/>"
+
+
+def client_xml(row):
+    """One `/clients` entry, addresses and all.
+
+    The address attributes are here precisely because the tool must never print
+    them: a double that left them out could not tell a command that withholds
+    them from one that never had them.
+    """
+    head = _attrs(
+        [
+            ("name", row["name"]),
+            ("host", row["host"]),
+            ("address", row["address"]),
+            ("port", row["port"]),
+            ("machineIdentifier", row["machineIdentifier"]),
+            ("version", row["version"]),
+            ("protocol", row["protocol"]),
+            ("product", row["product"]),
+            ("deviceClass", row["deviceClass"]),
+            ("protocolVersion", row["protocolVersion"]),
+            ("protocolCapabilities", row["protocolCapabilities"]),
+        ]
+    )
+    return f"<Server {head}/>"
+
+
+def sonos_xml(row):
+    head = _attrs(
+        [
+            ("title", row["title"]),
+            ("machineIdentifier", row["machineIdentifier"]),
+            ("product", row["product"]),
+            ("platform", row["platform"]),
+            ("platformVersion", row["platformVersion"]),
+            ("deviceClass", row["deviceClass"]),
+            ("protocol", row["protocol"]),
+            ("protocolCapabilities", row["protocolCapabilities"]),
+            ("lanIP", row["lanIP"]),
+        ]
+    )
+    return f"<Player {head}/>"
 
 
 # -------------------------------------------------------------- filter metadata
@@ -1076,6 +1254,10 @@ class FakePlex:
         plex_tv_unreachable=False,
         refuse_user_token=False,
         fields=None,
+        clients=None,
+        sonos=None,
+        sonos_status=200,
+        mints_tokens=False,
     ):
         self.groupable = groupable
         self.token = token
@@ -1120,6 +1302,23 @@ class FakePlex:
         #: be shown to block *here*, on the wire, not merely in an exit code.
         self.writes = []
         self.plex_tv_requests = []
+        #: The clients this server can see. A list rather than a constant so a
+        #: test can model an empty network, or two clients with the same name.
+        self.clients_seen = CLIENTS if clients is None else clients
+        self.sonos_speakers_seen = SONOS_SPEAKERS if sonos is None else sonos
+        self.sonos_status = sonos_status
+        #: Whether `/security/token` mints a delegation token. **False by
+        #: default, because that is what a real server did**: a server whose
+        #: token is not a plex.tv account token answers `403 Forbidden` there,
+        #: and a double that always minted one would have hidden the fact that
+        #: the client library's own play path fails outright on such a server.
+        self.mints_tokens = mints_tokens
+        self.playqueues = {}
+        self._next_playqueue = 700
+        #: Every playback command this server was asked to forward, so a test
+        #: can assert on what was sent rather than on an exit code.
+        self.played = []
+        self.sonos_requests = []
         self._identity = "owner"
 
     def _item_id(self):
@@ -1141,6 +1340,9 @@ class FakePlex:
             "method": method,
             "host": host,
         }
+        if host == "sonos.plex.tv":
+            self.sonos_requests.append(record)
+            return self._sonos(path, query, headers, method)
         if host == "plex.tv":
             self.plex_tv_requests.append(record)
             return self._plex_tv(path, headers, method)
@@ -1171,6 +1373,14 @@ class FakePlex:
             return self._rate(query, method, identity)
         if path == "/playlists" or path.startswith("/playlists/"):
             return self._playlists(path, query, method, start, size)
+        if path == "/clients":
+            return self._clients(method)
+        if path == "/playQueues":
+            return self._playqueue(query, method)
+        if path == "/player/playback/playMedia":
+            return self._play(query, headers, method)
+        if path == "/security/token":
+            return self._security_token(method)
         raise PlexRefusal(404, '<Response code="1000" status="Not Found"/>')
 
     def _identify(self, headers):
@@ -1376,6 +1586,13 @@ class FakePlex:
         except ValueError:
             raise PlexRefusal(400, "rating key must be an integer") from None
         if rating_key not in self.tables.by_key:
+            # A playlist's rating key lives in this namespace too, which was
+            # checked against a real server rather than assumed:
+            # `GET /library/metadata/<playlistRatingKey>` answers 200 with a
+            # `<Playlist>` element, in the same container as a track's.
+            for playlist in self.playlists:
+                if playlist["id"] == rating_key and not tail:
+                    return _container(playlist_xml(playlist, self.tables), size=1)
             raise PlexRefusal(404, "no item with that rating key")
         kind, row = self.tables.by_key[rating_key]
         row = self._rated(row)
@@ -1446,6 +1663,189 @@ class FakePlex:
             raise PlexRefusal(404, "no item with that rating key")
         self.ratings[(identity, rating_key)] = None if rating < 0 else rating
         return _container("", size=0)
+
+    # -- playback --------------------------------------------------------
+
+    def _clients(self, method):
+        """``/clients``: what has announced itself to this server, addresses and all."""
+        if method != "GET":
+            raise PlexRefusal(405, f"{method} is not defined for /clients")
+        body = "".join(client_xml(row) for row in self.clients_seen)
+        return _container(body, size=len(self.clients_seen))
+
+    def _security_token(self, method):
+        """``/security/token``, which a real server refused.
+
+        Measured: a Plex Media Server whose token is not a plex.tv account
+        token answers ``403 Forbidden`` here. That is the default, so the path
+        every test takes is the one a real installation takes, and the tool's
+        "play without a delegation token" branch is exercised rather than
+        assumed. ``mints_tokens=True`` is the other server.
+        """
+        if method != "GET":
+            raise PlexRefusal(405, f"{method} is not defined for /security/token")
+        if not self.mints_tokens:
+            raise PlexRefusal(403, "<html><body><h1>403 Forbidden</h1></body></html>")
+        return _container("", size=0, extra=[("token", DELEGATION_TOKEN)])
+
+    def _playqueue(self, query, method):
+        """``/playQueues``: build a queue from a uri, and refuse a bad one.
+
+        The queue is expanded for real -- an album becomes its tracks, a
+        playlist its items -- because a double that returned the same queue
+        whatever was asked would let a `uri` that names the wrong thing pass.
+        """
+        if method != "POST":
+            raise PlexRefusal(405, f"{method} is not defined for /playQueues")
+        unknown = sorted(set(query) - PLAYQUEUE_PARAMS - KNOWN_PARAMS)
+        if unknown:
+            raise PlexRefusal(400, f"unknown parameter(s): {', '.join(unknown)}")
+        missing = sorted({"type", "uri"} - set(query))
+        if missing:
+            raise PlexRefusal(400, f"missing parameter(s): {', '.join(missing)}")
+        if query["type"] not in ("audio", "video", "photo"):
+            raise PlexRefusal(400, f"unknown play queue type {query['type']!r}")
+        keys = self._queue_keys(query["uri"])
+        identifier = self._next_playqueue
+        self._next_playqueue += 1
+        self.playqueues[identifier] = keys
+        body = "".join(track_xml(self.tables.by_key[k][1], self.tables) for k in keys)
+        return _container(
+            body,
+            size=len(keys),
+            extra=[
+                ("playQueueID", identifier),
+                ("playQueueTotalCount", len(keys)),
+                ("playQueueSelectedItemOffset", 0),
+                ("playQueueVersion", 1),
+            ],
+        )
+
+    def _queue_keys(self, uri):
+        """The track keys a `uri` names, refusing anything it does not.
+
+        The prefix check is the same one the playlist endpoint makes and for the
+        same reason: a uri naming another machine is a request this server
+        cannot serve, and answering it would let a wrong machine identifier ship.
+        """
+        prefix = f"server://{MACHINE_ID}/com.plexapp.plugins.library"
+        if not uri.startswith(prefix):
+            raise PlexRefusal(400, "uri must name this server and its library")
+        rest = uri[len(prefix) :]
+        if rest.startswith("/playlists/"):
+            wanted = rest[len("/playlists/") :].split("/")[0]
+            for playlist in self.playlists:
+                if str(playlist["id"]) == wanted:
+                    return [entry["key"] for entry in playlist["items"]]
+            raise PlexRefusal(404, "no playlist with that rating key")
+        if not rest.startswith("/library/metadata/"):
+            raise PlexRefusal(400, f"unsupported play queue uri {rest!r}")
+        try:
+            rating_key = int(rest[len("/library/metadata/") :].split("/")[0])
+        except ValueError:
+            raise PlexRefusal(400, "rating key must be an integer") from None
+        if rating_key not in self.tables.by_key:
+            raise PlexRefusal(404, "no item with that rating key")
+        kind, _row = self.tables.by_key[rating_key]
+        if kind == "track":
+            return [rating_key]
+        if kind == "album":
+            return [t["key"] for t in self.tables.tracks if t["album"] == rating_key]
+        if kind == "artist":
+            albums = {a["key"] for a in self.tables.albums if a["artist"] == rating_key}
+            return [t["key"] for t in self.tables.tracks if t["album"] in albums]
+        raise PlexRefusal(400, f"a {kind} cannot be a play queue")
+
+    def _play(self, query, headers, method):
+        """``/player/playback/playMedia``, proxied to a client by this server.
+
+        Refuses the way Plex does: the target header has to name a client this
+        server can see, that client has to advertise ``playback``, and the
+        ``containerKey`` has to name a play queue this server actually created.
+        The last is the one worth having -- a playback command pointing at a
+        queue that does not exist is exactly what a broken implementation sends,
+        and a permissive double would answer it 200.
+        """
+        if method != "GET":
+            raise PlexRefusal(405, f"{method} is not defined for /player/playback/playMedia")
+        target = headers.get("X-Plex-Target-Client-Identifier")
+        if not target:
+            raise PlexRefusal(400, "X-Plex-Target-Client-Identifier is required")
+        row = next(
+            (c for c in self.clients_seen if c["machineIdentifier"] == target),
+            None,
+        )
+        if row is None:
+            raise PlexRefusal(404, "no client with that machine identifier")
+        if "playback" not in row["protocolCapabilities"].split(","):
+            raise PlexRefusal(400, "that client does not advertise the playback capability")
+        missing = sorted(PLAY_REQUIRED - set(query))
+        if missing:
+            raise PlexRefusal(400, f"missing parameter(s): {', '.join(missing)}")
+        unknown = sorted(set(query) - PLAY_REQUIRED - PLAY_OPTIONAL - KNOWN_PARAMS)
+        if unknown:
+            raise PlexRefusal(400, f"unknown parameter(s): {', '.join(unknown)}")
+        if query["type"] != "music":
+            raise PlexRefusal(400, "the remote-control API calls audio 'music'")
+        wanted = query["containerKey"].split("?")[0]
+        if not wanted.startswith("/playQueues/"):
+            raise PlexRefusal(400, "containerKey must name a play queue")
+        try:
+            identifier = int(wanted[len("/playQueues/") :])
+        except ValueError:
+            raise PlexRefusal(400, "play queue id must be an integer") from None
+        if identifier not in self.playqueues:
+            raise PlexRefusal(404, "no play queue with that id")
+        self.played.append(
+            {"client": row["name"], "queue": identifier, "key": query["key"], "route": "local"}
+        )
+        if row["answers"] == "OK":
+            # Not XML. Plexamp, Plex for Android and Plex for Samsung answer a
+            # successful playback command with this, which is why the tool has
+            # to treat a parse failure after a 200 as success.
+            return "OK"
+        return '<?xml version="1.0"?><Response code="200" status="OK"/>'
+
+    def _sonos(self, path, query, headers, method):
+        """``sonos.plex.tv``: the cloud route, answered by the same double.
+
+        Routed on the hostname exactly as ``plex.tv`` is, which is what lets
+        "the account token is missing" and "Sonos is unreachable" be test cases
+        rather than hypotheticals. The token it demands is the **account**
+        token, never the server one -- that separation is the whole reason the
+        route has its own environment variable.
+        """
+        if method != "GET":
+            raise PlexRefusal(405, f"{method} is not defined here")
+        if headers.get("X-Plex-Token") != ACCOUNT_TOKEN:
+            raise PlexRefusal(401, "<html><body><h1>401 Unauthorized</h1></body></html>")
+        if self.sonos_status != 200:
+            raise PlexRefusal(self.sonos_status, "the sonos service refused")
+        if path == "/resources":
+            body = "".join(sonos_xml(row) for row in self.sonos_speakers_seen)
+            return _container(body, size=len(self.sonos_speakers_seen))
+        if path == "/player/playback/playMedia":
+            target = query.get("X-Plex-Target-Client-Identifier")
+            row = next(
+                (s for s in self.sonos_speakers_seen if s["machineIdentifier"] == target), None
+            )
+            if row is None:
+                raise PlexRefusal(404, "no speaker with that machine identifier")
+            if query.get("X-Plex-Token") != self.token:
+                # Two credentials, and they are not the same one: the header
+                # carries the account token and this parameter carries the
+                # server token, because it is what the speaker streams with.
+                raise PlexRefusal(400, "the server token is required to stream")
+            self.played.append(
+                {
+                    "client": row["title"],
+                    "queue": int(query["containerKey"].split("?")[0].rsplit("/", 1)[-1]),
+                    "key": query.get("key"),
+                    "route": "sonos",
+                }
+            )
+            return '<?xml version="1.0"?><Response code="200" status="OK"/>'
+        raise PlexRefusal(404, "no such sonos endpoint")
 
     # -- playlists -------------------------------------------------------
 
@@ -1699,7 +2099,7 @@ class FakeSession:
     def _request(self, method, url, headers, params):
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname or ""
-        if host == "plex.tv" and self.server.plex_tv_unreachable:
+        if host.endswith("plex.tv") and self.server.plex_tv_unreachable:
             import requests
 
             raise requests.exceptions.ConnectionError("plex.tv is not answering")
@@ -1778,6 +2178,34 @@ def writable_env(plex_env):
     from plex_axi import writes
 
     return {**plex_env, writes.ALLOW_VAR: writes.ALLOW_VALUE}
+
+
+@pytest.fixture
+def playing_env(plex_env):
+    """The environment of an installation whose operator has opened *that* gate.
+
+    A separate variable from the write gate, and a separate fixture, because the
+    two answer different questions: one is "may this tool change my library" and
+    the other is "does anything else in this house own the speakers". A test that
+    reached for :func:`writable_env` here would be asserting a coupling the
+    design deliberately refuses.
+    """
+    from plex_axi import playback
+
+    return {**plex_env, playback.ALLOW_VAR: playback.ALLOW_VALUE}
+
+
+@pytest.fixture
+def sonos_env(playing_env):
+    """...and who has also given the tool a plex.tv account token.
+
+    The Sonos route needs a credential ``PLEX_TOKEN`` is not, so it needs an
+    environment ``playing_env`` is not: with the gate open and this unset, the
+    cloud route is not consulted at all and the answer says so.
+    """
+    from plex_axi import playback
+
+    return {**playing_env, playback.ACCOUNT_TOKEN_VAR: ACCOUNT_TOKEN}
 
 
 @pytest.fixture

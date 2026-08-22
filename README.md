@@ -9,9 +9,15 @@ gets its own flag — artist, track, genre, mood, year, minimum rating — and P
 predicate server-side. Every answer ends at a labelled `media_id`, the identifier you hand to
 whatever plays music where you are.
 
-**It never plays anything.** There is no play command and no concept of a speaker, room, player or
-client, and there will not be one: dispatch belongs to the system that already owns your speakers,
-and this tool stops at the identifier. That boundary is enforced by a test, not a missing feature.
+**It does not play anything unless you switch playback on, and until you do it has no play command
+at all.** Out of the box the tool stops at the identifier, and dispatch belongs to whatever already
+owns your speakers — which is the right answer if you run Home Assistant or anything like it, since
+two things that can both start music means two things that disagree about what is playing. If you
+have Plex and nothing else, that was a dead end, so `PLEX_AXI_ALLOW_PLAYBACK=true` adds two
+commands: `clients`, which lists what can play, and `play`, which starts one track, album, artist
+or playlist on one of them. Without that variable they are not refused — they do not exist, in the
+help, in the skill or in the command table, so an agent cannot pick a path you did not open. There
+is no pause, stop, volume or queue command in either case, and there is not going to be one.
 
 It is an [AXI](https://axi.md) tool — an *Agent eXperience Interface*, a convention for command
 lines whose primary user is an LLM agent rather than a person. In practice that means
@@ -81,6 +87,8 @@ export PLEX_URL=http://plex.example.com:32400   # the server on your local netwo
 export PLEX_TOKEN=<a Plex access token>
 export PLEX_SECTION='Example Music'             # only if the server has more than one
 export PLEX_AXI_ALLOW_WRITES=true               # only if `rate` and `playlist` may write
+export PLEX_AXI_ALLOW_PLAYBACK=true             # only if you want `clients` and `play` to exist
+export PLEX_ACCOUNT_TOKEN=<a plex.tv token>     # only to reach Sonos speakers; see Playback
 ```
 
 Point `PLEX_URL` at the server itself rather than at plex.tv, so the tool keeps working when plex.tv
@@ -222,8 +230,53 @@ help[3]:
 gate meaningless — anything a typed command refused could be reissued by hand — and several Plex
 write endpoints are destructive.
 
-There is still no playback, no speaker, no metadata editing and no server administration. Rating a
-track and editing a playlist are not dispatch; playing one is.
+There is still no metadata editing and no server administration, and no transport control: `play`
+starts one thing on one target and nothing in this tool can pause, skip or stop it.
+
+## Playback
+
+Off by default, and while it is off the commands are not there to be found — not in `--help`, not
+in the generated skill, not in the no-argument view. That is deliberate. If your house already has
+something that owns the speakers, a second tool that could also start music is how an agent ends up
+dispatching down a path your automation cannot see, and the safest form of "do not use this" is
+"this does not exist". Switch it on only if nothing else is doing that job.
+
+```sh
+export PLEX_AXI_ALLOW_PLAYBACK=true
+
+plex-axi clients                                        # what can actually play
+plex-axi play 12345 --client 'Living Room'              # says what it would do, sends nothing
+plex-axi play 12345 --client 'Living Room' --now        # starts it
+```
+
+The gate is an environment variable and `--now` is the confirmation, exactly as with writes: the
+variable is your standing decision, the flag is this invocation's. Leaving `--now` off is not a nag,
+it is a cheaper question — it resolves the item and the target and tells you which one it picked and
+why, which is where "I have three clients and named none of them" gets caught before a speaker comes
+on. If there is exactly one target it is used, and the answer says it was the only candidate.
+
+`clients` lists only targets that advertise Plex's `playback` capability; anything else that
+answered is counted, because a client that cannot play will accept the command and do nothing. No
+network address is printed for any target — `--client` takes the exact title, or the `machine_id`
+printed beside it when two targets share a name.
+
+Two routes, and the second has conditions:
+
+| Route | Reached via | Needs |
+|---|---|---|
+| `local` | the server's own `/clients` list | nothing beyond `PLEX_TOKEN`; the client's app must be running on the same network as the server |
+| `sonos` | `sonos.plex.tv` | `PLEX_ACCOUNT_TOKEN`, a Plex Pass, speakers linked to that account, and remote access working |
+
+`PLEX_ACCOUNT_TOKEN` is a **plex.tv account token, which is not the same thing as `PLEX_TOKEN`** — a
+server token is refused by plex.tv outright, and the error says so rather than handing you a bare
+401. The Sonos route is consulted only when that variable is set, and `clients` says which routes it
+asked either way. It goes over Plex's cloud rather than through your server, so anything watching
+your server for a session will lag the command; that matters if you run Home Assistant, and it is
+another reason to leave this gate shut where something else already dispatches.
+
+Starting playback is all `play` does. There is no pause, stop, resume, seek, next, previous, volume
+or queue command, and there is not going to be one: a start button is a handoff, and a transport is
+a second system believing it owns your queue.
 
 ## What `media_id` is, and what consumes it
 
@@ -309,6 +362,12 @@ flag that does not exist.
 - Plex's media-query language is documented in the community OpenAPI specification
   (<https://github.com/LukeHagar/plex-api-spec>, MIT), which is the thing to cite rather than
   re-derive.
+- Playback reaches a local client through the server's own remote-control path and a Sonos speaker
+  through one documented `sonos.plex.tv` endpoint parsed with the standard library. It deliberately
+  does **not** use the client library's `PlexClient`/`MyPlexAccount`/`plexapi.sonos` object model,
+  which is asserted by a test: that surface resolves speakers by name and dispatches to them, and
+  keeping it out of the process is what stops "play one thing on one named target" growing into a
+  control plane by accident.
 - Development notes, including every sharp edge behind the code, are in [AGENTS.md](AGENTS.md).
 
 ## Contributing

@@ -14,22 +14,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import writes
+from . import playback, writes
 from .argspec import render_access
 from .commands.home import DESCRIPTION
 
 SKILL_NAME = "plex-axi"
 SKILL_RELATIVE_PATH = Path("skills") / SKILL_NAME / "SKILL.md"
 
-FRONTMATTER_DESCRIPTION = (
+_FRONTMATTER_BODY = (
     "Search and diagnose a Plex music library through the plex-axi CLI - structured "
     "per-field search on artist, album, track, genre, mood, style, year and rating; "
     "the library's own genre/mood/style vocabulary; track, album and artist detail "
     "including file availability; and sonically similar tracks. It can also set a "
     "rating and edit an audio playlist, but only when the operator has enabled writes. "
     "Use whenever a task touches a Plex music library: finding a recording, checking why "
-    "a search found nothing, or resolving a title to a media id. It never plays anything."
+    "a search found nothing, or resolving a title to a media id."
 )
+
+#: The closing sentence of the frontmatter, and the single most load-bearing
+#: line in this document: it is what an agent reads to decide whether this tool
+#: is a way to play music. It has to be true of the installation the skill was
+#: generated on, so it is chosen rather than fixed.
+NO_PLAYBACK_CLAIM = "It never plays anything."
+PLAYBACK_CLAIM = (
+    "This installation has playback enabled, so it can also start one item on one Plex "
+    "client; where anything else in the house dispatches music, that is the tool to use "
+    "instead."
+)
+
+FRONTMATTER_DESCRIPTION = f"{_FRONTMATTER_BODY} {NO_PLAYBACK_CLAIM}"
 
 
 def _fence(lines) -> str:
@@ -37,11 +50,19 @@ def _fence(lines) -> str:
 
 
 def render(commands) -> str:
-    """Render SKILL.md from the live command table."""
+    """Render SKILL.md from the live command table.
+
+    Playback is described only when the command table carries it -- which it
+    does only when the operator has opened that gate. With the gate closed this
+    renders byte-for-byte the document this repository commits, and an agent
+    reading it cannot tell the capability exists. See :mod:`plex_axi.playback`.
+    """
+    playing = any(command.name in playback.COMMANDS for command in commands)
+    frontmatter = f"{_FRONTMATTER_BODY} {PLAYBACK_CLAIM}" if playing else FRONTMATTER_DESCRIPTION
     sections = [
         "---",
         f"name: {SKILL_NAME}",
-        f"description: {FRONTMATTER_DESCRIPTION}",
+        f"description: {frontmatter}",
         "---",
         "",
         f"# {SKILL_NAME}",
@@ -61,6 +82,16 @@ def render(commands) -> str:
                 "export PLEX_SECTION='Example Music'             # only if there is more than one",
                 f"export {writes.ALLOW_VAR}={writes.ALLOW_VALUE}"
                 "        # only to allow `rate` and `playlist` to write",
+                *(
+                    [
+                        f"export {playback.ALLOW_VAR}={playback.ALLOW_VALUE}"
+                        "     # what makes `clients` and `play` exist at all",
+                        f"export {playback.ACCOUNT_TOKEN_VAR}=<a plex.tv account token>"
+                        "  # only to reach Sonos",
+                    ]
+                    if playing
+                    else []
+                ),
             ]
         ),
         "",
@@ -85,9 +116,24 @@ def render(commands) -> str:
         "",
         "## What this tool does not do",
         "",
-        "- **It never plays anything.** There is no play command and no concept of a speaker,",
-        "  room or player. Every command ends at a labelled `media_id`, and dispatch belongs to",
-        "  whatever owns the speakers.",
+        *(
+            [
+                "- **It starts playback and does nothing else to it.** `play` starts one item on",
+                "  one client; there is no pause, stop, volume, next or queue command, and there",
+                f"  is not going to be one. Playback exists here only because `{playback.ALLOW_VAR}`",
+                f"  is `{playback.ALLOW_VALUE}`; where anything else in the house owns the",
+                "  speakers, that is the tool to dispatch with, because two dispatchers means two",
+                "  systems believing they own the same queue.",
+            ]
+            if playing
+            else [
+                "- **It never plays anything.** There is no play command and no concept of a "
+                "speaker,",
+                "  room or player. Every command ends at a labelled `media_id`, and dispatch "
+                "belongs to",
+                "  whatever owns the speakers.",
+            ]
+        ),
         "- **It is music only.** No films, shows, episodes or watchlist. The rest of the Plex",
         "  tooling landscape is video-shaped; this is the half nothing else covers.",
         "- **It reads unless it is told twice that it may write.** Only `rate` and",
