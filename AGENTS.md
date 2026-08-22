@@ -70,10 +70,13 @@ deliberate and one is worth knowing about:
   `dist`, `build`, `venv` or `node_modules` anywhere in the tree is skipped whole. It only applies to
   the `os.walk` modes: the tracked-files scan and `--staged` list files from git and never consult
   it, so nothing tracked escapes the scan this way.
-- `tests/test_no_dispatch.py` skips any line containing the substring `FORBIDDEN_NAMES`, which
-  exempts that whole line from *every* forbidden name. No file under `src/plex_axi/` contains the
-  string today, so it is currently dead, but it is a blanket exemption and the surrounding scan is
-  a security control. Narrow it if that file ever grows one.
+- `tests/test_no_dispatch.py` stopped being a loose match at all when this change rewrote its scan
+  from raw lines to an AST walk over names, attributes, imports and string literals. It reads no
+  comments and no docstrings, so there is no per-line exemption to narrow. The string-literal half
+  is what keeps `getattr(x, 'playMedia')` caught as surely as the attribute would be; the
+  docstring-blindness is what lets `cloud.py` explain at length why it does *not* use
+  `plexapi.sonos` without that paragraph being the offence -- a rule the prose could trip would be
+  answered by deleting the prose, which is the opposite of what it is for.
 
 **Real content has no shape and the scanner cannot see it.** Artist and album names are the half
 that is convention only. The README says the coverage is bounded; do not restore any claim that the
