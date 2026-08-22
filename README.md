@@ -236,10 +236,19 @@ starts one thing on one target and nothing in this tool can pause, skip or stop 
 ## Playback
 
 Off by default, and while it is off the commands are not there to be found — not in `--help`, not
-in the generated skill, not in the no-argument view. That is deliberate. If your house already has
-something that owns the speakers, a second tool that could also start music is how an agent ends up
-dispatching down a path your automation cannot see, and the safest form of "do not use this" is
-"this does not exist". Switch it on only if nothing else is doing that job.
+in the generated skill, not in the no-argument view. That is deliberate, and the default is the
+important half.
+
+**If you run Home Assistant, or anything else that already dispatches music, leave this switched
+off.** Your automation owns the speakers — Sonos included, which it reaches by its own path — and
+the shape that works is to use this tool to *find* music and let that system play it. A play issued
+here goes around it, so its state is stale the moment the command succeeds; the problem is not that
+nothing happens, it is that everything downstream is confidently wrong about what is playing. While
+the switch is off an agent cannot see this path at all, which is the only reliable way to stop it
+choosing one.
+
+Switch it on if you have Plex and nothing else doing that job — which is exactly who it is for,
+because without it the tool hands you an identifier and stops.
 
 ```sh
 export PLEX_AXI_ALLOW_PLAYBACK=true
@@ -277,6 +286,13 @@ another reason to leave this gate shut where something else already dispatches.
 Starting playback is all `play` does. There is no pause, stop, resume, seek, next, previous, volume
 or queue command, and there is not going to be one: a start button is a handoff, and a transport is
 a second system believing it owns your queue.
+
+**Both routes ship without having started music on real hardware.** Everything up to the final
+request is confirmed against a live Plex Media Server — the play queue is created for a track, an
+album and a playlist, and the empty-client case is handled — but no Plex client advertised to the
+server while this was written, and no plex.tv account token was available for Sonos. If you are the
+first to use it, `--now` is the moment to find out, and a report either way is welcome on the issue
+tracker.
 
 ## What `media_id` is, and what consumes it
 

@@ -211,12 +211,30 @@ decision is now reversed under a gate. It is worth reading the reasoning before 
 because the reversal is narrower than it looks and the thing that makes it safe is not the same
 thing that makes the write gate safe.
 
-**Why the old rule was right, and for whom it still is.** It was never "playing music is
-dangerous". It was that this repository's own operator runs Home Assistant, HA owns dispatch, and a
-second tool that could also start music lets an agent pick the path that bypasses it — leaving HA
-and a downstream assistant believing something different is playing. That reasoning is intact for
-anyone who has such a system. It is simply irrelevant to somebody who has a Plex library and
-nothing else, and for them the tool dead-ended at an identifier with nothing to do with it.
+**Why playback is gated at all, rather than simply added.** It was never "playing music is
+dangerous". It is that some houses already have something that owns the speakers, and in those
+houses a second tool that can also start music lets an agent pick the path the first one cannot
+see — leaving the home-automation system, and every assistant downstream of it, describing
+something that is not what is playing. Nothing about the code prevents that; only the gate does.
+
+**Why the gate defaults closed, and who should never open it.** The default has to be the answer
+that is safe in the house where it is wrong to guess, and that is the house that already
+dispatches. **If you run Home Assistant, do not set `PLEX_AXI_ALLOW_PLAYBACK`.** HA owns dispatch
+there — Sonos included, which it reaches by its own path — and the intended shape is to use this
+tool to *find* music and let HA play it. A play issued here bypasses HA entirely, so HA's state
+goes stale the moment it succeeds; the failure is not that nothing happens but that everything
+downstream is confidently wrong. The gate exists so that a house with Plex and nothing else can
+have the capability without a house that has HA ever being offered it.
+
+**This supersedes the blanket exclusion the first two releases shipped, and the reason it does is
+that the exclusion was about one house rather than about the capability.** The rule was written
+from this repository's own operator's installation — Home Assistant, Sonos, dispatch already
+solved — and generalised into "the tool must never play anything". For anybody with a Plex library
+and nothing else that generalisation was simply wrong: the tool dead-ended at an identifier with
+nothing to do with it. Both halves are true at once now, and it is the gate that makes them so —
+closed and *invisible* by default for the first house, opt-in for the second. If you are here
+because you found the old wording somewhere and think this is a regression: the old wording was
+right about the house it was written in, and that house is still served by the default.
 
 **What was surrendered, permanently.** `tests/test_no_dispatch.py` used to prove the capability was
 not *reachable* — no command, no flag, no code path. Once playback code exists that proof is gone
@@ -276,8 +294,9 @@ read.
 
 ### The two routes, and what each costs
 
-- **`local`** — `/clients`, which is the server's own list of what has announced itself to it.
-  Verifiable against a real client on the network.
+- **`local`** — `/clients`, which is the server's own list of what has announced itself to it. It
+  lists a client only while that client's app is running and reachable on the same network as the
+  server, which is why an empty answer is a snapshot rather than an inventory, and why it says so.
 - **`sonos`** — `sonos.plex.tv`, which is how Plex reaches a Sonos speaker linked to a plex.tv
   account. Plex for Sonos is a current product, not a discontinued one, and for somebody with Sonos
   and no home-automation system it is the only thing that makes a `media_id` useful. Two things it
@@ -298,12 +317,42 @@ relatives are still named nowhere in this package's code and still never enter t
 open or closed. That is a weaker claim than "the Sonos route is unreachable" and it is the strongest
 one that survives implementing the route; do not let the two be confused.
 
-**The Sonos route has not been verified against a live speaker.** No plex.tv account token was
-available when it was written — the credential to hand was a server token, and plex.tv answered it
-401, which is the failure the route's own error message describes. It is exercised end to end
-against the double, including the two-credential split, but the double's shapes for
-`sonos.plex.tv` are transcribed from `plexapi.sonos` rather than from a live capture. Treat it as
-unverified until somebody has played to a real speaker with it, and say so in any release note.
+### Verification status: neither route has started music on a real device
+
+A green suite is not evidence the tool works — that rule is stated at length under "Build, test,
+lint" and it applies to this feature more than to anything else in the repository, because this is
+the first feature whose whole point is an effect on a device the tests cannot see. **Both routes
+ship unverified against real hardware, and that has to stay written down until somebody fixes it.**
+
+What *was* checked against a live Plex Media Server, and is therefore settled:
+
+- `/clients` answers, and answered `size="0"` throughout — the command handles the empty case, and
+  `play` reports `NO_TARGETS` rather than failing obscurely.
+- `POST /playQueues` succeeds for a track, an album and a playlist, and expands an album and a
+  playlist to their tracks. The `uri` shape and `item.key`'s two forms were confirmed this way.
+- `GET /library/metadata/<playlistRatingKey>` answers 200 with a `<Playlist>` element, which is
+  what lets one lookup serve all four playable kinds.
+- `/security/token` answers **403**, which is where the optional-delegation-token branch comes
+  from.
+- The gate-closed surfaces render exactly as they did before the feature existed.
+
+What was **not** checked, and what it would take:
+
+- **`local`** — no `playMedia` has ever reached a real client. No Plex client advertised to the
+  server during development, over repeated checks across several hours, so there was no target to
+  send one to. Everything up to the final request is confirmed; the final request is not. Open a
+  Plex client on the server's network, run `plex-axi clients`, and play a track, an album and a
+  playlist to it.
+- **`sonos`** — no plex.tv account token was available; the credential to hand was a server token,
+  and plex.tv answered it 401, which is the failure the route's own error message describes. The
+  route is exercised end to end against the double, including the two-credential split, but the
+  double's shapes for `sonos.plex.tv` are transcribed from `plexapi.sonos` rather than from a live
+  capture — which is the softer half of the double-fidelity rule, not the strong half.
+
+Neither of these is a reason to withhold the feature: it is off by default and invisible while it
+is off, so an unverified route harms nobody who has not opted in. It *is* a reason to say so
+plainly wherever the feature is described, and to add the result to `tests/test_live_audit.py`
+rather than starting another file when somebody does run it.
 
 ### Sharp edges paid for by the live audit of this feature
 
