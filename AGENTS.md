@@ -777,7 +777,7 @@ one; read its module docstring before touching it.
 
 ```sh
 pip install -e ".[dev]"
-pytest                                   # ~870 tests, a few seconds
+pytest                                   # ~900 tests, a few seconds
 ruff check . && ruff format --check .
 plex-axi skill --check                   # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # run this AFTER formatting
