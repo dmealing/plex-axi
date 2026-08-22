@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/dmealing/plex-axi/compare/v0.3.0...v0.3.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **ci:** scan the pull request title and body, and report every location ([#16](https://github.com/dmealing/plex-axi/issues/16)) ([1ef389c](https://github.com/dmealing/plex-axi/commit/1ef389c6603cbbb748273f1b83b4b775e9fdbc5e))
+
 ## [0.3.0](https://github.com/dmealing/plex-axi/compare/v0.2.3...v0.3.0) (2026-08-22)
 
 
