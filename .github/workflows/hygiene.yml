@@ -36,8 +36,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The name names both halves deliberately: "leak check" on a job that also
+  # validates the pull request body against release-please's parser is a label
+  # understating what decides the outcome — the same failure mode the commit
+  # checker exists to catch. A display rename changes the string a required
+  # status check would reference; `main` carried no branch-protection rule when
+  # this was renamed, so nothing required the old name — re-check before
+  # renaming again.
   leakcheck:
-    name: leak check
+    name: leak scan and commit checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
