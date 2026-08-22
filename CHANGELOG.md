@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/dmealing/plex-axi/compare/v0.2.3...v0.3.0) (2026-08-22)
+
+
+### Features
+
+* **playback:** opt-in playback that does not exist until it is switched on ([#14](https://github.com/dmealing/plex-axi/issues/14)) ([6ae41c2](https://github.com/dmealing/plex-axi/commit/6ae41c252dffe486a12edee8d32d4ae8a3824218))
+
 ## [0.2.3](https://github.com/dmealing/plex-axi/compare/v0.2.2...v0.2.3) (2026-08-22)
 
 
