@@ -116,7 +116,7 @@ plex-axi api /library/sections                        # the escape hatch, GET on
 ```
 
 Every command takes `--help`, which is the authoritative reference for its flags — including an
-`access:` line under the description saying whether that command reads or writes.
+`access:` line under the description saying whether that command reads, writes or starts playback.
 
 `pick` is the "give me something to listen to" command. Every one of its filters is a Plex
 predicate the server evaluates — the rating comparison, the genre, the relative date, the
@@ -296,7 +296,8 @@ tracker.
 
 ## What `media_id` is, and what consumes it
 
-Every command that identifies one item prints a block like this and then stops:
+Every command that identifies one item prints a block like this and then stops — `play`, which
+[Playback](#playback) can switch on, prints the same block and then starts the item:
 
 ```
 item:
@@ -329,9 +330,9 @@ one track does. A playlist's rating key lives in the same `/library/metadata` na
 `plex://<machineIdentifier>/<ratingKey>` form resolves to the playlist — verified on a real server
 and against a real consumer, not assumed.
 
-`plex-axi` does not dispatch it anywhere. Handing it to something that plays is a single call in
-whatever already owns your speakers. In Home Assistant, for example, the `media_player.play_media`
-service takes it directly:
+Out of the box `plex-axi` does not dispatch it anywhere. Handing it to something that plays is a
+single call in whatever already owns your speakers. In Home Assistant, for example, the
+`media_player.play_media` service takes it directly:
 
 ```yaml
 service: media_player.play_media
@@ -344,7 +345,8 @@ data:
 
 That is illustrative, not a dependency: nothing in `plex-axi` knows Home Assistant exists, and the
 same id is what Plex's own clients and other integrations consume. Substitute whatever plays music
-where you are.
+where you are — or, if nothing does, [Playback](#playback) switches on a `play` command that takes
+this rating key directly.
 
 **Keep the `guid` with the `rating_key` wherever you write one down.** A rating key is a row number
 in one server's database. It changes when an item is re-matched or the library is rebuilt, and the

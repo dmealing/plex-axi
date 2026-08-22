@@ -332,7 +332,10 @@ What *was* checked against a live Plex Media Server, and is therefore settled:
 - `/clients` answers, and answered `size="0"` throughout — the command handles the empty case, and
   `play` reports `NO_TARGETS` rather than failing obscurely.
 - `POST /playQueues` succeeds for a track, an album and a playlist, and expands an album and a
-  playlist to their tracks. The `uri` shape and `item.key`'s two forms were confirmed this way.
+  playlist to their tracks. The `uri` shape and `item.key`'s two forms were confirmed this way. An
+  artist, the fourth playable kind, was never queued on the live server; `play` accepts one on the
+  expectation that the server answers it like an album, which is the one playable kind whose queue
+  the double alone has tested.
 - `GET /library/metadata/<playlistRatingKey>` answers 200 with a `<Playlist>` element, which is
   what lets one lookup serve all four playable kinds.
 - `/security/token` answers **403**, which is where the optional-delegation-token branch comes
@@ -344,8 +347,8 @@ What was **not** checked, and what it would take:
 - **`local`** — no `playMedia` has ever reached a real client. No Plex client advertised to the
   server during development, over repeated checks across several hours, so there was no target to
   send one to. Everything up to the final request is confirmed; the final request is not. Open a
-  Plex client on the server's network, run `plex-axi clients`, and play a track, an album and a
-  playlist to it.
+  Plex client on the server's network, run `plex-axi clients`, and play a track, an album, an
+  artist and a playlist to it.
 - **`sonos`** — no plex.tv account token was available; the credential to hand was a server token,
   and plex.tv answered it 401, which is the failure the route's own error message describes. The
   route is exercised end to end against the double, including the two-credential split, but the
@@ -621,7 +624,8 @@ and no configuration for one. A template could only ever come from the operator,
 tells the caller nothing they did not already know — it was ceremony. The `item:` block is exactly
 four fields — `media_id`, `rating_key`, `guid`, `note` — and `tests/test_ids.py` asserts that list
 verbatim. Only the *text* of the fourth varies. The README explains in prose what consumes a
-`media_id`; that belongs in documentation, not in output.
+`media_id`; that belongs in documentation, not in output. `play` is the one output that goes past
+this block — gated, and it names no consumer either: it addresses a target the server itself listed.
 
 **`media_id` is in every default row, and `guid` is not.** A list view that printed `key` alone
 under-delivered on the tool's own premise — it ends at a labelled identifier — and cost the caller
@@ -706,10 +710,11 @@ is a different thing from publishing one as a result a caller has to find a use 
 stop, resume, seek, next, previous, volume or queue management — no video, no server
 administration, no *metadata* editing (a user rating is per-account state, not library metadata,
 which is why `rate` is in and `edit` is not), no second Plex client library, and no semantic name
-resolution by regex or substring. `play` starts one item on one named target and that is the whole
-of it: the thing that was missing from a tool ending at an identifier was a way to *use* the
-identifier, and the rest was never missing. A control surface is where two systems start believing
-they own the same queue, which is why the line is drawn after the start button rather than before
+resolution by regex or substring. `play` starts one item on one explicitly resolved target and
+that is the whole of it: the thing that was missing from a tool ending at an identifier was a way
+to *use* the identifier, and the rest was never missing. A control surface is where two systems
+start believing they own the same queue, which is why the line is drawn after the start button
+rather than before
 it. `tests/test_no_dispatch.py` enforces it, on the playback commands as well as on every other
 one; read its module docstring before touching it.
 

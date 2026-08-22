@@ -178,7 +178,9 @@ def handoff(machine_identifier: str, item) -> dict:
     vendor-neutral because this tool ships to anyone with a Plex library, and
     the output stops at the identifier because a suggestion about what plays it
     could only be assembled from something the caller told us -- which is
-    information they already had. plex-axi prints identifiers and stops.
+    information they already had. plex-axi prints identifiers and stops;
+    ``play``, which exists only where the operator has opened the playback
+    gate, prints this block and then starts the item (see the module docstring).
     """
     rating_key = getattr(item, "ratingKey", None)
     guid = getattr(item, "guid", "") or ""
