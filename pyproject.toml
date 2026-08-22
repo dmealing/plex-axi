@@ -49,6 +49,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=7.4",
+  # The pull request leak scan is only a guard if the workflow actually runs it
+  # on the trigger that matters, so tests/test_leakcheck.py parses hygiene.yml
+  # into what GitHub will run rather than matching it as text.
+  "pyyaml>=6",
   "ruff>=0.5",
 ]
 

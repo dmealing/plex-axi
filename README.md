@@ -397,10 +397,29 @@ pytest && ruff check . && ruff format --check . && scripts/leakcheck.py
 ```
 
 This repository is public and a music library is full of identifying content, so a leak guard runs
-in a pre-commit hook, a commit-msg hook and CI. **Its coverage is bounded and it does not replace
-review:** it detects shapes — tokens, addresses, machine identifiers, media paths — and it cannot
-detect a real artist name, which has no shape. Use obviously-synthetic content everywhere, including
-tests and fixtures.
+in a pre-commit hook, a commit-msg hook, CI, and — on every open, push *and edit* — over the pull
+request's own title and body. That last one is not a file: a title and a body are published the
+moment they are written, are in no checkout and pass under no hook, and tooling routinely writes
+into a body, where an embedded script's worktree variable or a `pytest` header's `rootdir:` line is
+an absolute home path. It fails the check when it cannot read the pull request rather than reporting
+a clean it cannot support, and it reports the field, line and rule of a match — plus the offset when
+the finding's pass read the text as written — without printing the match, because a CI log is more
+public than the page it came from. For the same reason a pull request cannot carry an `allow=`
+marker: in a file that marker is committed and reviewed, and in a body it is an off-switch anyone
+can add after every check has run.
+
+**Its coverage is bounded and it does not replace review:** it detects shapes — tokens, addresses,
+machine identifiers, media paths — and it cannot detect a real artist name, which has no shape. Use
+obviously-synthetic content everywhere, including tests and fixtures.
+
+```sh
+scripts/leakcheck.py                       # scan every tracked file
+scripts/leakcheck.py --staged              # scan what a commit would actually record
+scripts/leakcheck.py --commit-msg <path>   # scan a commit message
+scripts/leakcheck.py --pull-request <n>    # scan a pull request's title and body
+scripts/leakcheck.py --rules               # list the rules, the surfaces, and the allowances
+scripts/leakcheck.py --demo                # self-test: prove every rule still fires
+```
 
 The TOON encoder is held to the specification's own opinion as well as to this project's:
 **every** official encode fixture is vendored byte-for-byte from
