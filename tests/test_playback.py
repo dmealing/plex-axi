@@ -549,6 +549,95 @@ def test_the_sonos_service_being_down_does_not_take_the_local_route_with_it(
     assert "sonos route failed" in debugged.err
 
 
+def test_a_target_the_failed_route_would_have_held_does_not_read_as_absent(
+    monkeypatch, cli_run, sonos_env
+):
+    """ "That speaker does not exist" and "the route listing it did not answer".
+
+    Two different answers with two different recoveries, and the first one sends
+    somebody looking for a speaker that is fine. Making the cloud failure
+    non-fatal created this: the survey now returns *fewer* targets rather than
+    an error, so a name that route would have matched falls through to the
+    ordinary not-found path.
+
+    `_no_such_target` prints `route_lines(found)`, so the failed row does reach
+    the message -- but that is a structural argument, and this repository has
+    been bitten exactly there before. AGENTS.md, "Advice has to be re-read
+    whenever the output it points away from changes", records six list views
+    whose help lines silently went wrong when the rows beneath them gained a
+    field. The same drift is one help-line reorder away here, so it is pinned on
+    the rendered output rather than on the helper.
+    """
+    from plex_axi import plex
+
+    fake = FakePlex(plex_tv_unreachable=True)
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
+
+    # `Example Speaker` is a Sonos target: it exists, and only the route that
+    # failed could have listed it.
+    result = cli_run("play", "111", "--client", "Example Speaker", "--now", env=sonos_env)
+    assert result.code == 1
+    assert "NO_SUCH_TARGET" in result
+    assert "sonos.plex.tv could not be reached" in result.out, (
+        "the refusal must say the route that would have held this target failed, "
+        "or it reads as 'no such speaker'"
+    )
+    assert fake.played == []
+
+
+def test_a_sonos_only_user_is_told_the_route_failed_rather_than_that_nothing_exists(
+    monkeypatch, cli_run, sonos_env
+):
+    """The shape where the bare message is most misleading, and it is not the one above.
+
+    With no local clients at all -- which is exactly a Sonos-only installation --
+    the answer is `NO_TARGETS`, "this server can see nothing to play to". That
+    sentence is true of the *server* and useless to the caller: their speakers
+    are not the server's to see, and the reason they are missing is that the
+    cloud call failed. Tested separately from the named-target case because a
+    fix that only threaded the detail through `_no_such_target` would pass that
+    one and leave this one saying nothing.
+    """
+    from plex_axi import plex
+
+    fake = FakePlex(clients=[], plex_tv_unreachable=True)
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
+
+    result = cli_run("play", "111", "--now", env=sonos_env)
+    assert result.code == 1
+    assert "NO_TARGETS" in result
+    assert "sonos.plex.tv could not be reached" in result.out
+
+    # ...and the same when they name the speaker rather than relying on a default.
+    named = cli_run("play", "111", "--client", "Example Speaker", "--now", env=sonos_env)
+    assert named.code == 1
+    assert "sonos.plex.tv could not be reached" in named.out
+
+
+def test_a_refused_account_token_reaches_the_refusal_too_not_only_an_unreachable_service(
+    monkeypatch, cli_run, playing_env
+):
+    """The other way the route fails, and the one whose detail is worth most.
+
+    An unreachable service explains itself; a refused credential does not, and
+    the explanation is the whole reason this route has its own variable. So the
+    not-found path has to carry the credential wording as well, not just the
+    short unreachable one.
+    """
+    from plex_axi import plex
+
+    fake = FakePlex()
+    monkeypatch.setattr(plex, "build_session", lambda **kwargs: FakeSession(fake))
+    env = {**playing_env, playback.ACCOUNT_TOKEN_VAR: "example-token-0000000009"}
+
+    result = cli_run("play", "111", "--client", "Example Speaker", "--now", env=env)
+    assert result.code == 1
+    assert "NO_SUCH_TARGET" in result
+    assert playback.ACCOUNT_TOKEN_VAR in result.out
+    assert "broader credential than PLEX_TOKEN" in result.out
+    assert fake.played == []
+
+
 # ----------------------------------------------------------- the declaration
 
 
