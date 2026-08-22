@@ -1,8 +1,0 @@
-#!/home/doug/.no-mistakes/worktrees/315dab9ba5cd/01M0NC35KNFM1M3PYJSKNKGMDA/.venv-review/bin/python3
-# -*- coding: utf-8 -*-
-import re
-import sys
-from pip._internal.cli.main import main
-if __name__ == '__main__':
-    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
-    sys.exit(main())
