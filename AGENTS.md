@@ -37,11 +37,13 @@ rule to make a commit pass, and do not bypass the hooks.
 **A file that cannot carry a marker** — JSON has no comment syntax, and vendored third-party data
 must stay byte-for-byte — is exempted in `PATH_ALLOWANCES` in `scripts/leakcheck.py` instead, per
 path *and* per rule, and `--rules` prints the table so the exemption is visible where the rules
-are. There is one entry today: the vendored TOON fixture whose backslash-escaping case is a
-synthetic Windows drive path. `tests/test_leakcheck.py` re-scans each exempted file with the table
-switched off and asserts that the rules which fire, and the shapes they match, are exactly the ones
-the entry names — an entry that has outlived its cause fails the suite rather than quietly covering
-something new.
+are. There are three entries today: the vendored TOON fixture whose backslash-escaping case is a
+synthetic Windows drive path, and the two commit-message fixtures transcribed from this
+repository's own history, which must stay byte-for-byte the commits they pin and whose co-author
+trailers carry no-reply addresses. `tests/test_leakcheck.py` re-scans each exempted file with the
+table switched off and asserts that the rules which fire, and the shapes they match, are exactly
+the ones the entry names — an entry that has outlived its cause fails the suite rather than
+quietly covering something new.
 
 **An allowance is matched against the exact path it names, and every entry point has to agree on
 what that path is.** `path_allowances` is a dictionary lookup: a name that merely *ends with* an
@@ -696,8 +698,10 @@ Three workflows, split by where the work is cheap:
 - **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests.
-- **`.github/workflows/hygiene.yml`** — the leak scan alone, on `ubuntu-latest`, on `pull_request`.
-  Exactly one GitHub-hosted check per PR, and it takes seconds.
+- **`.github/workflows/hygiene.yml`** — the leak scan and the pull-request-body check, on
+  `ubuntu-latest`, on `pull_request`. Exactly one GitHub-hosted job per PR, and it takes seconds;
+  the body check is the one deliberate exception to keeping this workflow thin, and the reason for
+  it is under "Releasing".
 - **`.github/workflows/release.yml`** — GitHub-hosted, and to stay that way: OIDC trusted publishing
   needs `id-token: write` on a GitHub-hosted runner.
 
@@ -784,10 +788,31 @@ A change that makes one of those fail is a regression in the guard, not a discov
   cannot see a message typed into GitHub's squash-merge box.
 - `.github/workflows/ci.yml` runs the same audit nightly, so an allowance that has outlived its
   cause surfaces without waiting for a merge, and installs `node` in the `test` job so the
-  agreement between the engines is enforced rather than skipped.
+  agreement between the engines is enforced rather than skipped. Nightly matters more than it looks
+  now that the audit reads pull request bodies: a body edited a week after the merge changes what
+  the next release contains, with nothing else having run in between.
+- `.github/workflows/hygiene.yml` gained a step, which is the one exception to "keep this workflow
+  to the one cheap job". It is not coverage for its own sake: it checks the pull request body, which
+  exists *only* on a pull request, never passes under a hook, and can replace the merged commit
+  message outright. Its trigger list carries `edited` for the same reason. Still one job, still
+  seconds.
 
-`hygiene.yml` was deliberately left alone: it is the one cheap PR check by design, and the release
-audit already covers what a PR-time check would.
+The claim that used to sit here — "`hygiene.yml` was deliberately left alone; the release audit
+already covers what a PR-time check would" — was false, and cost the second release. The release
+audit runs *after* the merge. Nothing looked at the body before it.
+
+**The audit's verdict is only as wide as its reach, and it has to say when it is narrower.**
+`resolve_bodies` has three modes and no fourth: `require` (the workflows) fails without a token
+rather than checking a different artefact and calling it green, `auto` (a developer's checkout)
+consults GitHub when it can and prints `NOT consulted` in the output when it cannot, and `skip` is
+git only, on purpose, which is what the unit tests pass so they never reach the network. There is
+deliberately no silent fallback: silent fallback to the wrong string is precisely the state the
+first guard shipped in. A per-commit miss is not an
+outage either: the commits endpoint answers 422 for a SHA GitHub does not have, which is the
+ordinary state of a local branch, so `resolve_bodies` reaches the repository once before the loop
+and only then reads a miss as "no pull request" — and names the commits it applied to. Reading a 404
+as "no pull request" without that probe would let a token with no access report an all-clear for
+every commit, which is this same blind spot from the other side.
 
 **The audit reads `--first-parent`, because that is what release-please reads.** It asks GitHub for
 the *merge commits on the branch*, not for everything reachable from it. A plain `git log` would
@@ -804,12 +829,53 @@ good: its content is restated as a conventional-commit section in the release th
 the changelog names the TOON conformance and leak-allowance work even though release-please could
 never read the original.
 
-**Two fidelity gaps worth knowing, neither of them closable from a hook.** release-please replaces
-the whole message with a `BEGIN_COMMIT_OVERRIDE` block from the pull request body when there is one,
-which neither the hook nor `git log` can see; and one commit may carry several conventional commits,
-split on `BEGIN_NESTED_COMMIT` or on a blank line before a new `type:` line. `split_messages`
-transcribes the second so a message that loses only *part* of itself is still refused. The first is
-one more reason the allowance table exists.
+**The message is not always the message, and that is what the first version of this guard got
+wrong.** It diagnosed the grammar rule correctly, shipped three layers built on it, and then passed
+— green, twice — on a release that considered zero commits. release-please does not parse the commit
+message. It parses `splitMessages(preprocessCommitMessage(commit))`, and `preprocessCommitMessage`
+is four lines:
+
+```js
+const overrideMessage = (commit.pullRequest.body.split('BEGIN_COMMIT_OVERRIDE')[1] || '')
+  .split('END_COMMIT_OVERRIDE')[0]
+  .trim()
+if (overrideMessage) return overrideMessage
+```
+
+`String.split` finds that literal **anywhere in a pull request body**, including in a sentence that
+merely names it. The pull request that shipped the guard had a body explaining this very mechanism,
+so release-please threw the commit message away and parsed the paragraph after the word instead. It
+began `block from the PR body when there is one`; `block` is five characters; the parser stopped on
+the space after it and reported `unexpected token ' ' at 1:6`. Column 6 makes no sense on a
+`fix(ci):` subject, which is the clue that the text being parsed was not the subject at all. The
+commit message parsed perfectly — and a checker that reads commit messages therefore said so.
+
+**Three artefacts reach release-please and only one of them passes under a commit-msg hook.**
+
+| artefact | written | checked by |
+| --- | --- | --- |
+| the commit message | locally, by a developer | `--commit-msg` (the hook) |
+| the merge commit's message | in GitHub's squash box | `--since-release` (after the merge) |
+| the pull request body | in GitHub's editor | `--pull-request` (`hygiene.yml`) |
+
+The body is the dangerous one. It *replaces* the other two, it can be edited after every check has
+run, and nothing in the repository records it — so `--since-release` and `--commit` resolve it from
+the GitHub API rather than trusting `git log`, and `--pull-requests require` (what the workflows
+pass) makes a missing credential a failure. Reaching for the network from a guard is a cost worth
+naming, and the alternative was measured: without it the audit validates a string release-please may
+never read, which is not a weaker check but a different one.
+
+**One rule here is stricter than upstream, deliberately.** Upstream is content with an override
+block that is never closed — it simply reads to the end of the body. That is exactly the shape an
+accidental mention takes, so `override_faults` refuses a block that names the marker and never closes
+it. Without that rule an accidental mention whose next paragraph *happened* to parse would silently
+become the changelog entry. An empty block is not refused: upstream's `if (overrideMessage)` is falsy
+on an empty string, so a body ending on the marker loses nothing and crying wolf at it would train
+somebody to stop reading the output.
+
+**The other fidelity note.** One commit may carry several conventional commits, split on
+`BEGIN_NESTED_COMMIT` or on a blank line before a new `type:` line. `split_messages` transcribes that
+so a message that loses only *part* of itself is still refused.
 
 **Releasing a fix release-please already dropped.** Landing a parseable commit makes it re-scan the
 range, but the unparseable commit is dropped again and never reaches the changelog — so the release

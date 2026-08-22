@@ -236,6 +236,11 @@ PATH_ALLOWANCES = {
     # reach the tracked-files scan instead, and the file cannot carry a marker
     # without ceasing to be the message.
     "tests/fixtures/commit-messages/41bcb73.txt": frozenset({"personal-email"}),
+    # The commit whose message was fine and was not the one release-please read,
+    # kept for the same reason and exempted on the same grounds: the same
+    # no-reply co-author trailer, and the same requirement that the bytes stay
+    # exactly the commit's.
+    "tests/fixtures/commit-messages/b1f9bb18.txt": frozenset({"personal-email"}),
 }
 
 

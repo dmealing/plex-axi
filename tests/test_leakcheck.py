@@ -199,6 +199,7 @@ def test_the_allow_marker_also_applies_to_the_condensed_pass():
 
 ALLOWED_PATH = "tests/fixtures/toon-spec/encode/primitives.json"
 LOST_MESSAGE_PATH = "tests/fixtures/commit-messages/41bcb73.txt"
+HIJACKED_MESSAGE_PATH = "tests/fixtures/commit-messages/b1f9bb18.txt"
 TWO_SHAPES = "path " + "/ho" + "me/" + "someone" + "/notes and " + "192." + "168.1.10"
 
 
@@ -228,6 +229,7 @@ def test_an_allowance_matches_only_the_exact_path_it_names():
 EXPECTED_SHAPES = {
     ALLOWED_PATH: frozenset({"C:" + "\\\\" + "Users" + "\\\\" + "path"}),
     LOST_MESSAGE_PATH: frozenset({"noreply" + "@" + "anthropic" + ".com"}),
+    HIJACKED_MESSAGE_PATH: frozenset({"noreply" + "@" + "anthropic" + ".com"}),
 }
 
 

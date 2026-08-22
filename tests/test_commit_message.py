@@ -19,11 +19,21 @@ Three things are pinned here, and they are not interchangeable:
   verdict *and* on the reported line, column and token. The Python transcription
   stands in for the real parser wherever `node` is absent, and a stand-in that
   disagreed would be worse than a skip.
+
+And one thing that is not a shape at all. The first version of this guard was
+correct about the grammar and still passed the commit release-please dropped,
+because it checked the wrong string: release-please parses
+`splitMessages(preprocessCommitMessage(commit))`, and preprocess replaces the
+whole message with the override block in the pull request body whenever that
+body so much as *names* the marker. So the second regression pinned here is a
+message that parses perfectly, refused because of a body written somewhere else.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +54,11 @@ MESSAGES = Path(__file__).parent / "fixtures" / "commit-messages"
 LOST_SHA = "41bcb73e6b1797bee245bea2cd4797460b5cdbb5"
 LOST_ERROR = "unexpected token '(' at 13:14, valid tokens [)]"
 
+#: The commit the *guard* dropped: the release run after it merged reported this
+#: while both guard jobs were green. Also transcribed from the run, not derived.
+HIJACKED_SHA = "b1f9bb18ea7d6d9dffc1d44e17c90bd6fc0cd5d3"
+HIJACKED_ERROR = "unexpected token ' ' at 1:6, valid tokens [(, !, :]"
+
 #: Engines to run every shared assertion under. `node` is skipped rather than
 #: failed where it is unavailable -- but CI installs it, so the agreement is
 #: enforced on every push rather than only where somebody happens to have it.
@@ -62,6 +77,22 @@ ENGINE_PARAMS = [engine_param(engine) for engine in ENGINES]
 @pytest.fixture(scope="module")
 def lost_message():
     return (MESSAGES / "41bcb73.txt").read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def hijacked_message():
+    return (MESSAGES / "b1f9bb18.txt").read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def hijacked_body():
+    """The slice of the pull request body that replaced a good commit message.
+
+    Transcribed from the live pull request through the REST API, not retyped:
+    the bullet that named the marker, and the one after it. The paragraph the
+    parser was handed begins at the word straight after the marker.
+    """
+    return (MESSAGES / "b1f9bb18-pull-request-body.txt").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +147,187 @@ def test_the_fixture_is_the_commit_that_is_actually_in_this_repository(lost_mess
     if result.returncode != 0:
         pytest.skip("the commit is not reachable from this checkout")
     assert result.stdout == lost_message
+
+
+# ---------------------------------------------------------------------------
+# The second regression: the message that was fine, and was not the one read.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine", ENGINE_PARAMS)
+def test_the_hijacked_commit_message_parses_perfectly_on_its_own(hijacked_message, engine):
+    """The false pass, stated first, because it is the whole defect.
+
+    Nothing is wrong with this commit message. A guard that reads commit
+    messages therefore passes it, reports success, and says nothing while
+    release-please drops the commit and skips the release.
+    """
+    assert not commitcheck.check(hijacked_message, engine=engine)
+
+
+@pytest.mark.parametrize("engine", ENGINE_PARAMS)
+def test_the_pull_request_body_is_what_release_please_actually_read(
+    hijacked_message, hijacked_body, engine
+):
+    problems = commitcheck.check(hijacked_message, engine=engine, pull_request_body=hijacked_body)
+    assert problems, "the body replaces the message, so the body is what must be judged"
+    assert str(problems[0].error) == HIJACKED_ERROR
+    assert problems[0].artefact == commitcheck.OVERRIDE_ARTEFACT
+
+
+def test_column_six_is_the_space_after_a_five_letter_word(hijacked_message, hijacked_body):
+    """Why the reported position looked impossible on a clean `fix(ci):` subject.
+
+    Column 6 is nowhere near an error on the subject line the run printed. It is
+    line 1 of a *different* text: the paragraph after the marker, whose first
+    word is five characters long, followed by the space the grammar refuses
+    because it wanted `(`, `!` or `:`.
+    """
+    problem = commitcheck.check(hijacked_message, engine="python", pull_request_body=hijacked_body)[
+        0
+    ]
+    assert (problem.line, problem.column) == (1, 6)
+    assert problem.source_line.split(" ")[0] == "block"
+    assert len(problem.source_line.split(" ")[0]) == 5
+    assert problem.source_line[problem.column - 1] == " "
+    assert problem.error.valid == ["(", "!", ":"]
+
+
+def test_the_report_says_which_artefact_and_what_to_do_about_it(
+    hijacked_message, hijacked_body, capsys
+):
+    problems = commitcheck.check(hijacked_message, engine="python", pull_request_body=hijacked_body)
+    assert commitcheck.report(problems, "this commit", stream=sys.stdout) == 1
+    out = capsys.readouterr().out
+    # Naming the artefact is the point: "fix your commit message" is useless
+    # advice to somebody whose commit message is already correct.
+    assert "pull request body" in out
+    assert "NOT the commit message" in out
+    assert "describe it instead" in out
+
+
+def test_the_fixture_is_the_commit_that_is_actually_in_this_repository_too(hijacked_message):
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "log", "-1", "--format=%B", HIJACKED_SHA],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip("the commit is not reachable from this checkout")
+    assert result.stdout == hijacked_message
+
+
+# ---------------------------------------------------------------------------
+# The transcription of release-please's own preprocessing.
+# ---------------------------------------------------------------------------
+
+
+def test_naming_the_marker_is_enough_to_trigger_it():
+    """`String.split` has no idea it is reading prose. Neither does this."""
+    body = f"see the {commitcheck.OVERRIDE_START} mechanism for details"
+    assert commitcheck.override_block(body) == "mechanism for details"
+    assert commitcheck.preprocess_commit_message("fix: a subject", body) == "mechanism for details"
+
+
+def test_a_closed_block_stops_at_the_closing_marker():
+    body = (
+        f"prose\n{commitcheck.OVERRIDE_START}\nfix: the real subject\n"
+        f"{commitcheck.OVERRIDE_END}\nmore prose\n"
+    )
+    assert commitcheck.override_block(body) == "fix: the real subject"
+
+
+def test_an_empty_block_is_not_an_override():
+    """Upstream's `if (overrideMessage)` is falsy on an empty string.
+
+    A body that ends on the marker leaves nothing after it, so release-please
+    falls back to the commit message and nothing is lost. Reporting that as a
+    failure would be crying wolf at the one shape that is harmless.
+    """
+    body = f"the marker is {commitcheck.OVERRIDE_START}"
+    assert commitcheck.override_block(body) is None
+    assert commitcheck.preprocess_commit_message("fix: a subject", body) == "fix: a subject"
+    assert commitcheck.override_faults(body) == []
+
+
+def test_the_first_marker_wins():
+    """`split(...)[1]` is the text between the first and second occurrence."""
+    marker = commitcheck.OVERRIDE_START
+    body = f"a {marker} first block {marker} second block"
+    assert commitcheck.override_block(body) == "first block"
+
+
+def test_no_body_at_all_leaves_the_message_alone():
+    for body in (None, "", "ordinary prose with no marker in it"):
+        assert commitcheck.preprocess_commit_message("fix: a subject", body) == "fix: a subject"
+        assert commitcheck.override_faults(body) == []
+
+
+def test_an_unclosed_block_is_refused_even_when_the_prose_parses():
+    """This repository is stricter than upstream here, on purpose.
+
+    Upstream reads an unclosed block to the end of the body and is content. That
+    is exactly the shape an accidental mention takes, so a mention whose next
+    paragraph happens to parse would otherwise become the changelog entry with
+    nothing said. Requiring the closing marker costs a deliberate override one
+    line and makes the intent visible.
+    """
+    body = f"see {commitcheck.OVERRIDE_START}\n\nfix: this parses by luck\n"
+    assert not commitcheck.check_text(commitcheck.override_block(body), engine="python")
+    faults = commitcheck.override_faults(body)
+    assert faults, "an unclosed block that parses is still an accident"
+    assert "never" in " ".join(faults)
+
+
+def test_a_deliberate_closed_override_is_left_alone():
+    body = (
+        f"## Intent\n\nprose\n\n{commitcheck.OVERRIDE_START}\n"
+        f"fix(toon): restate the dropped fix\n\nbody\n{commitcheck.OVERRIDE_END}\n"
+    )
+    problems, faults = commitcheck.check_pull_request("chore: internal title", 12, body)
+    assert not problems and not faults
+
+
+# ---------------------------------------------------------------------------
+# The artefacts a merge creates, which no commit-msg hook ever sees.
+# ---------------------------------------------------------------------------
+
+
+def test_the_pull_request_check_would_have_caught_it_before_the_merge(hijacked_body):
+    """The merge-time half of the fix, against the body that actually did it."""
+    problems, faults = commitcheck.check_pull_request(
+        "ci: prevent release workflow from silently skipping unparseable commits",
+        11,
+        hijacked_body,
+    )
+    assert faults, "an unclosed accidental override is a fault in its own right"
+    assert [str(p.error) for p in problems] == [HIJACKED_ERROR]
+    assert problems[0].artefact == commitcheck.OVERRIDE_ARTEFACT
+
+
+def test_the_title_is_checked_because_github_offers_it_as_the_squash_subject():
+    problems, faults = commitcheck.check_pull_request("prevent the workflow skipping", 12, "prose")
+    assert not faults
+    assert [p.artefact for p in problems] == [commitcheck.TITLE_ARTEFACT]
+    # And a conventional title with the number GitHub appends is fine.
+    assert not commitcheck.check_pull_request("fix(ci): a subject", 12, "prose")[0]
+
+
+@pytest.mark.parametrize("engine", ENGINE_PARAMS)
+@pytest.mark.parametrize("label", sorted(commitcheck.DEMO_PULL_REQUESTS_REJECTED))
+def test_every_unmergeable_pull_request_shape_is_refused(label, engine):
+    title, number, body = commitcheck.DEMO_PULL_REQUESTS_REJECTED[label]
+    problems, faults = commitcheck.check_pull_request(title, number, body, engine=engine)
+    assert problems or faults, label
+
+
+@pytest.mark.parametrize("engine", ENGINE_PARAMS)
+@pytest.mark.parametrize("label", sorted(commitcheck.DEMO_PULL_REQUESTS_ACCEPTED))
+def test_every_legitimate_pull_request_shape_is_accepted(label, engine):
+    title, number, body = commitcheck.DEMO_PULL_REQUESTS_ACCEPTED[label]
+    problems, faults = commitcheck.check_pull_request(title, number, body, engine=engine)
+    assert not problems and not faults, f"{label}: {problems or faults}"
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +499,19 @@ def _repo(tmp_path, commits):
 
 def test_the_audit_passes_when_every_commit_can_be_read(tmp_path, capsys):
     root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
-    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 0
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="skip")
+        == 0
+    )
     assert "silently dropped:              0" in capsys.readouterr().out
 
 
 def test_the_audit_fails_when_a_commit_would_be_dropped(tmp_path, capsys):
     root = _repo(tmp_path, ["fix: a real fix\n\n`a(b(c))` at the line start\n"])
-    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="skip")
+        == 1
+    )
     out = capsys.readouterr().out
     assert "silently dropped:              1" in out
 
@@ -306,7 +524,10 @@ def test_zero_considered_with_commits_waiting_is_called_out_by_name(tmp_path, ca
     identical.
     """
     root = _repo(tmp_path, ["fix: a real fix\n\n`a(b(c))` at the line start\n"])
-    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="skip")
+        == 1
+    )
     out = capsys.readouterr().out
     assert "release-please would consider: 0" in out
     assert "ZERO of these commits and still" in out
@@ -315,7 +536,10 @@ def test_zero_considered_with_commits_waiting_is_called_out_by_name(tmp_path, ca
 def test_an_empty_range_is_not_reported_as_a_failure(tmp_path, capsys):
     """The healthy no-op still has to pass, or the guard gets switched off."""
     root = _repo(tmp_path, [])
-    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 0
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="skip")
+        == 0
+    )
     assert "ZERO" not in capsys.readouterr().out
 
 
@@ -360,9 +584,19 @@ def test_the_allowance_is_matched_on_the_full_sha(tmp_path):
     original = commitcheck.KNOWN_UNPARSEABLE.copy()
     try:
         commitcheck.KNOWN_UNPARSEABLE[head[:12]] = "a prefix, which must not exempt anything"
-        assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+        assert (
+            commitcheck.audit_range(
+                "v1.0.0..HEAD", engine="python", root=root, pull_requests="skip"
+            )
+            == 1
+        )
         commitcheck.KNOWN_UNPARSEABLE[head] = "the full SHA, which must"
-        assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 0
+        assert (
+            commitcheck.audit_range(
+                "v1.0.0..HEAD", engine="python", root=root, pull_requests="skip"
+            )
+            == 0
+        )
     finally:
         commitcheck.KNOWN_UNPARSEABLE.clear()
         commitcheck.KNOWN_UNPARSEABLE.update(original)
@@ -380,8 +614,423 @@ def test_the_rules_output_shows_the_allowances(capsys):
 
 
 # ---------------------------------------------------------------------------
+# The audit's reach: it has to read the half of the artefact that is not in git.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    """No credential and no repository, so nothing here can reach the network."""
+    monkeypatch.setattr(commitcheck, "github_token", lambda: None)
+    monkeypatch.setattr(commitcheck, "repo_slug", lambda root=".": None)
+
+
+def _with_bodies(monkeypatch, bodies):
+    """A reachable repository whose commits carry `bodies`. No network."""
+    monkeypatch.setattr(commitcheck, "github_token", lambda: "a token")
+    monkeypatch.setattr(commitcheck, "repo_slug", lambda root=".": "owner/name")
+    monkeypatch.setattr(commitcheck, "github_json", lambda path, **kwargs: {"full_name": path})
+    monkeypatch.setattr(
+        commitcheck,
+        "pull_request_body_for_commit",
+        lambda sha, **kwargs: bodies.get(sha),
+    )
+
+
+def test_the_audit_fails_on_a_perfect_message_whose_body_replaces_it(tmp_path, capsys, monkeypatch):
+    """The whole defect, end to end, through the mode the release workflow runs.
+
+    Every commit message in this range is impeccable. The audit must still fail,
+    because the pull request body is what release-please will read.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _with_bodies(monkeypatch, {head: f"prose {commitcheck.OVERRIDE_START} block from the body"})
+    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    out = capsys.readouterr().out
+    assert "1 carry a commit-override block" in out
+    assert "release-please would consider: 0" in out
+
+
+def test_the_audit_fails_when_the_replacing_text_parses(tmp_path, capsys, monkeypatch):
+    """The quiet variant of the hijack, which the parse cannot see at all.
+
+    An unclosed block whose text happens to parse leaves every count healthy --
+    release-please really can read *something* -- and the something is an
+    accidental paragraph. The fault lives in the body, not the parse, so the
+    post-merge audit applies the same rule the pull request check does.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    body = (
+        "A paragraph explaining that a body naming "
+        f"{commitcheck.OVERRIDE_START}\n"
+        "\n"
+        "fix: the paragraph after the mention, which parses\n"
+    )
+    _with_bodies(monkeypatch, {head: body})
+    assert not commitcheck.check("fix: a real fix\n\nbody text\n", pull_request_body=body)
+    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    out = capsys.readouterr().out
+    assert "silently dropped:              0" in out
+    assert "messages replaced by an unclosed override block: 1" in out
+    assert "the body silently replaced this message" in out
+
+
+def test_an_allowance_never_covers_a_replaced_message(tmp_path, capsys, monkeypatch):
+    """KNOWN_UNPARSEABLE exempts a loss that is accounted for, and nothing else.
+
+    The entry says the *message's* content was restated elsewhere. A body that
+    replaces the message with an accidental paragraph is a different,
+    unaccounted loss, and honouring the allowance for it would put the blind
+    spot back one layer up.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _with_bodies(monkeypatch, {head: f"prose {commitcheck.OVERRIDE_START} block from the body"})
+    original = commitcheck.KNOWN_UNPARSEABLE.copy()
+    try:
+        commitcheck.KNOWN_UNPARSEABLE[head] = "the message is accounted for elsewhere"
+        assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 1
+    finally:
+        commitcheck.KNOWN_UNPARSEABLE.clear()
+        commitcheck.KNOWN_UNPARSEABLE.update(original)
+    out = capsys.readouterr().out
+    assert "known-unparseable, accounted for: 1" in out
+    assert "the body silently replaced this message" in out
+
+
+def test_commit_audit_reports_a_replacement_even_when_it_parses(tmp_path, capsys, monkeypatch):
+    """`--commit` answers the factual question, so an allowance is not the whole answer.
+
+    The single-commit audit honours no allowances at all, and the replacement
+    fault is not a parse question: a readable block that was never meant to be
+    the message is still the wrong string becoming the changelog entry.
+    """
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    body = (
+        "A paragraph explaining that a body naming "
+        f"{commitcheck.OVERRIDE_START}\n"
+        "\n"
+        "fix: the paragraph after the mention, which parses\n"
+    )
+    _with_bodies(monkeypatch, {head: body})
+    assert commitcheck.audit_commit(head, engine="python", root=root) == 1
+    out = capsys.readouterr().out
+    assert "verdict: readable" not in out
+    assert "closes the block" in out
+
+
+def test_the_audit_says_so_when_it_could_not_read_the_bodies(tmp_path, capsys, offline):
+    """A reduced check that reads as a full one is how this failed the first time."""
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody text\n"])
+    assert commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root) == 0
+    out = capsys.readouterr().out
+    assert "NOT consulted" in out
+    assert "not necessarily the text" in out
+
+
+def test_require_refuses_to_report_a_verdict_it_cannot_support(tmp_path, offline):
+    """What the workflows run. Without the bodies there is no answer, not a pass."""
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody\n"])
+    with pytest.raises(commitcheck.GitHubUnavailable):
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="require")
+
+
+def test_skip_is_the_only_way_to_get_the_old_reach_and_it_says_so(tmp_path, capsys, monkeypatch):
+    _with_bodies(monkeypatch, {})
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody\n"])
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="skip")
+        == 0
+    )
+    assert "not consulted" in capsys.readouterr().out
+
+
+def test_a_commit_github_does_not_have_is_an_answer_and_not_an_outage(
+    tmp_path, capsys, monkeypatch
+):
+    """Unpushed work is the ordinary local state, and has no pull request.
+
+    Failing on it would make the audit unusable on a branch, which is where it
+    is most useful. The commits are still named in the output, because "we did
+    not look" and "there was nothing to look at" must not read the same.
+    """
+    monkeypatch.setattr(commitcheck, "github_token", lambda: "a token")
+    monkeypatch.setattr(commitcheck, "repo_slug", lambda root=".": "owner/name")
+
+    def answer(path, **kwargs):
+        if path == "/repos/owner/name":
+            return {"full_name": "owner/name"}
+        raise commitcheck.GitHubMissing(f"GET {path}: HTTP Error 422")
+
+    monkeypatch.setattr(commitcheck, "github_json", answer)
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody\n"])
+    assert (
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="require")
+        == 0
+    )
+    assert "are not on owner/name yet" in capsys.readouterr().out
+
+
+def test_a_credential_that_cannot_reach_the_repository_is_not_an_all_clear(tmp_path, monkeypatch):
+    """The blind spot arrived at from the other direction.
+
+    A token without access answers 404 for every commit. Read naively, that is
+    "no pull request anywhere" -- which is exactly the wrong string being
+    checked again, with nothing said. So the repository is reached once first,
+    and a failure there is an outage.
+    """
+    monkeypatch.setattr(commitcheck, "github_token", lambda: "a token")
+    monkeypatch.setattr(commitcheck, "repo_slug", lambda root=".": "owner/name")
+
+    def answer(path, **kwargs):
+        raise commitcheck.GitHubMissing(f"GET {path}: HTTP Error 404")
+
+    monkeypatch.setattr(commitcheck, "github_json", answer)
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody\n"])
+    with pytest.raises(commitcheck.GitHubUnavailable):
+        commitcheck.audit_range("v1.0.0..HEAD", engine="python", root=root, pull_requests="require")
+
+
+def test_the_command_line_reports_a_missing_credential_rather_than_passing(tmp_path):
+    """The exit code has to be non-zero: a check that cannot run has not passed."""
+    root = _repo(tmp_path, ["fix: a real fix\n\nbody\n"])
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN", "GH_TOKEN")}
+    env["GITHUB_REPOSITORY"] = ""
+    # `git` but no `gh`: the script still has to read the range, and must not
+    # borrow a credential from whatever the developer happens to be logged into.
+    env["PATH"] = str(Path(shutil.which("git")).parent)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "commitcheck.py"),
+            "--range",
+            "v1.0.0..HEAD",
+            "--pull-requests",
+            "require",
+            "--root",
+            str(root),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 1
+    assert "Refusing to report a verdict" in result.stderr
+
+
+# ---------------------------------------------------------------------------
 # The hook, end to end.
 # ---------------------------------------------------------------------------
+
+
+def _strip_comment(line):
+    """One YAML line without its comment: `#` at the start or after whitespace.
+
+    Quoted text keeps its `#`, and one glued to a word is content -- both YAML's
+    own rules, not generosity. Stripping before anything else is parsed is the
+    point of these helpers: these workflows explain their wiring in prose, and
+    prose quoting a command satisfied the first version of the tests below with
+    the wiring deleted.
+    """
+    kept = []
+    quote = None
+    for index, char in enumerate(line):
+        if quote is not None:
+            kept.append(char)
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+            kept.append(char)
+        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+            break
+        else:
+            kept.append(char)
+    return "".join(kept)
+
+
+def _scalar(text):
+    """A flow list as a list, a quoted string without its quotes, else the text."""
+    text = text.strip()
+    if text.startswith("[") and text.endswith("]"):
+        return [_scalar(item) for item in text[1:-1].split(",") if item.strip()]
+    if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
+        return text[1:-1]
+    return text
+
+
+def _parse_node(lines, start, indent):
+    """The list, mapping or scalar beginning at `start`, and the index after it."""
+    text = lines[start][1]
+    if text == "-" or text.startswith("- "):
+        return _parse_items(lines, start, indent)
+    if ":" not in text:
+        return text, start + 1
+    return _parse_mapping(lines, start, indent)
+
+
+def _parse_items(lines, start, indent):
+    items = []
+    index = start
+    while (
+        index < len(lines)
+        and lines[index][0] == indent
+        and (lines[index][1] == "-" or lines[index][1].startswith("- "))
+    ):
+        rest = lines[index][1][2:].strip()
+        index += 1
+        if not rest:
+            if index < len(lines) and lines[index][0] > indent:
+                item, index = _parse_node(lines, index, lines[index][0])
+            else:
+                item = None
+        else:
+            # The item begins on the dash line, and everything deeper belongs to
+            # it until the next dash at this indent -- which is how YAML scopes it.
+            item_lines = [(indent + 2, rest)]
+            while index < len(lines) and lines[index][0] > indent:
+                item_lines.append(lines[index])
+                index += 1
+            item, _ = _parse_node(item_lines, 0, indent + 2)
+        items.append(item)
+    return items, index
+
+
+def _parse_mapping(lines, start, indent):
+    mapping = {}
+    index = start
+    while index < len(lines) and lines[index][0] == indent:
+        key, separator, value = lines[index][1].partition(":")
+        index += 1
+        if not separator:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if value in ("|", "|-", "|+"):
+            block = []
+            while index < len(lines) and lines[index][0] > indent:
+                block.append(lines[index][1])
+                index += 1
+            mapping[key] = "\n".join(block)
+        elif value:
+            mapping[key] = _scalar(value)
+        elif index < len(lines) and lines[index][0] > indent:
+            mapping[key], index = _parse_node(lines, index, lines[index][0])
+        else:
+            mapping[key] = None
+    return mapping, index
+
+
+def _parse_workflow(path):
+    """A workflow file as the mappings and lists GitHub's evaluator reads.
+
+    Written for the subset these first-party workflows use -- nested mappings,
+    `- ` items, `[a, b]` flow lists and `|` blocks -- rather than a YAML
+    dependency for a handful of wiring assertions; a workflow that grows a
+    construct outside the subset has to grow this with it.
+    """
+    lines = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = _strip_comment(raw).rstrip()
+        if line.strip():
+            lines.append((len(line) - len(line.lstrip(" ")), line.strip()))
+    workflow, _ = _parse_node(lines, 0, 0)
+    return workflow
+
+
+def _workflow(name):
+    """One of this repository's workflow files, as what GitHub would evaluate."""
+    return _parse_workflow(REPO_ROOT / ".github" / "workflows" / name)
+
+
+def _audit_steps(workflow):
+    """Every step that runs the commit checker.
+
+    Gathered across jobs rather than within one, because the wiring under test
+    is which command the workflow runs, not which job it runs in.
+    """
+    steps = []
+    for job in (workflow.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            tokens = (step.get("run") or "").split()
+            if any(token.endswith("commitcheck.py") for token in tokens):
+                steps.append(step)
+    return steps
+
+
+def test_the_release_audit_requires_the_pull_request_bodies():
+    """Wired with `require`, or the workflow silently checks the wrong string.
+
+    `auto` would degrade to git's copy of the messages the moment a token went
+    missing, and report success -- which is the exact failure this change fixes.
+    Asserted on the parsed step rather than the file: both workflows also carry
+    a comment quoting the command, and prose is not wiring.
+    """
+    for name in ("release.yml", "ci.yml"):
+        audits = [
+            step
+            for step in _audit_steps(_workflow(name))
+            if "--since-release" in step["run"].split()
+        ]
+        assert audits, f"{name} runs no audit over the release range"
+        for step in audits:
+            tokens = step["run"].split()
+            assert "--pull-requests" in tokens, name
+            following = tokens[tokens.index("--pull-requests") + 1 :][:1]
+            assert following == ["require"], name
+            assert "GITHUB_TOKEN" in (step.get("env") or {}), name
+
+
+def test_a_pull_request_is_checked_before_it_can_be_merged():
+    """The body can be edited after every other check has run, so `edited` counts.
+
+    The word also appears in this workflow's own header comment, which is why
+    the assertion reads the parsed trigger list rather than the file.
+    """
+    workflow = _workflow("hygiene.yml")
+    assert "edited" in workflow["on"]["pull_request"]["types"]
+    assert any("--pull-request" in step["run"].split() for step in _audit_steps(workflow))
+
+
+def test_the_workflow_view_reads_the_configuration_not_the_prose(tmp_path):
+    """A comment naming a setting is not the setting.
+
+    This is the mutation the substring tests could not catch: hygiene.yml's own
+    header says `edited` is in the trigger list, so deleting the type left them
+    green with the backstop gone. Here a comment mentions a type that is not in
+    the list and quotes a command no step runs, and neither may count.
+    """
+    synthetic = tmp_path / "mentioned.yml"
+    synthetic.write_text(
+        "# The `edited` trigger is deliberately absent from the list below, and\n"
+        "# no step runs the command the next line quotes.\n"
+        "# run: python3 scripts/commitcheck.py --pull-request 7\n"
+        "name: synthetic\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    types: [opened, synchronize]\n"
+        "jobs:\n"
+        "  one:\n"
+        "    steps:\n"
+        "      - name: not an audit\n"
+        "        run: python3 scripts/leakcheck.py\n",
+        encoding="utf-8",
+    )
+    workflow = _parse_workflow(synthetic)
+    assert workflow["on"]["pull_request"]["types"] == ["opened", "synchronize"]
+    assert _audit_steps(workflow) == []
 
 
 def test_the_commit_msg_hook_runs_this_check():

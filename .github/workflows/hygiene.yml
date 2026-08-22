@@ -13,10 +13,20 @@
 # tests, lint, docs — before the PR exists. GitHub-hosted CI is not the primary
 # quality signal here. Keep this workflow to the one cheap job; adding the
 # matrix back would restore the duplicate-run waste the split exists to end.
+#
+# The second step here is the one exception to that, and it is not coverage for
+# its own sake: it checks something that exists ONLY on a pull request. A pull
+# request body that names release-please's commit-override marker replaces the
+# merged commit message with whatever follows the word, and a paragraph *about*
+# the mechanism is enough to do it. That body never passes under the commit-msg
+# hook, is not in the checkout, and can be edited after every other check has
+# run — so `edited` is in the trigger list. It has already cost this repository
+# a release. Still one job, still seconds.
 name: hygiene
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -26,10 +36,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The name names both halves deliberately: "leak check" on a job that also
+  # validates the pull request body against release-please's parser is a label
+  # understating what decides the outcome — the same failure mode the commit
+  # checker exists to catch. A display rename changes the string a required
+  # status check would reference; `main` carried no branch-protection rule when
+  # this was renamed, so nothing required the old name — re-check before
+  # renaming again.
   leakcheck:
-    name: leak check
+    name: leak scan and commit checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,3 +61,11 @@ jobs:
         run: python3 scripts/leakcheck.py --demo
       - name: Scan every tracked file
         run: python3 scripts/leakcheck.py
+      # Same discipline as the scan above: prove the checker still tells the
+      # shapes apart before believing its verdict on this pull request.
+      - name: Self-test the commit checker
+        run: python3 scripts/commitcheck.py --demo
+      - name: Check what a merge would hand release-please
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/commitcheck.py --pull-request "${{ github.event.pull_request.number }}"
