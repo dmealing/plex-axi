@@ -1,9 +1,12 @@
 """`plex-axi doctor` -- prove the environment, the server and the filters work.
 
-Five checks in the order a failure actually happens, because the first one to
-fail is the one worth reporting. The last is the one no other Plex tool makes:
-a music search is only as good as the server's filter metadata, and a library
-that has not finished scanning advertises fields that are not there yet.
+Four checks in the order a failure actually happens, because the first one to
+fail is the one worth reporting -- five failure branches, because the last
+check fails two ways: a field a structured search needs is not advertised, or
+the library will not answer about its fields at all. That last check is the
+one no other Plex tool makes: a music search is only as good as the server's
+filter metadata, and a library that has not finished scanning advertises
+fields that are not there yet.
 """
 
 from __future__ import annotations
