@@ -67,7 +67,7 @@ plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,r
 
 - each flag is searched on its own Plex field; that is the whole point of this tool
 - ratings are stars (0-5) in and out, so a rating in a result can be passed to --rated-min
-- track fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, guid
+- track fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, added, guid
 - album fields: key, media_id, title, artist, year, rating, tracks, added, guid
 - artist fields: key, media_id, title, rating, added, guid
 - identical track titles are collapsed with Plex's own `group=title`; --no-group shows each

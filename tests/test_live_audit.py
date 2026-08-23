@@ -1,4 +1,4 @@
-"""One regression per bug found by the first live audit against a real server.
+"""One regression per finding from a live audit against a real server.
 
 The tool was built entirely against the double in ``conftest.py``, and this file
 is where the difference between that and a Plex Media Server is written down as
@@ -8,18 +8,23 @@ locally precisely because the double had invented the capability the tool was
 built on.
 
 The topical files carry the ordinary versions of these claims. This one exists
-so the list stays checkable: fourteen bugs, fourteen names, each naming the
+so the list stays checkable: fifteen findings, fifteen names, each naming the
 symptom a real server produced rather than the implementation that fixed it.
+B1 through B14 are the first audit's fourteen bugs; B15 is a design gap a later
+one found, which is why it reads as an absence rather than a wrong answer.
 """
 
 from __future__ import annotations
 
+import ast
 import itertools
 import re
+from pathlib import Path
 
 import pytest
 
 from conftest import MACHINE_ID, SECTION_FIELDS, FakePlex, FakeSession
+from plex_axi import commands
 
 # ------------------------------------------------------------------- B1: rated-min
 
@@ -124,21 +129,24 @@ def _int_ops():
 # --------------------------------------------------------------- B2: the handoff id
 
 
-@pytest.mark.parametrize(
-    ("argv", "header"),
-    [
-        (("search", "--track", "Example Track", "--no-group"), "tracks["),
-        (("pick",), "tracks["),
-        (("recent",), "albums["),
-        (("recent", "--type", "track"), "tracks["),
-        (("recent", "--type", "artist"), "artists["),
-        (("similar", "111"), "tracks["),
-        (("playlist", "show", "Example Playlist"), "tracks["),
-        (("sessions",), "music["),
-        (("search", "--artist", "Example Artist", "--type", "album"), "albums["),
-        (("search", "--genre", "Jazz", "--type", "artist"), "artists["),
-    ],
-)
+#: Every surface that prints rows, and the header its rows arrive under. Named
+#: rather than inlined so that the sweep below can be checked for completeness
+#: by :func:`test_b2_the_sweep_reaches_every_module_that_builds_a_row`.
+ROW_BEARING_SURFACES = [
+    (("search", "--track", "Example Track", "--no-group"), "tracks["),
+    (("pick",), "tracks["),
+    (("recent",), "albums["),
+    (("recent", "--type", "track"), "tracks["),
+    (("recent", "--type", "artist"), "artists["),
+    (("similar", "111"), "tracks["),
+    (("playlist", "show", "Example Playlist"), "tracks["),
+    (("sessions",), "music["),
+    (("search", "--artist", "Example Artist", "--type", "album"), "albums["),
+    (("search", "--genre", "Jazz", "--type", "artist"), "artists["),
+]
+
+
+@pytest.mark.parametrize(("argv", "header"), ROW_BEARING_SURFACES)
 def test_b2_every_row_bearing_surface_carries_the_media_id(server, cli_run, argv, header):
     """B2: the tool ends at a labelled id, and six surfaces printed `key` only.
 
@@ -149,6 +157,48 @@ def test_b2_every_row_bearing_surface_carries_the_media_id(server, cli_run, argv
     assert result.code == 0, argv
     assert "media_id" in result.line(header), argv
     assert f"plex://{MACHINE_ID}/" in result.out, argv
+
+
+def _row_building_modules() -> set:
+    """Every command module that turns a server object into a row.
+
+    Either it calls :func:`plex_axi.music.rows_for` or it defines a builder of
+    its own. Both are read off the parse tree rather than the file's text, so a
+    module that merely *names* one in its prose is not swept for it.
+
+    The bound, stated rather than left to be discovered: a module that inlines
+    its rows in a comprehension without naming a builder is not found this way.
+    ``home`` does exactly that, and it is not a row-bearing surface in this
+    sweep's sense either -- it prints a summary, not a `{...}` header a caller
+    reads columns off. Both conventions the codebase uses for a *reusable* row
+    builder are covered, which is what a new noun would reach for.
+    """
+    found = set()
+    for path in Path(commands.__file__).parent.glob("[!_]*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                (isinstance(node, ast.Name) and node.id == "rows_for")
+                or (isinstance(node, ast.Attribute) and node.attr == "rows_for")
+                or (isinstance(node, ast.FunctionDef) and node.name.endswith("_row"))
+            ):
+                found.add(path.stem)
+                break
+    return found
+
+
+def test_b2_the_sweep_reaches_every_module_that_builds_a_row():
+    """The one thing the sweep above cannot say about itself.
+
+    A list of surfaces written out one by one is only as complete as the last
+    person to remember it. A new row-building command joins the codebase, never
+    reaches ``ROW_BEARING_SURFACES``, and is then untested *and silent about
+    it* -- which from here reads exactly like coverage. So the modules that
+    build rows are discovered rather than recalled, and a surface that is not
+    swept fails this rather than nothing.
+    """
+    swept = {argv[0] for argv, _header in ROW_BEARING_SURFACES}
+    missing = _row_building_modules() - swept
+    assert not missing, f"builds rows but is not swept above: {sorted(missing)}"
 
 
 def test_b2_the_media_id_in_a_row_is_the_one_the_detail_view_prints(server, cli_run):
@@ -686,6 +736,42 @@ def test_b14_no_output_anywhere_says_a_album_or_a_artist(server, cli_run, writab
     ):
         result = cli_run(*argv, env=writable_env)
         assert not re.search(r"\ba (album|artist|item)\b", result.out), argv
+
+
+# ------------------------------------------------------- B15: a track's added date
+
+
+def test_b15_a_track_can_report_when_it_was_added(server, cli_run):
+    """B15: `added` was offered on an album and an artist, and not on a track.
+
+    A track carries ``addedAt`` like everything else the scanner writes, and
+    "what turned up recently" is exactly the question `--fields` exists to let a
+    caller ask without spending a detail request per row. Asking for it on the
+    one libtype most likely to want it was an unknown-field usage error.
+    """
+    result = cli_run("search", "--track", "Example Track", "--no-group", "--fields", "key,added")
+    assert result.code == 0, result.out
+    assert result.line("tracks[").endswith("{key,added}:")
+    assert re.search(r"\d{4}-\d{2}-\d{2}", result.out), result.out
+
+
+def test_b15_the_added_date_is_the_one_the_detail_view_prints(server, cli_run):
+    """The same value, not merely one of the same shape."""
+    listed = cli_run("search", "--track", "Example Track", "--no-group", "--fields", "key,added")
+    detail = cli_run("track", "111")
+    assert listed.code == 0 and detail.code == 0
+    assert detail.line("added:").split(":", 1)[1].strip().strip('"') in listed.out
+
+
+def test_b15_recently_added_tracks_now_say_when(server, cli_run):
+    """`recent` already appends `added` to any libtype that offers it.
+
+    The branch was there and a track was the one libtype it could not reach, so
+    the recently-added list said everything except the thing it was sorted by.
+    """
+    result = cli_run("recent", "--type", "track")
+    assert result.code == 0
+    assert "added" in result.line("tracks[")
 
 
 # ------------------------------------------------------------------------ helpers

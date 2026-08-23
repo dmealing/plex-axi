@@ -193,6 +193,19 @@ RATED_MIN_ZERO_NOTE = (
 )
 
 
+def describe_filter(field: str, operator: str, value: str) -> dict:
+    """One echoed filter: the predicate that ran, in the caller's terms.
+
+    Seven of these are built between here and :mod:`plex_axi.commands.pick`,
+    and every one of them is these three keys in this order -- the echo is a
+    promise about the request, so a row that gained a fourth key on one path
+    and not another would make it a promise about one code path instead.
+    :func:`label_filters` rewrites the operator in place afterwards, so this
+    hands back a plain mutable dict rather than anything tidier.
+    """
+    return {"field": field, "operator": operator, "value": value}
+
+
 def parse_stars(raw, *, flag: str) -> float:
     try:
         value = float(str(raw))
@@ -232,11 +245,11 @@ def rating_predicate(libtype: str, value: float) -> tuple:
     return (
         f"{libtype}.userRating>>",
         threshold,
-        {
-            "field": f"{libtype}.userRating",
-            "operator": RATING_OPERATOR,
-            "value": f"{threshold} (at least {value:g} star{'' if value == 1 else 's'})",
-        },
+        describe_filter(
+            f"{libtype}.userRating",
+            RATING_OPERATOR,
+            f"{threshold} (at least {value:g} star{'' if value == 1 else 's'})",
+        ),
     )
 
 
@@ -258,7 +271,7 @@ def build_filters(parsed, libtype: str) -> tuple:
             continue
         field = FIELD_MAP[flag](libtype)
         filters[field] = value
-        described.append({"field": field, "operator": BARE_OPERATOR, "value": value})
+        described.append(describe_filter(field, BARE_OPERATOR, value))
 
     raw_rating = parsed.get("rated_min")
     if raw_rating not in (None, ""):
@@ -665,7 +678,8 @@ def _bracketed(text: str) -> str:
 ROW_FIELDS = {
     "track": (
         "key,media_id,title,artist,album",
-        "key,media_id,title,artist,track_artist,album,year,rating,duration,plays,skips,index,guid",
+        "key,media_id,title,artist,track_artist,album,year,rating,"
+        "duration,plays,skips,index,added,guid",
     ),
     "album": (
         "key,media_id,title,artist,year",
@@ -713,6 +727,7 @@ def track_row(item, machine_identifier: str) -> dict:
         "plays": int(getattr(item, "viewCount", 0) or 0),
         "skips": int(getattr(item, "skipCount", 0) or 0),
         "index": number(getattr(item, "index", None)),
+        "added": date_only(getattr(item, "addedAt", None)),
         "guid": getattr(item, "guid", "") or "",
     }
 
