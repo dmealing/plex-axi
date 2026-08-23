@@ -45,49 +45,33 @@ def run(ctx, name: str, sub: str, parsed):
 
     missing = missing_env_vars(ctx.environ)
     if missing:
-        checks.append(
-            {
-                "check": "environment",
-                "status": "fail",
-                "detail": f"{' and '.join(missing)} not set",
-            }
-        )
+        checks.append(_check("environment", "fail", f"{' and '.join(missing)} not set"))
         return _document(checks, healthy=False)
 
-    checks.append(
-        {
-            "check": "environment",
-            "status": "ok",
-            "detail": f"{env['url_var']} and {env['token_var']} are set",
-        }
-    )
+    checks.append(_check("environment", "ok", f"{env['url_var']} and {env['token_var']} are set"))
 
     try:
         server = ctx.server()
     except AxiError as exc:
-        checks.append({"check": "server", "status": "fail", "detail": exc.message})
+        checks.append(_check("server", "fail", exc.message))
         return _document(checks, healthy=False, extra_help=exc.help_lines)
 
     checks.append(
-        {
-            "check": "server",
-            "status": "ok",
-            "detail": f"{server.friendlyName} (Plex Media Server {server.version})",
-        }
+        _check("server", "ok", f"{server.friendlyName} (Plex Media Server {server.version})")
     )
 
     try:
         section = ctx.section()
     except AxiError as exc:
-        checks.append({"check": "music library", "status": "fail", "detail": exc.message})
+        checks.append(_check("music library", "fail", exc.message))
         return _document(checks, healthy=False, extra_help=exc.help_lines)
 
     checks.append(
-        {
-            "check": "music library",
-            "status": "ok",
-            "detail": f"{section.title} (key {section.key}, type {MUSIC_SECTION_TYPE})",
-        }
+        _check(
+            "music library",
+            "ok",
+            f"{section.title} (key {section.key}, type {MUSIC_SECTION_TYPE})",
+        )
     )
 
     healthy = True
@@ -97,34 +81,33 @@ def run(ctx, name: str, sub: str, parsed):
         if absent:
             healthy = False
             checks.append(
-                {
-                    "check": "filter fields",
-                    "status": "fail",
-                    "detail": (
-                        f"this library does not advertise {', '.join(absent)} for a track; "
-                        "a structured search cannot be built on it yet"
-                    ),
-                }
+                _check(
+                    "filter fields",
+                    "fail",
+                    f"this library does not advertise {', '.join(absent)} for a track; "
+                    "a structured search cannot be built on it yet",
+                )
             )
         else:
             checks.append(
-                {
-                    "check": "filter fields",
-                    "status": "ok",
-                    "detail": f"{plural(len(fields), 'queryable field')} on a track",
-                }
+                _check(
+                    "filter fields", "ok", f"{plural(len(fields), 'queryable field')} on a track"
+                )
             )
     except Exception as exc:
         healthy = False
-        checks.append(
-            {
-                "check": "filter fields",
-                "status": "fail",
-                "detail": _brief(exc),
-            }
-        )
+        checks.append(_check("filter fields", "fail", _brief(exc)))
 
     return _document(checks, healthy=healthy, version=server.version)
+
+
+def _check(name: str, status: str, detail: str) -> dict:
+    """One row of the report.
+
+    Nine of these are built across the branches above and the shape has never
+    varied between them. Building it in one place is what keeps it that way.
+    """
+    return {"check": name, "status": status, "detail": detail}
 
 
 def _brief(exc: Exception) -> str:

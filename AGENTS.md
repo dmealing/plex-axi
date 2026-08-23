@@ -221,6 +221,24 @@ reaches for `COMMAND_ORDER` directly is describing the base installation, which 
 committed `SKILL.md` and for the tests that pin the public surface, and wrong for anything a caller
 sees. Adding a playback noun is one entry in each of those two, plus its module.
 
+**Two output shapes have exactly one construction site, and the row builders deliberately do not.**
+`music.describe_filter(field, operator, value)` builds every echoed filter — seven call sites across
+`music.py` and `commands/pick.py` — and `doctor._check(name, status, detail)` builds all nine rows
+of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
+rather than reconciling a difference — which is what made it checkable as byte-identical output on
+every surface that prints either shape, rather than only as a green suite.
+`describe_filter` hands back a plain mutable dict on purpose: `label_filters` rewrites the operator
+in place afterwards. It is not named `described` because that is the name of the list every caller
+appends it to.
+
+The seven **row builders** — `music.track_row`/`album_row`/`artist_row`, `playlist._item_rows` and
+`_playlist_row`, `sessions._row`, and the inline one in `home._recent` — look like the same drift
+and are not. Each is a set of per-source coercion rules: which server attribute a column reads, what
+an absent value becomes, which of the three artist names a compilation needs. A shared builder would
+have to carry all of that as parameters, which is the hand-written version with indirection in front
+of it. **Leave them hand-written.** What they needed was not deduplication but a check that the
+tests reach all of them — see "Build, test, lint".
+
 ### Security invariants — do not regress these
 
 - **Every output path is redacted, stdout and stderr alike.** `output.write`, `output.write_text`,
@@ -624,6 +642,12 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   `plexapi.myplex` all stay on `tests/test_no_dispatch.py`'s forbidden list.
 - **Plex Home users are not in the sharing record**, so `--user` cannot reach them. The error says
   so and points at exporting that user's own `PLEX_TOKEN`, rather than reporting them as absent.
+- **Adding a column to `ROW_FIELDS` changes what `recent` prints by default.** `recent.run` appends
+  `added` to the default row of *any* libtype that advertises it, so the branch was already written
+  for a column a track did not have. Giving `track_row` an `added` column therefore did two things
+  at once: `--fields key,added` stopped being an unknown-field usage error on a track, and the
+  recently-added list stopped omitting the one thing it is sorted by. Both are wanted; a column
+  added later without wanting the second would need that branch looked at first.
 - **Sort fields are libtype-scoped on the wire.** `recentlyAddedAlbums` builds
   `sort=album.addedAt:desc`, not `sort=addedAt:desc`. Anything parsing a sort parameter has to strip
   the scope.
@@ -813,6 +837,17 @@ commands a user would type. Read-only is enough for almost all of it, and the cr
 the environment for the length of one shell session and nowhere else. `tests/test_live_audit.py`
 carries one regression per bug the first such audit found; add to it rather than starting another
 file, so the list of "things a real server does that we got wrong" stays in one place.
+
+**A hand-written sweep list is only as complete as whoever last remembered it, so the list is
+checked against a discovered set.** `tests/test_live_audit.py` sweeps `ROW_BEARING_SURFACES` — every
+command that prints rows — asserting each carries a `media_id`. Nothing said that list covered every
+module that builds rows, so a new row-building noun would have joined the codebase untested *and
+silent about it*, which from the outside reads exactly like coverage. `_row_building_modules()` now
+walks each command module's parse tree for a `rows_for` call or a `*_row` definition and the sweep
+must contain everything it finds. This is `CASE_COUNT` in `tests/test_toon_conformance.py` applied
+one layer up: the count of things covered is asserted rather than assumed. The coverage is bounded
+and the test's docstring says how — a module that inlines its rows in a comprehension without naming
+a builder is not found, which is what `home._recent` does and why `home` is not swept.
 
 **Tests never need a live server or a live token, and must not start to.** They run the real client
 library against a Plex double in `tests/conftest.py` that speaks HTTP-shaped XML over a fake

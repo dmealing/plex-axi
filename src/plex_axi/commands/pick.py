@@ -38,6 +38,7 @@ from ..music import (
     advertised_sorts,
     available_fields,
     default_fields,
+    describe_filter,
     label_filters,
     offers,
     parse_relative_date,
@@ -237,7 +238,7 @@ def _build(section, asked) -> tuple:
         # carries genres there and a track-scoped genre filter finds nothing.
         if offers(section, "artist.genre", libtype="track", tag=True):
             filters["artist.genre"] = genre
-            described.append({"field": "artist.genre", "operator": "=", "value": genre})
+            described.append(describe_filter("artist.genre", "=", genre))
         else:
             unavailable("--genre", "artist.genre")
 
@@ -248,11 +249,7 @@ def _build(section, asked) -> tuple:
         if offers(section, "album.subformat", libtype="track", tag=True):
             filters["album.subformat!"] = LIVE_SUBFORMATS
             described.append(
-                {
-                    "field": "album.subformat",
-                    "operator": "is not",
-                    "value": ", ".join(LIVE_SUBFORMATS),
-                }
+                describe_filter("album.subformat", "is not", ", ".join(LIVE_SUBFORMATS))
             )
         else:
             unavailable("--exclude-live", "album.subformat")
@@ -305,18 +302,14 @@ def _add_last_played(section, period, filters, groups, described, unapplied) -> 
     if has_date and has_plays:
         groups.append({"or": [{"track.lastViewedAt<<": period}, {"track.viewCount": 0}]})
         described.append(
-            {
-                "field": "track.lastViewedAt",
-                "operator": "is before, or never played",
-                "value": _echo_period(period),
-            }
+            describe_filter(
+                "track.lastViewedAt", "is before, or never played", _echo_period(period)
+            )
         )
         return
     if has_date:
         filters["track.lastViewedAt<<"] = period
-        described.append(
-            {"field": "track.lastViewedAt", "operator": "is before", "value": _echo_period(period)}
-        )
+        described.append(describe_filter("track.lastViewedAt", "is before", _echo_period(period)))
         unapplied.append(
             {
                 "filter": "--not-played-since",
@@ -330,9 +323,7 @@ def _add_last_played(section, period, filters, groups, described, unapplied) -> 
         return
     if has_plays:
         filters["track.viewCount"] = 0
-        described.append(
-            {"field": "track.viewCount", "operator": "is", "value": "0 (never played)"}
-        )
+        described.append(describe_filter("track.viewCount", "is", "0 (never played)"))
         unapplied.append(
             {
                 "filter": "--not-played-since",
