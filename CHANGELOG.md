@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/dmealing/plex-axi/compare/v0.3.1...v0.4.0) (2026-08-23)
+
+
+### Features
+
+* **rows:** give a track row an added column ([33fc6d1](https://github.com/dmealing/plex-axi/commit/33fc6d1d53acc85f7e9686b191e2395c81c7af04))
+
 ## [0.3.1](https://github.com/dmealing/plex-axi/compare/v0.3.0...v0.3.1) (2026-08-22)
 
 
