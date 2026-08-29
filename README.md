@@ -76,6 +76,12 @@ uvx plex-axi search --artist "Example Artist"
 pipx run plex-axi genres
 ```
 
+Two runtime dependencies come with it. [`PlexAPI`](https://github.com/pkkid/python-plexapi) carries
+the Plex model layer; [`axi-toolkit`](https://github.com/dmealing/axi-toolkit) carries the `plex://`
+identifier forms and the music filter language, which the AXI CLIs share rather than each keeping a
+copy of. `axi-toolkit` declares no runtime dependency of its own, so it adds exactly one name to the
+environment and nothing transitive behind it.
+
 ## Configure
 
 Both values come from the environment. There is **no `--token` flag and no credential file**: a
@@ -380,8 +386,8 @@ flag that does not exist.
 - The `plex://` identifier forms and the music filter language — stars, field scoping, the one
   inequality real Plex offers for an integer, relative dates and sorts — come from
   [`axi-toolkit`](https://github.com/dmealing/axi-toolkit), the shared package the AXI CLIs build
-  on. It declares no runtime dependency of its own, so installing this tool adds exactly one name
-  to the environment.
+  on. What that costs an installation is stated under [Install](#install), where somebody deciding
+  whether to install it will actually read it.
 - Plex's media-query language is documented in the community OpenAPI specification
   (<https://github.com/LukeHagar/plex-api-spec>, MIT), which is the thing to cite rather than
   re-derive.
