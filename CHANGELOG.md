@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/dmealing/plex-axi/compare/v0.4.0...v0.5.0) (2026-08-29)
+
+
+### Documentation
+
+* say in the install section that axi-toolkit installs alongside PlexAPI ([#21](https://github.com/dmealing/plex-axi/issues/21)) ([d5cfe82](https://github.com/dmealing/plex-axi/commit/d5cfe8219433a13e7ec03bc250530930288ea0e0))
+
 ## [0.4.0](https://github.com/dmealing/plex-axi/compare/v0.3.1...v0.4.0) (2026-08-23)
 
 
