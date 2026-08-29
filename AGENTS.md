@@ -1046,9 +1046,11 @@ expression is carried by the *order* of `push`/`or`/`pop`, so a dictionary canno
 test that only saw the mapping could not tell `(A or B) and C` from `A or (B and C)`.
 
 Supported Pythons are 3.10 through 3.12, and **the floor is not a free choice — `PlexAPI` sets
-it.** plexapi 4.18.0 raised its own `requires-python` to `>=3.10`, which raised this project's floor
-with it and said nothing: `requires-python = ">=3.9"` stayed in `pyproject.toml`, the whole test
-suite passed on 3.10 through 3.12, and the only thing that ever noticed was `pip install` on 3.9
+it**, still, now that there are two runtime dependencies rather than one: `axi-toolkit` publishes
+`requires-python >= 3.9`, so it has no say in the floor today. That is a thing to re-read whenever
+either pin moves, not a thing to assume. plexapi 4.18.0 raised its own `requires-python` to
+`>=3.10`, which raised this project's floor with it and said nothing: `requires-python = ">=3.9"`
+stayed in `pyproject.toml`, the whole test suite passed on 3.10 through 3.12, and the only thing that ever noticed was `pip install` on 3.9
 failing to resolve the dependency at all. Published metadata is the one claim tests cannot check,
 because the interpreter that would have failed is the one they were never run on. **Read plexapi's
 `requires-python` before raising the pin, and treat a bump as a possible floor change until you
@@ -1106,6 +1108,17 @@ accident.
 
 **The sample TOON block was generated, not typed.** Feed the document to `toon.encode` and paste
 what comes back, so a reader who copies the shape is copying the real one.
+
+**What an installation costs belongs under `Install`, not under `Design notes`.** The two runtime
+dependencies were described only in a design note for a while, which is the wrong end of the page:
+a design note is read after somebody has decided to install the tool, and "what lands in my
+environment" is one of the questions that decides it. `Install` names both — `PlexAPI` for the Plex
+model layer, `axi-toolkit` for the shared id and filter language — and says that `axi-toolkit`
+declares no runtime dependency of its own, so it costs exactly one name and nothing transitive. The
+design note keeps the *why* and points at `Install` for the price, so the two cannot drift into
+different numbers. Deliberately no Python version in that prose: the floor is held to one number by
+`tests/test_python_floor.py` across `pyproject.toml`, `ci.yml` and the classifiers, and a fourth
+copy in the README would be the one nothing checks. The badge reports it from PyPI instead.
 
 **`[project.urls]` is what PyPI renders as the sidebar links** on the project page, and `Homepage`
 and `Source` alone left a cold reader with no route to the issue tracker or the changelog.
@@ -1169,6 +1182,27 @@ the first publish, the manifest deliberately trails the source: baseline `0.0.0`
 means "nothing released yet, the next `feat:` lands 0.1.0". Never "fix" a mismatch by raising the
 baseline to match the source; that tells release-please the version is already out and it bumps past
 it, permanently skipping a version number PyPI will never let us reuse.
+
+**A commit release-please parses perfectly can still cut no release at all, and that is not a
+failure — it is the changelog sections doing their job.** Only `feat:` and `fix:` (and a breaking
+change) move the version; `refactor:`, `chore:`, `docs:`, `test:` and `ci:` are recorded and
+nothing more. That is right almost always and wrong in one shape: a change with no behaviour to
+describe that nevertheless alters **what a user installs**. Adopting `axi-toolkit` was exactly
+that — a `refactor:` on `main`, correctly typed, while PyPI went on serving a version that still
+carried its own copy of the extracted code, so the duplication the extraction removed was the only
+thing users had.
+
+**The lever is a `Release-As: <version>` footer**, on its own line at the end of the commit
+message, which makes release-please propose that version whatever the types in the range say. Two
+things about it:
+
+- **It has to survive the squash.** release-please reads the merged commit's message, not the
+  branch's, so a footer typed on a local commit and dropped from the squash box does nothing and
+  says nothing — the same silent-no-op class as an unparseable message, reached from the other
+  side. Whoever merges has to carry it across, so say so in the pull request.
+- **Do not hand-edit a version string to compensate.** `pyproject.toml`,
+  `src/plex_axi/__init__.py`, `.release-please-manifest.json` and `CHANGELOG.md` are all
+  release-please's, and the paragraph above is what happens when one of them is set by hand.
 
 **A commit message release-please cannot parse is dropped silently, and the run stays green.**
 This cost one release: `41bcb73` merged to `main`, the release workflow exited **success** with
