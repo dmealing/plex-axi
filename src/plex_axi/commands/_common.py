@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from axi_toolkit.plex.filters import LIBTYPES
+
 from ..errors import UsageError
-from ..music import LIBTYPES
 
 #: Preview length for long free-text values (a summary, a review) before
 #: `--full` is needed.

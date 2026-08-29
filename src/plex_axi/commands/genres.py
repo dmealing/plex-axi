@@ -17,9 +17,10 @@ it surfaces the real set and lets the caller choose.
 
 from __future__ import annotations
 
+from axi_toolkit.plex.filters import LIBTYPES
+
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..music import LIBTYPES
 from ..output import HelpBlock
 from ..plex import translate
 from ._common import article, parse_libtype, parse_limit

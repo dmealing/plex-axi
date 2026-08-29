@@ -15,7 +15,7 @@ from pathlib import Path
 from .. import playback, writes
 from ..argspec import Command, Sub
 from ..config import missing_env_vars, setup_help
-from ..errors import AxiError
+from ..errors import AnyAxiError, help_lines_for
 from ..music import date_only
 from ..output import HelpBlock
 from ._common import plural
@@ -83,9 +83,11 @@ def run(ctx, name: str, sub: str, parsed):
     try:
         server = ctx.server()
         section = ctx.section()
-    except AxiError as exc:
+    except AnyAxiError as exc:
         doc["error"] = exc.message
-        doc["help"] = HelpBlock([*exc.help_lines, "Run `plex-axi doctor` to see which check fails"])
+        doc["help"] = HelpBlock(
+            [*help_lines_for(exc), "Run `plex-axi doctor` to see which check fails"]
+        )
         doc["__exit_code__"] = 1
         return doc
 

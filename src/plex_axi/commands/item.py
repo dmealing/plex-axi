@@ -21,10 +21,12 @@ reason the command earns its place beside the raw `api` escape hatch:
 
 from __future__ import annotations
 
+from axi_toolkit.plex.filters import stars
+from axi_toolkit.plex.ids import handoff, validate_rating_key
+
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..ids import handoff, validate_rating_key
-from ..music import date_only, stars, tag_titles
+from ..music import date_only, tag_titles
 from ..output import HelpBlock, truncate
 from ..plex import translate
 from ._common import PREVIEW_CHARS, article
@@ -84,7 +86,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], invocation=f"plex-axi {name}")
+    key = validate_rating_key(parsed.positionals[0], command=(name,))
     server = ctx.server()
     try:
         item = server.fetchItem(f"/library/metadata/{key}")

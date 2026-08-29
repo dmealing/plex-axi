@@ -11,9 +11,11 @@ anything -- listing what is playing is a read, and this tool does only reads.
 
 from __future__ import annotations
 
+from axi_toolkit.plex.filters import stars
+from axi_toolkit.plex.ids import media_id_for
+
 from ..argspec import Command, Sub
-from ..ids import media_id_for
-from ..music import number, stars
+from ..music import number
 from ..output import HelpBlock
 from ..plex import translate
 

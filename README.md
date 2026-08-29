@@ -377,6 +377,11 @@ flag that does not exist.
   the only Plex library with `MusicSection`, the filter language, and server-side field validation.
   It is synchronous, which is a hazard in a long-running service and simply correct in a one-shot
   CLI — do not "fix" it.
+- The `plex://` identifier forms and the music filter language — stars, field scoping, the one
+  inequality real Plex offers for an integer, relative dates and sorts — come from
+  [`axi-toolkit`](https://github.com/dmealing/axi-toolkit), the shared package the AXI CLIs build
+  on. It declares no runtime dependency of its own, so installing this tool adds exactly one name
+  to the environment.
 - Plex's media-query language is documented in the community OpenAPI specification
   (<https://github.com/LukeHagar/plex-api-spec>, MIT), which is the thing to cite rather than
   re-derive.

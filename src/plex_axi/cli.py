@@ -23,7 +23,7 @@ from .commands import search as search_command
 from .commands import sessions as sessions_command
 from .commands import similar as similar_command
 from .commands import skill as skill_command
-from .errors import EXIT_ERROR, EXIT_OK, AxiError, UsageError
+from .errors import EXIT_ERROR, EXIT_OK, AnyAxiError, UsageError, help_lines_for
 from .output import MODE_HUMAN, MODE_JSON, MODE_TOON, HelpBlock
 
 #: Dispatch order, which is also the order `--help` and the skill list them in.
@@ -637,12 +637,13 @@ def _unknown_sub(command: Command, token: str):
     )
 
 
-def _error_document(exc: AxiError) -> dict:
+def _error_document(exc: AnyAxiError) -> dict:
     doc: dict = {"error": exc.message}
     if exc.code:
         doc["code"] = exc.code
-    if exc.help_lines:
-        doc["help"] = HelpBlock([line for line in exc.help_lines if line])
+    help_lines = help_lines_for(exc)
+    if help_lines:
+        doc["help"] = HelpBlock(help_lines)
     return doc
 
 
@@ -711,7 +712,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
         )
         output.debug(f"command={name} sub={sub_name} mode={mode}")
         doc = module.run(ctx, name, sub_name, parsed)
-    except AxiError as exc:
+    except AnyAxiError as exc:
         # The diagnostic for a *handled* error, which is the error a caller is
         # most likely to be debugging -- and the one `--debug` said nothing
         # about until now. The type is the useful half: it says which boundary

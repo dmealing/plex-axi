@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from ..argspec import Command, Sub
 from ..config import describe_environment, missing_env_vars, setup_help
-from ..errors import AxiError
+from ..errors import AnyAxiError, help_lines_for
 from ..music import MUSIC_SECTION_TYPE
 from ..output import HelpBlock
 from ._common import plural
@@ -55,9 +55,9 @@ def run(ctx, name: str, sub: str, parsed):
 
     try:
         server = ctx.server()
-    except AxiError as exc:
+    except AnyAxiError as exc:
         checks.append(_check("server", "fail", exc.message))
-        return _document(checks, healthy=False, extra_help=exc.help_lines)
+        return _document(checks, healthy=False, extra_help=help_lines_for(exc))
 
     checks.append(
         _check("server", "ok", f"{server.friendlyName} (Plex Media Server {server.version})")
@@ -65,9 +65,9 @@ def run(ctx, name: str, sub: str, parsed):
 
     try:
         section = ctx.section()
-    except AxiError as exc:
+    except AnyAxiError as exc:
         checks.append(_check("music library", "fail", exc.message))
-        return _document(checks, healthy=False, extra_help=exc.help_lines)
+        return _document(checks, healthy=False, extra_help=help_lines_for(exc))
 
     checks.append(
         _check(

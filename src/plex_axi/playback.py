@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .errors import AuthFailed, AxiError
+from .errors import AnyAxiError, AuthFailed, AxiError
 from .output import register_secret
 
 #: The operator's standing decision. Prefixed like :data:`writes.ALLOW_VAR`,
@@ -307,7 +307,7 @@ def survey(server, config, environ) -> dict:
 
         try:
             speakers = cloud.speakers(config, token)
-        except AxiError as exc:
+        except AnyAxiError as exc:
             # A route failing is a fact about that route, not about the targets
             # the other one found. The failure goes where this route's row
             # already lives, which is also where a later "no target called
@@ -342,7 +342,7 @@ def route_lines(found: dict) -> list:
     return [f"{row['route']}: {row['detail']}" for row in found["routes"]]
 
 
-def _route_failure(exc: AxiError) -> str:
+def _route_failure(exc: AnyAxiError) -> str:
     """A failed cloud survey as one routes-row detail.
 
     An auth refusal keeps the credential explanation from the error itself, so

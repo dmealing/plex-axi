@@ -17,9 +17,10 @@ The empty state says which of the two happened, because `track <key>` reports
 
 from __future__ import annotations
 
+from axi_toolkit.plex.ids import validate_rating_key
+
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..ids import validate_rating_key
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
@@ -64,7 +65,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], invocation="plex-axi similar")
+    key = validate_rating_key(parsed.positionals[0], command=("similar",))
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
     max_distance = _parse_distance(parsed.get("max_distance"))
 

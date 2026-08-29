@@ -29,21 +29,24 @@ the caller can tell "no track matched" from "that constraint never ran".
 
 from __future__ import annotations
 
-from ..argspec import Command, Flag, Sub
-from ..errors import AxiError
-from ..ids import handoff
-from ..music import (
+from axi_toolkit.plex.filters import (
     RATED_MIN_ZERO_NOTE,
     RELATIVE_DATE,
-    advertised_sorts,
-    available_fields,
-    default_fields,
     describe_filter,
-    label_filters,
-    offers,
     parse_relative_date,
     parse_stars,
     rating_predicate,
+)
+from axi_toolkit.plex.ids import handoff
+
+from ..argspec import Command, Flag, Sub
+from ..errors import AnyAxiError
+from ..music import (
+    advertised_sorts,
+    available_fields,
+    default_fields,
+    label_filters,
+    offers,
     rows_for,
     run_search,
     with_track_artist,
@@ -141,7 +144,7 @@ def run(ctx, name: str, sub: str, parsed):
     try:
         filters, described, unapplied = _build(section, asked)
         sort, shuffled = _shuffle(section)
-    except AxiError:
+    except AnyAxiError:
         raise
     except Exception as exc:
         raise _metadata_error(exc) from None
