@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/dmealing/plex-axi/compare/v0.6.0...v0.6.1) (2026-08-29)
+
+
+### Build System
+
+* release the isolated developer setup ([#26](https://github.com/dmealing/plex-axi/issues/26)) ([b4f6806](https://github.com/dmealing/plex-axi/commit/b4f68060d92f8bc373a9844ddaaf9302ab1a8ace))
+
 ## [0.6.0](https://github.com/dmealing/plex-axi/compare/v0.5.0...v0.6.0) (2026-08-29)
 
 
