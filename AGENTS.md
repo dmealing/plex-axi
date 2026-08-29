@@ -998,12 +998,33 @@ somebody closes it.
 ## Build, test, lint
 
 ```sh
-pip install -e ".[dev]"
-pytest                                   # ~900 tests, a few seconds
-ruff check . && ruff format --check .
-plex-axi skill --check                   # SKILL.md is generated, never hand-edited
-scripts/leakcheck.py                     # run this AFTER formatting
+scripts/dev-setup.sh                     # builds .venv and installs into it
+.venv/bin/pytest                         # ~900 tests, a few seconds
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
+.venv/bin/plex-axi skill --check         # SKILL.md is generated, never hand-edited
+scripts/leakcheck.py                     # stdlib only; run this AFTER formatting
 ```
+
+**Never write an editable install into a document, a message or a shell here, and do not run one**
+— `pip install` with `-e`, against whatever interpreter is ambient. This tool is normally installed
+as an isolated user-level tool (`pipx`, `uv tool`), and such an install *replaces that
+installation*: it overwrites the
+console script in `~/.local/bin` with a launcher bound to the system interpreter and leaves an
+editable pointer at the checkout. Delete the checkout — the ordinary end of a throwaway one — and
+the reader's own copy of the tool dies with `ModuleNotFoundError`, with nothing to say why. This is
+not hypothetical; it has happened, to two tools at once, and the second symptom was silent: one of
+them went on working while pinned two releases behind what was published. `scripts/dev-setup.sh` is
+the entry point because a rule that only exists as a sentence is one somebody eventually skips: it
+creates `.venv` if it is absent, installs into it, and prints the by-path invocations. `.venv` and
+the call-by-path style are the ones `ci.yml` already uses, and for a related reason — see
+"Continuous integration" — so there is one pattern in this repository rather than two.
+
+**Call the tools out of `.venv/bin` rather than activating.** A bare `pytest`, `ruff` or `plex-axi`
+resolves against `PATH`, which on a machine that has this tool installed is the *installed* copy
+rather than the checkout's — the same confusion in the other direction, and the one that makes a
+generated-file check pass against the wrong command table. `scripts/leakcheck.py` and
+`scripts/commitcheck.py` are the exceptions: both are standard-library-only by design, because the
+git hooks run them before any virtualenv is guaranteed to exist.
 
 **Do not edit a vendored conformance fixture.** If one fails, the encoder is wrong until proven
 otherwise; the checksum test will catch the edit anyway. Refreshing them from upstream is its own
@@ -1171,7 +1192,9 @@ and removing them from every module is a separate change from moving a floor. No
 multi-line f-string expression need 3.12; the test fixtures use `.format` for that reason.
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
-`plex-axi skill` and commit the result; CI fails if the two disagree.
+`.venv/bin/plex-axi skill` and commit the result; CI fails if the two disagree. The by-path spelling
+is the point: a bare `plex-axi` is whatever is installed on the machine, which would regenerate the
+file from a *different* command table than the one being changed.
 
 ## The README, and the metadata PyPI renders
 
@@ -1265,6 +1288,11 @@ bare `pytest`, `ruff` or `plex-axi` would therefore run the maintainer's copy ag
 checkout it points at. Every job that needs third-party packages does
 `python -m venv --clear .venv` and calls tools as `.venv/bin/<tool>`; a venv sets
 `ENABLE_USER_SITE = False`, so the leak cannot happen. Do not "simplify" these back to bare names.
+
+The documented developer setup is the same shape for the same reason, and `scripts/dev-setup.sh` is
+where it lives — see "Build, test, lint". The workflows were right about this before the docs were,
+which is why the script matches them rather than the other way round; `--clear` is the one
+divergence, and it belongs here only because this workspace is reused between jobs.
 
 Checkouts on the self-hosted runner pass `persist-credentials: false`: that workspace outlives the
 job, and a token left behind in its `.git/config` would outlive it too.
