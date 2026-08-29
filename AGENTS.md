@@ -207,6 +207,12 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   when `PLEX_ACCOUNT_TOKEN` is set.
 - `users.py` — `--user`: one plex.tv call, parsed with the standard library. Deliberately not the
   client library's own user switch; see the sharp edge below.
+- `hooks.py` — the session integration AXI §7 calls the *primary* discovery path, and the one
+  place this repository writes to a machine rather than to a library: the `SessionStart` hook for
+  Claude Code and Codex, the managed OpenCode plugin, and the atomic writes and path repair that
+  keep a reinstall from duplicating an entry. Installed only from `plex-axi setup hooks`. See
+  "The session integration" below, because the one thing it does not inherit from the sibling is
+  the thing the hook actually runs.
 - `argspec.py` — per-subcommand flag declarations, and the `access:` block `--help` prints under the
   description. Unknown flags are rejected by name with the valid ones inlined; `RENAMED` maps
   plausible wrong guesses (mostly video vocabulary) to the real flag.
@@ -896,6 +902,86 @@ start believing they own the same queue, which is why the line is drawn after th
 rather than before
 it. `tests/test_no_dispatch.py` enforces it, on the playback commands as well as on every other
 one; read its module docstring before touching it.
+
+## The session integration, and the one thing it could not inherit
+
+AXI §7 makes a **SessionStart hook the primary discovery path** and the installable skill the
+secondary one. This tool shipped only the skill for three releases, which is the standard's own
+primary integration missing from a tool submitted to the standard's own catalog.
+
+`plex-axi setup hooks` installs it, and everything about the installer is the sibling AXI CLI's
+contract, deliberately: the same four targets (Claude Code, Codex, Codex's `[features] hooks`
+flag, and a managed OpenCode plugin), the same atomic writes into the user's own global settings,
+the same PATH-verified portable command, the same idempotence and path repair, and the same
+refusal to overwrite an OpenCode plugin it did not write. Do not redesign any of that; the two
+tools are meant to install the same way.
+
+**What could not be inherited is what the hook runs, and this is the load-bearing paragraph.** The
+sibling's hook runs its bare executable, whose no-argument view is live state. Here the
+no-argument view is `commands/home.py`, and running it from a hook fails on three separate counts,
+each of which alone would be fatal:
+
+- **It needs credentials.** With `PLEX_URL` unset it reports `NOT_CONFIGURED` and exits 1, so on
+  every machine that has the package and no server the hook would open every session with a
+  failure.
+- **It touches the network.** It resolves the section, asks three item counts, the mood
+  vocabulary, the recently-added albums and the sessions. A hook runs before anybody has decided
+  to use the tool; it may not spend that.
+- **It prints a host address.** `url:` is the second line. Hook output lands in an agent's context
+  and is routinely logged and transcribed, which makes it a *wider* surface than a terminal, not a
+  narrower one — and this repository's whole discipline is that a server's address is a thing you
+  do not write down.
+
+So the hook runs **`plex-axi context`** (`commands/context.py`), which reads the environment and
+the command table and nothing else. `tests/test_hooks.py` asserts that rather than describing it:
+the document reaches the server **zero times** — on `server.requests`, not on an exit code, for the
+same reason `tests/test_writes.py` does — exits 0 with no environment at all, and prints neither
+the base URL nor the token on either stream, including the one URL shape where the address is
+itself a secret. The test that joins the two halves is the one asserting the *installed* command
+is `<executable> context` and not the bare executable.
+
+**The document is gate-aware, and it is a surface the playback sweep now reads.** Its commands come
+from `cli.command_order(environ)` and its `media_id:` line is chosen rather than fixed, because
+"this tool ends at a media id and leaves dispatch to whatever owns the speakers" is false with the
+playback gate open. `tests/test_playback.py`'s `_surfaces` carries `context` alongside root help,
+the home view, every `--help` and the skill — it is the widest of them, being the one that arrives
+unasked.
+
+**Its size is asserted, not intended.** It loads on *every* session, so `tests/test_hooks.py` pins
+a byte ceiling. A line added without weighing the cost fails there rather than being paid forever
+by everybody who installed the hook.
+
+**Three smaller decisions, each a deliberate divergence from the sibling.**
+
+- **`setup` carries `hooks` and not `skill`.** There, `setup skill` is the skill's only spelling.
+  Here `plex-axi skill` already exists, is what CI runs as `--check`, and is named in the README
+  and in the generated skill; adding `setup skill` would be two names for one idea — the thing
+  this project refused when it declined to ship `--count` beside `--limit`, and the ambiguity the
+  shared-package extraction exists to end. The *choice* between the two paths is explained in
+  `setup --help`, which is what AXI §7 asks for. `commands/skill.py` and `skill.py` were not
+  touched by the change that added hooks, and a test asserts `setup` has no `skill` subcommand.
+- **`setup hooks` declares `READ_ONLY`.** It writes files, but the access vocabulary is about the
+  *server*, and `MUTATING` is defined as needing `PLEX_AXI_ALLOW_WRITES` and previewing without
+  `--write` — none of which is true here, so declaring it would put a false sentence in `--help`.
+  `plex-axi skill` set the precedent: it writes a file too, declares read-only, and names the file
+  in a note. `setup hooks` names all four. Do not route it through `writes.require`; coupling
+  "may I install a hook on this machine" to "may I change your library" is exactly the coupling
+  the two gates exist to keep apart.
+- **The hook command is shell-quoted.** The sibling's is a single token and needs no quoting. This
+  one carries an argument after the path, so an unquoted space would split the executable in two.
+
+**Neither `setup` nor `context` is subject to the promotion rule below.** That rule asks what a
+typed command does that `api` cannot, and `api` is a GET proxy onto a Plex server. These two do not
+address the server at all — one configures this machine, the other describes the installation — so
+the question does not apply to them rather than being answered generously.
+
+**Verification status: the OpenCode plugin was run, the two JSON hooks were not.** The generated
+plugin was executed under Node against a real build of this package and did push the context
+document into `output.system`, so that route is confirmed end to end. The Claude Code and Codex
+entries were verified as *written* — correct file, correct shape, correct command — and the command
+they record was run directly, but neither agent has been restarted against them. That is the same
+distinction `tests/test_live_audit.py` draws elsewhere and it belongs in the same place when
+somebody closes it.
 
 ## Build, test, lint
 

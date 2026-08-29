@@ -286,6 +286,21 @@ plex-axi --section 'Example Music' doctor
 - exits non-zero when any check fails, so it works as a CI or hook gate
 - a rejected token is reported as invalid or expired separately, because Plex answers 401 to both and only the response text tells them apart
 
+### `plex-axi setup`
+
+Install or repair the session hook that gives an agent ambient context.
+
+- **read-only - this command cannot change anything on the server**
+
+```sh
+plex-axi setup hooks
+```
+
+- hooks give ambient context every session; the skill loads on demand instead -- install either, with `plex-axi setup hooks` or `plex-axi skill`
+- the hook runs `plex-axi context`, which reads the environment and the command table: no connection, no token, no server address, and it exits 0 on a machine with no server
+- writes four files under your home directory and nothing on the Plex server: .claude/settings.json, .codex/hooks.json, .codex/config.toml and .config/opencode/plugins/
+- installation is idempotent and repairs the recorded path after a reinstall or a move; another tool's hooks are left alone and an unmanaged OpenCode plugin is never overwritten
+
 ### `plex-axi skill`
 
 Write or verify the generated Agent Skill for this CLI.
@@ -300,6 +315,20 @@ plex-axi skill --check
 - writes skills/plex-axi/SKILL.md; never hand-edit that file, it is generated
 - the skill describes the commands *this installation* has, so a gated command that is enabled here is described and one that is not is absent entirely
 - needs no server and no token: it reads the command table, not the library
+
+### `plex-axi context`
+
+Print the ambient context a session hook puts in front of an agent.
+
+- **read-only - this command cannot change anything on the server**
+
+```sh
+plex-axi context
+```
+
+- this is the document `plex-axi setup hooks` installs a SessionStart hook to print
+- it reads the environment and the command table only: no connection, no token, no server address, and it exits 0 whether or not this machine has a Plex server
+- for the live library -- the server, its size, what arrived recently and what is playing -- run `plex-axi` with no arguments instead
 
 ## Rules of thumb
 

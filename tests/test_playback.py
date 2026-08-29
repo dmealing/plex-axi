@@ -45,7 +45,14 @@ ADDRESSES = tuple(
 
 def _surfaces(cli_run, env) -> dict:
     """Every place this tool describes itself, as one dictionary of text."""
-    texts = {"root help": cli_run("--help", env=env).out, "home": cli_run(env=env).out}
+    texts = {
+        "root help": cli_run("--help", env=env).out,
+        "home": cli_run(env=env).out,
+        # The ambient document a session hook prints, which is the widest
+        # surface of the four: it lands in an agent's context unasked, on every
+        # session, whether or not the tool is ever used.
+        "context": cli_run("context", env=env).out,
+    }
     for noun in cli.command_order(env):
         texts[f"{noun} --help"] = cli_run(noun, "--help", env=env).out
     specs = cli.command_specs(env)

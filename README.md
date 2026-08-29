@@ -367,15 +367,57 @@ promising the opposite. Match them by artist and title if you need them to survi
 
 ## Agent integration
 
-Install the [Agent Skill](https://agentskills.io) so an agent loads the guidance on demand,
-without paying for it in every session:
+Two ways to make this discoverable. **You only need one.**
+
+**Session hook** — ambient context in every session, for agents that support hooks:
+
+```sh
+plex-axi setup hooks
+```
+
+Installs a `SessionStart` hook for Claude Code (`~/.claude/settings.json`) and Codex
+(`~/.codex/hooks.json`, plus `[features] hooks = true`), and a managed ambient-context plugin for
+OpenCode. It is idempotent, repairs the recorded path after a reinstall or a move, leaves other
+tools' hooks alone, and refuses to overwrite a plugin it does not manage. It writes to your own
+home directory and to nothing on the Plex server.
+
+What the hook puts in front of a session is `plex-axi context` — and unlike most AXI tools, that is
+deliberately *not* the no-argument view. A hook runs at the start of every session, on every
+machine that has the package, before anybody has decided to use the tool, so it must not need a
+token, must not open a connection, and must not put your server's address into an agent's context.
+`context` reads the environment and the command table and nothing else, and exits 0 whether or not
+this machine has a Plex server at all:
+
+```
+$ plex-axi context
+bin: ~/.local/bin/plex-axi
+description: "Structured, per-field music search and diagnosis against a Plex Media Server. Prefer this over raw curl or a free-text search for anything about a music library."
+config: PLEX_URL and PLEX_TOKEN are set
+writes: disabled (export PLEX_AXI_ALLOW_WRITES=true to enable)
+search: "one flag per field -- --artist, --album, --track, --genre, --mood, --style, --year, --rated-min -- because Plex matches them separately; --query searches one unstructured string and is the fallback, not the default"
+media_id: "every row carries one, spelled plex://<machine-id>/<rating-key>, and that is where this tool ends: it leaves dispatch to whatever owns the speakers"
+vocabulary: "--genre and --style match the artist, --mood the type being searched; run `plex-axi genres` (or `moods`, `styles`) for the exact strings this server will accept"
+commands[18]: search,pick,genres,moods,styles,track,album,artist,similar,recent,playlist,rate,sessions,api,doctor,setup,skill,context
+help[3]:
+  Run `plex-axi` for this library at a glance: the server, its size, what arrived recently and what is playing
+  Run `plex-axi search --artist '<name>' --track '<title>'` to search field by field
+  Run `plex-axi <command> --help` for its flags, or `plex-axi --help` for all of them
+```
+
+`config` reports *whether* the two variables are set and never what they hold. The live library —
+the server, its size, what arrived recently, what is playing — is what `plex-axi` with no arguments
+prints, when somebody has asked for it.
+
+**Agent Skill** — loads on demand, no per-session token cost, works in any agent that supports
+skills:
 
 ```sh
 npx skills add dmealing/plex-axi --skill plex-axi
 ```
 
-`skills/plex-axi/SKILL.md` is generated from the CLI's own command table, so it cannot describe a
-flag that does not exist.
+`skills/plex-axi/SKILL.md` is generated from the CLI's own command table by `plex-axi skill`, and
+CI runs `plex-axi skill --check`, so it cannot describe a flag that does not exist or drift from
+the commands it documents.
 
 ## Design notes
 
