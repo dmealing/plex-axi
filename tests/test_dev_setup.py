@@ -39,6 +39,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY_POINT = "scripts/dev-setup.sh"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -154,6 +156,10 @@ def test_the_entry_point_and_ci_build_the_same_virtualenv():
     The workflows were right about this before the documents were, so the script
     matches them rather than the other way round. If the two ever name different
     directories, a contributor's `.venv` is not the one CI proves.
+
+    The workflow is parsed into what GitHub will actually run, not matched as
+    text: the comment above the `lint` job discusses the same directory, and
+    prose is not a step.
     """
     script = (REPO_ROOT / ENTRY_POINT).read_text(encoding="utf-8")
     declared = re.search(r"^venv=(\S+)$", script, re.MULTILINE)
@@ -163,8 +169,12 @@ def test_the_entry_point_and_ci_build_the_same_virtualenv():
         "deleting it."
     )
 
-    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    in_ci = set(re.findall(r"python -m venv (?:--clear )?(\S+)", workflow))
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    in_ci = set()
+    for job in (workflow.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            run = step.get("run") or ""
+            in_ci.update(re.findall(r"python -m venv (?:--clear )?(\S+)", run))
     assert in_ci, (
         f"No `python -m venv <dir>` step found in {CI_WORKFLOW.name}. If the jobs "
         "stopped building a virtualenv, read the comment above the `lint` job before "
