@@ -444,10 +444,19 @@ the commands it documents.
 ## Contributing
 
 ```sh
-pip install -e ".[dev]"
+scripts/dev-setup.sh          # builds .venv and installs this checkout into it
 scripts/install-hooks.sh
-pytest && ruff check . && ruff format --check . && scripts/leakcheck.py
+.venv/bin/pytest && .venv/bin/ruff check . && .venv/bin/ruff format --check . && scripts/leakcheck.py
 ```
+
+**Set up through that script rather than with a bare editable install** — `pip install` with `-e`,
+against whatever interpreter is ambient. `plex-axi` is normally installed as an isolated user-level
+tool, and such an install replaces that installation — then breaks it, with a `ModuleNotFoundError`
+and no
+explanation, the moment this checkout goes away. The script builds a virtualenv at `.venv` and
+installs into that, which cannot reach outside the checkout; call the tools out of `.venv/bin` for
+the same reason, so nothing resolves to a copy installed elsewhere. `scripts/leakcheck.py` needs no
+virtualenv — it is standard library only, so the git hooks can run it.
 
 This repository is public and a music library is full of identifying content, so a leak guard runs
 in a pre-commit hook, a commit-msg hook, CI, and — on every open, push *and edit* — over the pull
