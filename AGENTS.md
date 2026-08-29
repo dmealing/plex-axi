@@ -1312,9 +1312,10 @@ it, permanently skipping a version number PyPI will never let us reuse.
 
 **A commit release-please parses perfectly can still cut no release at all, and that is not a
 failure — it is the changelog sections doing their job.** Only `feat:` and `fix:` (and a breaking
-change) move the version; `refactor:`, `chore:`, `docs:`, `test:` and `ci:` are recorded and
-nothing more. That is right almost always and wrong in one shape: a change with no behaviour to
-describe that nevertheless alters **what a user installs**. Adopting `axi-toolkit` was exactly
+change) move the version; `docs:` is recorded and nothing more, and `build:`, `refactor:`,
+`chore:`, `style:`, `test:` and `ci:` are not even that — see two paragraphs down, because a range
+holding only those cuts nothing at all. That is right almost always and wrong in one shape: a
+change with no behaviour to describe that nevertheless alters **what a user installs**. Adopting `axi-toolkit` was exactly
 that — a `refactor:` on `main`, correctly typed, while PyPI went on serving a version that still
 carried its own copy of the extracted code, so the duplication the extraction removed was the only
 thing users had.
@@ -1330,6 +1331,31 @@ things about it:
 - **Do not hand-edit a version string to compensate.** `pyproject.toml`,
   `src/plex_axi/__init__.py`, `.release-please-manifest.json` and `CHANGELOG.md` are all
   release-please's, and the paragraph above is what happens when one of them is set by hand.
+
+**The footer does a second thing, and it is the half that decides whether a release happens at
+all.** The changelog sections here are the `python` strategy's own, so `docs:` is visible — which
+is why 0.5.0 has a Documentation section — while `build:`, `chore:`, `refactor:`, `style:`,
+`test:` and `ci:` are hidden and are *dropped* rather than merely recorded. A range holding
+nothing but hidden types therefore renders release notes that are the version header and nothing
+else, and `changelogEmpty` in release-please's base strategy turns that into `No user facing
+commits found … - skipping`: no release pull request, no tag, no publish, and a green run. That is
+the third way this project has shipped nothing while the workflow reported success, and it is what
+a lone `build:` commit does. The footer answers both halves at once, because
+`conventional-changelog-conventionalcommits` sets `discard = false` for any commit whose footer
+matches `Release-As:` — so the commit carrying the footer is always rendered, under the section
+for its own type, and the notes are never empty. `commit-audit` cannot see this one: the message
+parses perfectly, which is the whole point of the distinction that section draws.
+
+**Which is why the subject of a forced release *is* the changelog entry, and nothing is written by
+hand.** release-please takes the entry from that commit's **subject**, and its `Changelog` updater
+inserts before the first `## <version>` heading it finds without reading what that heading says — so
+a hand-written section for the version being forced is a *second* section with the same heading
+rather than a replacement for the generated one. That is the bullet above about not hand-editing a
+version string, reaching `CHANGELOG.md` by a route worth naming separately, and it is why 0.5.0 was
+cut as prose plus a footer and nothing else. Write the subject as the changelog line it is about to
+become; improving the wording afterwards is a change to the release branch release-please opens, not
+to the commit that triggers it. Measured against release-please 17.11.2 and its writer preset, not
+inferred from the documentation.
 
 **A commit message release-please cannot parse is dropped silently, and the run stays green.**
 This cost one release: `41bcb73` merged to `main`, the release workflow exited **success** with
