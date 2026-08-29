@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import sys
 
 import pytest
 
@@ -68,6 +69,7 @@ def test_install_creates_hooks_for_every_default_target(tmp_path):
         "type": "command",
         "command": "plex-axi context",
         "timeout": hooks.DEFAULT_TIMEOUT_SECONDS,
+        "managed_by": "plex-axi",
     }
     assert (tmp_path / ".codex" / "hooks.json").exists()
     assert "hooks = true" in (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
@@ -100,6 +102,75 @@ def test_a_changed_executable_path_is_repaired_not_duplicated(tmp_path):
     assert commands_in(settings) == ["/new/bin/plex-axi context"]
 
 
+def test_a_user_hook_that_names_this_tool_is_left_alone(tmp_path):
+    """Ownership is decided by the marker key, never by a substring of the command.
+
+    This tool takes its configuration from the environment, so an env-prefixed
+    wrapper is a hook this tool's users actually write; claiming it would rewrite
+    their wrapper out of their own settings and report the target installed.
+    """
+    wrapper = "env PLEX_URL=http://plex.example.com:32400 plex-axi context"
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {"matcher": "", "hooks": [{"type": "command", "command": wrapper}]}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    hooks.install(tmp_path, command=EXECUTABLE)
+    assert commands_in(read(settings)) == [wrapper, "plex-axi context"]
+
+
+def test_a_second_stale_managed_entry_gives_way_not_reported_current(tmp_path):
+    """A restored backup or a hand repair can leave two of this tool's entries.
+
+    The scan used to stop at the first one, so an already-correct entry ended it
+    with nothing changed and a second stale entry was never repaired -- while
+    every later install reported the target ``current``.
+    """
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{EXECUTABLE} {hooks.CONTEXT_COMMAND}",
+                                    "timeout": hooks.DEFAULT_TIMEOUT_SECONDS,
+                                    "managed_by": "plex-axi",
+                                },
+                                {
+                                    "type": "command",
+                                    "command": f"/old/bin/plex-axi {hooks.CONTEXT_COMMAND}",
+                                    "timeout": hooks.DEFAULT_TIMEOUT_SECONDS,
+                                    "managed_by": "plex-axi",
+                                },
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = hooks.install(tmp_path, command=EXECUTABLE)
+    target = next(t for t in report["targets"] if t["target"] == "claude-code")
+    assert target["status"] == "installed"
+    assert commands_in(read(settings)) == [f"{EXECUTABLE} {hooks.CONTEXT_COMMAND}"]
+
+
 def test_other_tools_hooks_and_unrelated_settings_are_left_alone(tmp_path):
     """These are the user's own global settings; this tool owns one entry in them."""
     settings = tmp_path / ".claude" / "settings.json"
@@ -125,15 +196,32 @@ def test_other_tools_hooks_and_unrelated_settings_are_left_alone(tmp_path):
 
 
 def test_a_legacy_lowercase_hook_entry_is_cleaned_up(tmp_path):
+    """The cleanup recognizes the same marker the installer writes, nothing else.
+
+    An unmarked entry that merely names this tool is a user's, on this key as on
+    any other: no release of this tool shipped a hook, so there is no unmarked
+    entry in the wild to adopt, and adopting by command substring would claim
+    hooks this tool never wrote.
+    """
     settings = tmp_path / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
+    wrapper = "env PLEX_URL=http://plex.example.com:32400 plex-axi context"
     settings.write_text(
-        json.dumps({"hooks": {"session_start": [{"type": "command", "command": "plex-axi"}]}}),
+        json.dumps(
+            {
+                "hooks": {
+                    "session_start": [
+                        {"type": "command", "command": "plex-axi", "managed_by": "plex-axi"},
+                        {"type": "command", "command": wrapper},
+                    ]
+                }
+            }
+        ),
         encoding="utf-8",
     )
     hooks.install(tmp_path, command=EXECUTABLE)
     data = read(settings)
-    assert "session_start" not in data["hooks"]
+    assert [hook["command"] for hook in data["hooks"]["session_start"]] == [wrapper]
     assert commands_in(data) == ["plex-axi context"]
 
 
@@ -160,29 +248,85 @@ def test_a_path_with_a_space_survives_being_joined_with_the_argument():
     assert shlex.split(line) == ["/opt/an example/bin/plex-axi", hooks.CONTEXT_COMMAND]
 
 
+def _assert_features_enabled(content: str) -> None:
+    """Assert the flag landed where Codex reads it, and that the file still parses.
+
+    tomllib arrives with Python 3.11; on 3.10, where the project floor sits
+    today, the same claim is pinned on the one shape that matters: exactly one
+    ``hooks`` key, set to the bare boolean.
+    """
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        assert tomllib.loads(content)["features"] == {"hooks": True}
+    else:
+        assert content.count("hooks =") == 1
+        assert "hooks = true" in content
+
+
 def test_codex_features_flag_is_added_without_disturbing_other_sections():
-    updated, changed = hooks.compute_codex_config_update('[model]\nname = "example"\n')
-    assert changed
+    updated, changed, problem = hooks.compute_codex_config_update('[model]\nname = "example"\n')
+    assert changed and problem is None
     assert "[model]" in updated and 'name = "example"' in updated
     assert "[features]" in updated and "hooks = true" in updated
 
 
 def test_codex_features_flag_already_true_is_a_no_op():
     content = "[features]\nhooks = true\n"
-    assert hooks.compute_codex_config_update(content) == (content, False)
+    assert hooks.compute_codex_config_update(content) == (content, False, None)
 
 
 def test_codex_features_flag_set_to_false_is_flipped():
-    updated, changed = hooks.compute_codex_config_update("[features]\nhooks = false\n")
-    assert changed and "hooks = true" in updated
+    updated, changed, problem = hooks.compute_codex_config_update("[features]\nhooks = false\n")
+    assert changed and problem is None
+    _assert_features_enabled(updated)
 
 
 def test_codex_features_is_inserted_into_an_existing_features_table():
-    updated, changed = hooks.compute_codex_config_update(
+    updated, changed, problem = hooks.compute_codex_config_update(
         "[features]\nother = 1\n\n[model]\nx = 2\n"
     )
-    assert changed
+    assert changed and problem is None
     assert updated.index("hooks = true") < updated.index("[model]")
+
+
+def test_a_quoted_features_flag_is_rewritten_not_duplicated():
+    """`hooks = "true"` is a string, not the bare boolean the flag needs.
+
+    Appending a second key beside it -- the old behaviour -- left Codex with a
+    duplicate its own parser rejects, so the existing line is rewritten.
+    """
+    updated, changed, problem = hooks.compute_codex_config_update(
+        '[features]\nhooks = "true"\n\n[model]\nname = "example"\n'
+    )
+    assert changed and problem is None
+    _assert_features_enabled(updated)
+    assert updated.index("[model]") > updated.index("hooks = true")
+
+
+def test_an_array_of_features_tables_is_refused_rather_than_corrupted(tmp_path):
+    """`[[features]]` is not the features table, and nothing written beside it works.
+
+    A key inside an array element enables nothing and a `[features]` table
+    appended beside the array is a declaration TOML refuses -- so the honest
+    outcome is a refusal that leaves the file byte-identical.
+    """
+    content = '[[features]]\nname = "example"\n\n[model]\nname = "example"\n'
+    updated, changed, problem = hooks.compute_codex_config_update(content)
+    assert not changed and updated == content and problem is not None
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        tomllib.loads(updated)
+
+    config = tmp_path / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(content, encoding="utf-8")
+    report = hooks.install(tmp_path, command=EXECUTABLE)
+    target = next(t for t in report["targets"] if t["target"] == "codex-features")
+    assert target["status"] == "skipped"
+    assert any("array of tables" in error for error in report["errors"])
+    assert config.read_text(encoding="utf-8") == content
 
 
 def test_portable_command_prefers_a_path_entry_resolving_to_this_executable(tmp_path):

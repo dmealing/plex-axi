@@ -50,6 +50,14 @@ from pathlib import Path
 MARKER = "plex-axi"
 BINARY_NAMES = ("plex-axi",)
 
+#: The key that marks a JSON hook entry as one this installer wrote, read back
+#: by exact equality on its value. Deliberately not a substring of the command:
+#: this tool takes its configuration from the environment, so a user's own
+#: wrapper (``env PLEX_URL=... plex-axi context``) names this tool too, and an
+#: installer that claimed every hook mentioning its own name would rewrite the
+#: user's entry out of their own settings and report the target ``installed``.
+MANAGED_KEY = "managed_by"
+
 #: The subcommand a session hook runs. Not the bare executable: see the module
 #: docstring for why the no-argument home view cannot be what a hook prints.
 CONTEXT_COMMAND = "context"
@@ -130,14 +138,29 @@ def hook_command(executable: str) -> str:
 
 
 def _is_managed(hook) -> bool:
-    return isinstance(hook, dict) and MARKER in str(hook.get("command", ""))
+    return isinstance(hook, dict) and hook.get(MANAGED_KEY) == MARKER
+
+
+def _managed_hook(command: str, timeout: int) -> dict:
+    """The one construction site for a JSON hook entry this tool owns.
+
+    Every entry written here carries the marker key and no entry is recognized
+    as managed without it, so what is written and what is claimed cannot drift
+    apart. The marker travels with an entry through a path repair, which is why
+    ownership cannot be decided from the command string: a moved executable's
+    stale entry is by definition a different string.
+    """
+    return {"type": "command", "command": command, "timeout": timeout, MANAGED_KEY: MARKER}
 
 
 def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
     """Return ``(settings, changed)`` with this tool's SessionStart hook current.
 
     Repeat installs with an unchanged path are silent no-ops; a changed path is
-    repaired in place rather than duplicated.
+    repaired in place rather than duplicated. The scan covers every group, not
+    only up to the first managed entry, and every managed entry beyond the first
+    is collapsed: settings restored from a backup or repaired by hand can hold
+    two, and the stale one has to give way whichever position it sits in.
     """
     updated = json.loads(json.dumps(settings)) if settings else {}
     changed = False
@@ -164,40 +187,57 @@ def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
         hooks["SessionStart"] = groups
         changed = True
 
-    for group in groups:
+    have_managed = False
+    for group in list(groups):
         if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
             continue
+        kept_hooks = []
         for hook in group["hooks"]:
             if not _is_managed(hook):
+                kept_hooks.append(hook)
                 continue
-            correct = (
+            if have_managed:
+                changed = True
+                continue
+            have_managed = True
+            if not (
                 hook.get("command") == command
                 and hook.get("type") == "command"
                 and hook.get("timeout") == timeout
-            )
-            if correct and not changed:
-                return settings, False
-            hook["command"] = command
-            hook["type"] = "command"
-            hook["timeout"] = timeout
-            return updated, True
+            ):
+                hook.update(_managed_hook(command, timeout))
+                changed = True
+            kept_hooks.append(hook)
+        if kept_hooks != group["hooks"]:
+            group["hooks"] = kept_hooks
+            if not kept_hooks:
+                groups.remove(group)
 
-    groups.append(
-        {"matcher": "", "hooks": [{"type": "command", "command": command, "timeout": timeout}]}
-    )
-    return updated, True
+    if not have_managed:
+        groups.append({"matcher": "", "hooks": [_managed_hook(command, timeout)]})
+        return updated, True
+    return (updated, True) if changed else (settings, False)
 
 
 def compute_codex_config_update(content: str) -> tuple:
-    """Ensure Codex has ``[features] hooks = true`` without disturbing the rest."""
+    """Ensure Codex has ``[features] hooks = true`` without disturbing the rest.
+
+    Returns ``(content, changed, problem)``. ``problem`` is set when the config
+    cannot carry the flag: a ``[[features]]`` array of tables is not the
+    features table -- a key written beside it lands inside one array element and
+    enables nothing, and a ``[features]`` table appended beside it is a
+    declaration TOML refuses -- so the caller reports a refusal rather than a
+    target that only looks installed.
+    """
     newline = "\r\n" if "\r\n" in content else "\n"
     if not content.strip():
-        return f"[features]{newline}hooks = true{newline}", True
+        return f"[features]{newline}hooks = true{newline}", True, None
 
     lines = content.split("\n")
     lines = [line.rstrip("\r") for line in lines]
     in_features = False
     saw_features = False
+    saw_features_array = False
 
     for index, line in enumerate(lines):
         section = re.match(r"^\s*(\[{1,2})([^\]]+)(\]{1,2})\s*(?:#.*)?$", line)
@@ -207,25 +247,34 @@ def compute_codex_config_update(content: str) -> tuple:
                 continue
             if in_features:
                 lines.insert(index, "hooks = true")
-                return newline.join(lines), True
-            in_features = name == "features"
-            saw_features = saw_features or in_features
+                return newline.join(lines), True, None
+            if name == "features":
+                if len(opener) == 1:
+                    in_features = True
+                    saw_features = True
+                else:
+                    saw_features_array = True
             continue
         if not in_features:
             continue
-        flag = re.match(r"^\s*hooks\s*=\s*(true|false)\s*(?:#.*)?$", line)
-        if not flag:
-            continue
-        if flag.group(1) == "true":
-            return content, False
-        lines[index] = line.replace("false", "true", 1)
-        return newline.join(lines), True
+        if re.match(r"^\s*hooks\s*=\s*true\s*(?:#.*)?$", line):
+            return content, False, None
+        if re.match(r"^\s*hooks\s*=", line):
+            lines[index] = "hooks = true"
+            return newline.join(lines), True, None
 
     if saw_features:
         suffix = "" if content.endswith(newline) else newline
-        return f"{content}{suffix}hooks = true{newline}", True
+        return f"{content}{suffix}hooks = true{newline}", True, None
+    if saw_features_array:
+        return (
+            content,
+            False,
+            "`[features]` is an array of tables here; rewrite it as a `[features]` "
+            "table and install again",
+        )
     separator = newline if content.endswith(newline) else newline * 2
-    return f"{content}{separator}[features]{newline}hooks = true{newline}", True
+    return f"{content}{separator}[features]{newline}hooks = true{newline}", True, None
 
 
 # ------------------------------------------------------------------ OpenCode
@@ -361,7 +410,10 @@ def _install_codex_features(path: Path, report: dict) -> dict:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         current = path.read_text(encoding="utf-8") if path.exists() else ""
-        updated, changed = compute_codex_config_update(current)
+        updated, changed, problem = compute_codex_config_update(current)
+        if problem is not None:
+            report["errors"].append(f"{path}: {problem}")
+            return {"target": "codex-features", "status": "skipped"}
         if changed:
             write_atomic(path, updated)
         return {"target": "codex-features", "status": "installed" if changed else "current"}

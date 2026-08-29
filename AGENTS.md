@@ -951,7 +951,7 @@ unasked.
 a byte ceiling. A line added without weighing the cost fails there rather than being paid forever
 by everybody who installed the hook.
 
-**Three smaller decisions, each a deliberate divergence from the sibling.**
+**Four smaller decisions, each a deliberate divergence from the sibling.**
 
 - **`setup` carries `hooks` and not `skill`.** There, `setup skill` is the skill's only spelling.
   Here `plex-axi skill` already exists, is what CI runs as `--check`, and is named in the README
@@ -969,6 +969,18 @@ by everybody who installed the hook.
   the two gates exist to keep apart.
 - **The hook command is shell-quoted.** The sibling's is a single token and needs no quoting. This
   one carries an argument after the path, so an unquoted space would split the executable in two.
+- **A managed JSON hook entry is recognized by a marker key, not by its command.** The sibling's
+  installer treats any hook whose command mentions the tool as its own. That is safe there and is
+  not here: this tool takes its configuration from the environment, so an env-prefixed wrapper
+  (`env PLEX_URL=… plex-axi context`) is a hook this tool's users actually write, and an installer
+  claiming every entry that mentions its own name would rewrite the user's wrapper out of their own
+  settings and report the target `installed`. Every entry the installer writes carries
+  `managed_by: plex-axi` beside the command, `_is_managed` matches that key by exact equality and
+  nothing else, and the marker travels with an entry through a path repair — which a command-shaped
+  test could never do, since a moved executable's stale entry is by definition a different string.
+  The legacy lowercase `session_start` cleanup follows the same rule, and nothing needs migrating:
+  no release of this tool shipped a hook before this one, so there is no unmarked entry in the wild
+  to adopt, and adopting by command substring would reintroduce the bug.
 
 **Neither `setup` nor `context` is subject to the promotion rule below.** That rule asks what a
 typed command does that `api` cannot, and `api` is a GET proxy onto a Plex server. These two do not
