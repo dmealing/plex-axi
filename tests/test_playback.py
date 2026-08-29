@@ -49,7 +49,7 @@ def _surfaces(cli_run, env) -> dict:
         "root help": cli_run("--help", env=env).out,
         "home": cli_run(env=env).out,
         # The ambient document a session hook prints, which is the widest
-        # surface of the four: it lands in an agent's context unasked, on every
+        # surface of them all: it lands in an agent's context unasked, on every
         # session, whether or not the tool is ever used.
         "context": cli_run("context", env=env).out,
     }

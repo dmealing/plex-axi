@@ -242,8 +242,8 @@ starts one thing on one target and nothing in this tool can pause, skip or stop 
 ## Playback
 
 Off by default, and while it is off the commands are not there to be found — not in `--help`, not
-in the generated skill, not in the no-argument view. That is deliberate, and the default is the
-important half.
+in the generated skill, not in the no-argument view, not in the ambient context a session hook
+prints. That is deliberate, and the default is the important half.
 
 **If you run Home Assistant, or anything else that already dispatches music, leave this switched
 off.** Your automation owns the speakers — Sonos included, which it reaches by its own path — and
