@@ -4,17 +4,25 @@ Two of the five `plex://` forms in circulation break a consumer, and one of them
 raises inside it rather than failing a lookup. This is where that is prevented,
 so these tests assert on the strings the tool emits as much as on the ones it
 refuses.
+
+**Six cases used to sit above these and are deliberately gone.** They addressed
+:mod:`axi_toolkit.plex.ids` -- ``media_content_id`` and ``validate_rating_key``
+called directly -- and that module is where they now live, stated in its own
+suite along with direct coverage of ``media_id_for``, ``handoff`` and
+``stability_note``, which this file only ever reached through a command. Two
+copies of one test is the divergence the shared package exists to end, so they
+were removed rather than repointed; do not restore them here. What is left is
+this tool's own half: the identifiers its commands print, and the refusals its
+callers read. The bytes of those refusals are pinned in
+``tests/test_recovery.py``, because the tool's name arriving at the renderer is
+the one thing the move could have broken silently.
 """
 
 from __future__ import annotations
 
 import re
 
-import pytest
-
 from conftest import MACHINE_ID
-from plex_axi.errors import UsageError
-from plex_axi.ids import media_content_id, validate_rating_key
 
 #: The form that must never leave this tool: a rating key wearing the guid
 #: namespace. A consumer parses the namespace as a server name, looks for a
@@ -22,52 +30,6 @@ from plex_axi.ids import media_content_id, validate_rating_key
 #: in the same position, raises rather than failing. A guid is all-hex and 24
 #: characters; a rating key is a short run of digits, which is what this matches.
 _FORBIDDEN = re.compile(r"plex://(artist|album|track)/\d{1,12}(?![0-9a-f])")
-
-
-def test_the_content_id_names_the_server_as_well_as_the_item():
-    """M5: the canonical form, not the one a consumer calls legacy."""
-    assert media_content_id(MACHINE_ID, 311) == f"plex://{MACHINE_ID}/311"
-
-
-def test_a_content_id_is_never_built_from_a_guid():
-    """The `plex://track/<hex>` form raises inside a consumer rather than failing."""
-    with pytest.raises(ValueError):
-        media_content_id(MACHINE_ID, "0000000000000000000000a1")
-
-
-def test_a_content_id_needs_the_machine_identifier():
-    with pytest.raises(ValueError):
-        media_content_id("", 311)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "plex://track/a1b2c3d4e5f60718293a0100",
-        "plex://0f0f0f0f/311",
-        "plex://311",
-        "not-a-key",
-        "",
-        "12a",
-    ],
-)
-def test_only_a_decimal_rating_key_is_accepted(value):
-    with pytest.raises(UsageError):
-        validate_rating_key(value, invocation="plex-axi track")
-
-
-def test_a_guid_is_rejected_by_name_rather_than_crashing():
-    """§ the collision is real: a guid is a legitimate Plex identifier."""
-    with pytest.raises(UsageError) as caught:
-        validate_rating_key("plex://track/a1b2c3d4e5f60718293a0100", invocation="plex-axi track")
-    assert caught.value.code == "GUID_NOT_RATING_KEY"
-    assert "guid" in caught.value.message
-
-
-def test_a_media_id_is_rejected_with_the_field_that_carries_the_number():
-    with pytest.raises(UsageError) as caught:
-        validate_rating_key("plex://abc/311", invocation="plex-axi track")
-    assert caught.value.code == "MEDIA_ID_NOT_RATING_KEY"
 
 
 def test_the_search_output_labels_the_id_and_carries_the_guid(server, cli_run):

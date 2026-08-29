@@ -29,10 +29,11 @@ exercise before they were a Plex question.
 
 from __future__ import annotations
 
+from axi_toolkit.plex.ids import media_id_for, validate_rating_key
+
 from .. import writes
 from ..argspec import Command, Flag, Sub
 from ..errors import AxiError, UsageError
-from ..ids import media_id_for, validate_rating_key
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
@@ -442,9 +443,9 @@ def _items(playlist) -> list:
 
 def _keys(parsed, sub: str, title: str) -> list:
     raw = parsed.get("key", []) or []
-    keys = [
-        validate_rating_key(value, invocation=f"plex-axi playlist {sub} '{title}'") for value in raw
-    ]
+    # The caller's own words after the tool name, which is what a `run`
+    # recovery is: the name in front of them is the renderer's to supply.
+    keys = [validate_rating_key(value, command=("playlist", sub, f"'{title}'")) for value in raw]
     if not keys:
         raise UsageError(
             f"`playlist {sub}` needs at least one --key",

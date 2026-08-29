@@ -23,10 +23,11 @@ the rest was never missing.
 
 from __future__ import annotations
 
+from axi_toolkit.plex.ids import handoff, validate_rating_key
+
 from .. import playback
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..ids import handoff, validate_rating_key
 from ..output import HelpBlock
 from ..plex import translate
 from ._common import article
@@ -92,7 +93,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], invocation="plex-axi play")
+    key = validate_rating_key(parsed.positionals[0], command=("play",))
 
     # Before the connection, not after it: a refused dispatch must not be a
     # request the server ever hears about. With the gate closed the CLI will not

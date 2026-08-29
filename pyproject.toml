@@ -44,6 +44,13 @@ dependencies = [
   # matrix, but only an install on the oldest version proves the pin is
   # satisfiable there.
   "PlexAPI>=4.18",
+  # The `plex://` forms and the music filter language live here now, with the
+  # error contract they raise against and the renderer that puts this tool's
+  # name back in front of a recovery. 0.4.0 is the first release carrying
+  # `axi_toolkit.plex`, so it is the floor. The package declares no runtime
+  # dependency of its own and publishes `requires-python >= 3.9`, so it neither
+  # brings anything transitive with it nor has any say in the floor above.
+  "axi-toolkit>=0.4.0",
 ]
 
 [project.optional-dependencies]

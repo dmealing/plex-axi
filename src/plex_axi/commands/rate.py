@@ -6,7 +6,7 @@ rating read out of `search` or `track` can be handed straight back here, and
 what comes back is read from the server rather than echoed from the request.
 
 Plex stores 0-10 and a star is two points. That conversion lives in
-:mod:`plex_axi.music` and is done once, here as everywhere else, because a tool
+:mod:`axi_toolkit.plex.filters` and is done once, here as everywhere else, because a tool
 that took stars in one command and points in another would be a silent trap --
 the kind that looks like it worked and halves every rating it touches.
 
@@ -18,11 +18,12 @@ different blast radius.
 
 from __future__ import annotations
 
+from axi_toolkit.plex.filters import LIBTYPES, POINTS_PER_STAR, parse_stars, stars
+from axi_toolkit.plex.ids import handoff, validate_rating_key
+
 from .. import writes
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..ids import handoff, validate_rating_key
-from ..music import LIBTYPES, POINTS_PER_STAR, parse_stars, stars
 from ..output import HelpBlock
 from ..plex import translate
 from ._common import article
@@ -74,7 +75,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], invocation="plex-axi rate")
+    key = validate_rating_key(parsed.positionals[0], command=("rate",))
     wanted = _wanted(parsed, key)
 
     # Before the connection, not after it: a refused write must not be a request

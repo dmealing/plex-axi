@@ -169,7 +169,7 @@ def test_exponent_notation_is_kept_for_magnitudes_outside_that_range(value, expe
 def test_the_star_and_distance_values_commands_do_emit_are_unchanged():
     """The two bands are the encoder's guarantee, not any command's output today.
 
-    `music.stars` yields half-star steps and `similar` rounds a sonic distance to
+    `filters.stars` yields half-star steps and `similar` rounds a sonic distance to
     four places, so nothing the tool currently prints lands in either band. That
     is why no existing test moved -- and why the claim the README makes about the
     encoder is the thing this fix is protecting, rather than a row shape.

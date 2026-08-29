@@ -183,9 +183,17 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   are command lines full of commas.
 - `plex.py` — connection, hardening and error translation. Nothing from the client library crosses
   this boundary: not its exceptions, not its response bodies, not its name.
-- `music.py` — the product: section resolution, the per-field filter map, the search, the exact
-  count, and the row shapes.
-- `ids.py` — which `plex://` string may be printed. See "The six `plex://` forms" below.
+- `music.py` — the product, and only the half of it that needs a live server: section resolution,
+  the operator titles a section advertises, the search, the exact total, the `plexapi` exception
+  classification and the whole `--fields` row vocabulary.
+- `axi_toolkit.plex.filters` — the pure half of the same product, and no longer in this repository:
+  `LIBTYPES`, the stars conversion both ways, `FIELD_MAP`, the operators, `build_filters`, the
+  relative dates and `parse_sort`. Everything there takes a flag's raw value and returns a value or
+  raises; nothing there takes a `server` or a `section`. See "The shared package" below.
+- `axi_toolkit.plex.ids` — which `plex://` string may be printed, also no longer here. See "The six
+  `plex://` forms" below.
+- `errors.py` — this tool's error classes, and the one place a shared refusal is rendered. See "The
+  shared package".
 - `writes.py` — the write gate and the `access` vocabulary. Nothing mutates without going through
   `writes.require`, and every command declares `access=READ_ONLY` or `access=MUTATING` so that
   `--help` and the generated skill are printing the *same declaration* rather than two descriptions
@@ -222,8 +230,10 @@ committed `SKILL.md` and for the tests that pin the public surface, and wrong fo
 sees. Adding a playback noun is one entry in each of those two, plus its module.
 
 **Two output shapes have exactly one construction site, and the row builders deliberately do not.**
-`music.describe_filter(field, operator, value)` builds every echoed filter — seven call sites across
-`music.py` and `commands/pick.py` — and `doctor._check(name, status, detail)` builds all nine rows
+`describe_filter(field, operator, value)` builds every echoed filter — five call sites in
+`commands/pick.py` now, the two that sat in `music.py` having moved with `build_filters` and
+`rating_predicate`, and the builder itself being `axi_toolkit.plex.filters`' — and
+`doctor._check(name, status, detail)` builds all nine rows
 of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
 rather than reconciling a difference — which is what made it checkable as byte-identical output on
 every surface that prints either shape, rather than only as a green suite.
@@ -238,6 +248,76 @@ an absent value becomes, which of the three artist names a compilation needs. A 
 have to carry all of that as parameters, which is the hand-written version with indirection in front
 of it. **Leave them hand-written.** What they needed was not deduplication but a check that the
 tests reach all of them — see "Build, test, lint".
+
+### The shared package: what left, and the one thing it changed
+
+`axi-toolkit` carries the parts of this tool that two AXI CLIs had in common. Two of them were
+this repository's:
+
+- **`ids.py` moved whole** and is `axi_toolkit.plex.ids`. The six forms, the `local://` note, the
+  regular expressions and the refusals are the same code; `src/plex_axi/ids.py` is gone and there
+  is no shim standing where it was.
+- **The pure half of `music.py`** is `axi_toolkit.plex.filters`: `LIBTYPES`, `POINTS_PER_STAR`,
+  `stars`, `parse_stars`, `FIELD_MAP`, `BARE_OPERATOR`, `RATING_OPERATOR`, `RATED_MIN_ZERO_NOTE`,
+  `describe_filter`, `rating_predicate`, `build_filters`, `assert_server_side`, `RELATIVE_DATE`,
+  `ABSOLUTE_DATE`, `parse_relative_date`, `SORT_DIRECTIONS` and `parse_sort`.
+
+**What deliberately stayed, and the line the split follows.** Anything taking a `server`, a
+`section` or a page of items is here — `resolve_section`, `run_search`, `count_matches`, the
+`advertised_*` probes, `offers`, `label_filters`, `SearchResult` — along with the `plexapi`
+exception classification and the whole `--fields` row vocabulary (`ROW_FIELDS`, `default_fields`,
+`available_fields`, the seven row builders, `rows_for`, `with_track_artist`, `tag_titles`,
+`date_only`, `number`). Those are decisions about *this* tool's output rather than about Plex's
+query language. **Do not propose moving them.**
+
+**Every call site was repointed rather than re-exported, and that was a decision.** `music.py`
+could have kept importing the moved names and handing them on, which would have left every
+existing importer untouched — and would have left two import paths for one object with nothing to
+say which is canonical. That ambiguity is the thing the extraction exists to end, so `search.py`,
+`pick.py`, `rate.py`, `item.py`, `sessions.py`, `genres.py` and `_common.py` name
+`axi_toolkit.plex.filters` directly.
+
+**The one thing that genuinely changed is where the tool's name lives, and it is the reason this
+was not a mechanical move.** A dozen recovery lines used to be written out at the point of the
+raise, with `plex-axi` baked into the sentence:
+
+```
+help_lines=["Run `plex-axi search --track '<title>'` to get this server's rating key"]
+```
+
+Upstream those are *intent* — `run(("search", "--track", "'<title>'"), purpose="to get this
+server's rating key")` — with no tool name anywhere in them, which is what lets one module serve a
+second CLI. So the name has to be supplied here, and there is exactly one place that does it:
+
+- **`plex_axi.errors.AxiError` subclasses `axi_toolkit.errors.AxiError`**, which this module
+  re-exports as `AnyAxiError`. That name is what an `except` clause should catch: *an error already
+  in AXI's shape, whoever raised it*. A handler catching `AxiError` alone silently misses every
+  refusal raised inside `axi_toolkit.plex`, and there were three that would have — the last-resort
+  clause in `cli.main`, and the two pass-through arms in `music.run_search` and `commands/pick`,
+  each of which would have re-wrapped a caller's typo as a plexapi translation or an
+  `INTERNAL_ERROR`. All three are asserted in `tests/test_recovery.py`.
+- **`errors.help_lines_for(exc)` is the only place `plex-axi` is put in front of a recovery.** It
+  returns this tool's own `help_lines` when it has them and renders the recovery through
+  `axi_toolkit.render.cli` when it does not. `cli._error_document`, `doctor` and the home view all
+  read it rather than the attribute.
+- **`validate_rating_key` takes `command` now, not `invocation`** — the caller's own words *after*
+  the tool name, as a tuple: `("track",)`, `("playlist", "add", "'Example Playlist'")`. A bare
+  string is refused upstream rather than accepted, because `run` would take one apart into its
+  characters and the resulting line would look plausible right up until somebody read it.
+
+**The bar this move had to clear was byte-for-byte output, and it was measured rather than
+argued.** 324 invocations — every `--help` surface with each gate open and closed, every refusal
+in both moved modules, the successful commands that echo a filter, and the config failures — were
+captured from `main` before the change and re-captured after. The two files are identical. Do not
+take a green suite as the evidence here: the suite passed on the day the tool's headline filter
+did not work against any real server. `tests/test_recovery.py` pins the refusal lines so the next
+change to them fails locally.
+
+**A consequence in the other repository, which is not this one's to fix.** `axi-toolkit`'s drift
+gates `plexDomainDefinitions`, `plexIdBehaviour` and `plexFilterBehaviour` read *this* repository's
+`ids.py` and `music.py` at capture time, to prove the two copies stayed in agreement while both
+existed. There is nothing left here for them to read, so they need retiring over there. Nothing
+was added here to compensate, and nothing should be.
 
 ### Security invariants — do not regress these
 
@@ -524,7 +604,7 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   formats through `Decimal(repr(value))` inside the range and defers to `json.dumps` outside it,
   where an exponent is permitted. `Decimal(value)` would be wrong: it expands the exact binary
   value into a fifty-digit fraction instead of the shortest round-tripping digits. No typed command
-  reaches either band today — `music.stars` yields half-star steps and `similar` rounds a sonic
+  reaches either band today — `filters.stars` yields half-star steps and `similar` rounds a sonic
   distance to four places — so the guarantee is the encoder's, which is what the README's
   strictness claim is about, and not any one row shape's.
 - **Tabular form is not available in list-item position.** A tabular header on a hyphen line is a
@@ -544,8 +624,9 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   `userRating__gte=8` through `Library.search` is emitted verbatim into the URL and applied nowhere.
   Through `LibrarySection.search` it becomes a *client-side* post-filter applied after `limit` has
   already sliced the results, so it filters within the slice rather than narrowing the query. Only
-  `filters={"userRating>>": 7}` is a real, server-validated Plex predicate. `music._assert_server_side`
-  fails loudly if anything ever lands in the client-side bucket again.
+  `filters={"userRating>>": 7}` is a real, server-validated Plex predicate.
+  `axi_toolkit.plex.filters.assert_server_side`, called from `music._execute`, fails loudly if
+  anything ever lands in the client-side bucket again.
 - **Plex's operator suffixes are not Python's, and one of the two you would reach for does not
   exist.** `>` normalises to `>=` ("is greater than or equals") and `>>` to `>>=` ("is greater
   than") — but **no real music section advertises `>=` for any type**, so the natural spelling of
@@ -701,17 +782,19 @@ Six strings are in circulation and they all look like one identifier:
 | 6. `local://<ratingKey>` | Plex, for an item it never matched | **no** — a guid, and not a durable one |
 
 Forms 4 and 5 are the trap: the same shape in two namespaces, one of which is a legitimate Plex
-identifier handed out under the attribute name `guid`. `ids.media_content_id` builds only the first
-form and refuses anything that is not a decimal rating key; `tests/test_ids.py` sweeps every command
-and asserts none of them ever emits form 4 or 5.
+identifier handed out under the attribute name `guid`. `media_content_id`, in
+`axi_toolkit.plex.ids`, builds only the first form and refuses anything that is not a decimal
+rating key; `tests/test_ids.py` sweeps every command and asserts none of them ever emits form 4
+or 5.
 
 **Form 6 is the one that makes the durability note conditional.** An item Plex never matched to its
 catalogue carries `local://<ratingKey>` — the rating key with a scheme in front of it, so it moves
 exactly when the rating key moves. It is not rare: roughly one track in seven on a real library. The
 note printed beside it used to say "guid is the identifier that survives, so keep them together",
 which is false for exactly those items and is printed at the moment somebody is about to write one
-into a configuration file. `ids.stability_note(guid)` reads the scheme and says which situation the
-caller is in; the double carries a `local://` row so the branch has a fixture rather than a comment.
+into a configuration file. `ids.stability_note(guid)` reads the scheme and says which situation
+the caller is in; the double carries a `local://` row so the branch has a fixture rather than a
+comment.
 
 **Labels are vendor-neutral, and the output stops at the identifier.** The field is `media_id`, not
 the name of any particular consumer: this ships to anyone with a Plex library, and naming one in the
@@ -827,6 +910,15 @@ scripts/leakcheck.py                     # run this AFTER formatting
 **Do not edit a vendored conformance fixture.** If one fails, the encoder is wrong until proven
 otherwise; the checksum test will catch the edit anyway. Refreshing them from upstream is its own
 commit, separate from any encoder change made to satisfy it, and `PROVENANCE.md` carries the recipe.
+
+**Six cases that used to be in `tests/test_ids.py` are gone on purpose, and are not lost.** They
+called `media_content_id` and `validate_rating_key` directly, and both live in
+`axi_toolkit.plex.ids` now, stated in its own suite along with direct coverage of `media_id_for`,
+`handoff` and `stability_note` — which this repository only ever reached through a command. Two
+copies of one test is the divergence the shared package exists to end. What replaced them is
+stronger and is *this* tool's to keep: `tests/test_recovery.py` pins the exact bytes of every
+refusal those two modules raise, because the tool's name now arrives at a renderer rather than
+being written into the sentence, and that is the one thing the move could have broken silently.
 
 **A green suite is not evidence the tool works.** It was green for the whole of 0.2.0, and 0.2.0's
 headline filter did not work against any real Plex server. The suite proves the tool behaves
