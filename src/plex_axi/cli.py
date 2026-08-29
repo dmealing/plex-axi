@@ -10,6 +10,7 @@ from . import config as config_module
 from .argspec import GLOBAL_FLAGS, VALUE_GLOBALS, Command, parse, render_command_help
 from .commands import api as api_command
 from .commands import clients as clients_command
+from .commands import context as context_command
 from .commands import doctor as doctor_command
 from .commands import genres as genres_command
 from .commands import home as home_command
@@ -21,6 +22,7 @@ from .commands import rate as rate_command
 from .commands import recent as recent_command
 from .commands import search as search_command
 from .commands import sessions as sessions_command
+from .commands import setup as setup_command
 from .commands import similar as similar_command
 from .commands import skill as skill_command
 from .errors import EXIT_ERROR, EXIT_OK, AnyAxiError, UsageError, help_lines_for
@@ -45,7 +47,9 @@ COMMAND_ORDER = (
     "sessions",
     "api",
     "doctor",
+    "setup",
     "skill",
+    "context",
 )
 
 #: The nouns that exist only while the playback gate is open, appended to
@@ -73,7 +77,9 @@ _MODULES = {
     "sessions": sessions_command,
     "api": api_command,
     "doctor": doctor_command,
+    "setup": setup_command,
     "skill": skill_command,
+    "context": context_command,
     "home": home_command,
 }
 
