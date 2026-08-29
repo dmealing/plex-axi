@@ -935,7 +935,7 @@ _STRING_OPS = [
 ]
 #: Real Plex offers no "greater than or equal" for an integer at all: `>>=` is
 #: strictly greater and `<<=` is strictly less. "At least N" is therefore
-#: `>>= N-1`, which is what `music.rating_predicate` builds.
+#: `>>= N-1`, which is what `filters.rating_predicate` builds.
 _INT_OPS = [
     ("=", "is"),
     ("!=", "is not"),

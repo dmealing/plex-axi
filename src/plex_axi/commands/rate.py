@@ -6,7 +6,7 @@ rating read out of `search` or `track` can be handed straight back here, and
 what comes back is read from the server rather than echoed from the request.
 
 Plex stores 0-10 and a star is two points. That conversion lives in
-:mod:`plex_axi.music` and is done once, here as everywhere else, because a tool
+:mod:`axi_toolkit.plex.filters` and is done once, here as everywhere else, because a tool
 that took stars in one command and points in another would be a silent trap --
 the kind that looks like it worked and halves every rating it touches.
 

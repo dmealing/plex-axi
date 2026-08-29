@@ -230,8 +230,9 @@ committed `SKILL.md` and for the tests that pin the public surface, and wrong fo
 sees. Adding a playback noun is one entry in each of those two, plus its module.
 
 **Two output shapes have exactly one construction site, and the row builders deliberately do not.**
-`describe_filter(field, operator, value)` builds every echoed filter — seven call sites across
-`music.py` and `commands/pick.py`, and it is `axi_toolkit.plex.filters`' now — and
+`describe_filter(field, operator, value)` builds every echoed filter — five call sites in
+`commands/pick.py` now, the two that sat in `music.py` having moved with `build_filters` and
+`rating_predicate`, and the builder itself being `axi_toolkit.plex.filters`' — and
 `doctor._check(name, status, detail)` builds all nine rows
 of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
 rather than reconciling a difference — which is what made it checkable as byte-identical output on
