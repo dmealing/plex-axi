@@ -1050,9 +1050,10 @@ it**, still, now that there are two runtime dependencies rather than one: `axi-t
 `requires-python >= 3.9`, so it has no say in the floor today. That is a thing to re-read whenever
 either pin moves, not a thing to assume. plexapi 4.18.0 raised its own `requires-python` to
 `>=3.10`, which raised this project's floor with it and said nothing: `requires-python = ">=3.9"`
-stayed in `pyproject.toml`, the whole test suite passed on 3.10 through 3.12, and the only thing that ever noticed was `pip install` on 3.9
-failing to resolve the dependency at all. Published metadata is the one claim tests cannot check,
-because the interpreter that would have failed is the one they were never run on. **Read plexapi's
+stayed in `pyproject.toml`, the whole test suite passed on 3.10 through 3.12, and the only thing
+that ever noticed was `pip install` on 3.9 failing to resolve the dependency at all. Published
+metadata is the one claim tests cannot check, because the interpreter that would have failed is the
+one they were never run on. **Read plexapi's
 `requires-python` before raising the pin, and treat a bump as a possible floor change until you
 have.** `tests/test_python_floor.py` now holds `requires-python`, the `ci.yml` matrix and the
 `Programming Language :: Python :: X.Y` classifiers to one number, so drifting any one of them
