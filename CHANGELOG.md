@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/dmealing/plex-axi/compare/v0.5.0...v0.6.0) (2026-08-29)
+
+
+### Features
+
+* install the AXI SessionStart hook, the standard's primary integration ([#23](https://github.com/dmealing/plex-axi/issues/23)) ([6afd7f3](https://github.com/dmealing/plex-axi/commit/6afd7f3f4062706c0c08c7de8e67b5b22a40455e))
+
 ## [0.5.0](https://github.com/dmealing/plex-axi/compare/v0.4.0...v0.5.0) (2026-08-29)
 
 
