@@ -120,6 +120,9 @@ COMMAND = Command(
         "same server are deliberately invisible here",
         "a smart playlist's contents are a saved search and cannot be edited by adding "
         "items; the command says so rather than letting the server refuse",
+        "repeating one of these writes is safe: when the playlist already holds "
+        "everything a `create` or `add` names, or none of what a `remove` names, the "
+        "command answers `already: … (no-op)` and exits 0 rather than failing",
         "a playlist is named by its `key` from `playlist list`, or by its exact "
         "case-folded title; on a miss the real keys and titles are handed back",
         "`items` in a listing (`--fields key,title,items`) is the count the server "
