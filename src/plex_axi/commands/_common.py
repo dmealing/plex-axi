@@ -53,6 +53,17 @@ def parse_libtype(raw, *, default: str = "track") -> str:
     return value
 
 
+def more_hint(command: str, total: int, cap: int, noun: str) -> str:
+    """The follow-up that reveals the rest of a list cut short by ``--limit``.
+
+    ``cap`` is the command's own ``--limit`` ceiling: a hint past it would be
+    advice to run something the command refuses.
+    """
+    if total <= cap:
+        return f"Run `{command} --limit {total}` for all {total} {noun}"
+    return f"Run `{command} --limit {cap}` for the first {cap} of {total} {noun}"
+
+
 def select_fields(raw, available: list, default: list) -> list:
     """Resolve ``--fields`` against the fields a view can actually produce."""
     if not raw:

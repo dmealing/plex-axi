@@ -220,9 +220,7 @@ def test_b2_a_playlist_listing_carries_an_identifier_that_can_be_used(server, cl
     listed = cli_run("playlist", "list")
     assert listed.code == 0
     # Two, not three: the video playlist on this server stays invisible.
-    assert listed.line("playlists[").startswith(
-        "playlists[2]{key,media_id,title,items,smart,updated}"
-    )
+    assert listed.line("playlists[").startswith("playlists[2]{key,media_id,title,smart}")
 
     key = re.search(r"^  (\d+),", listed.out, re.M).group(1)
     shown = cli_run("playlist", "show", key)
@@ -294,7 +292,7 @@ def test_b3_a_session_names_the_player(server, cli_run):
     result = cli_run("sessions")
     assert result.code == 0
     assert "Example Speaker" in result
-    assert result.line("music[").startswith("music[1]{key,media_id,title,artist,album,device,")
+    assert result.line("music[").startswith("music[1]{key,media_id,title,device}")
 
 
 # ---------------------------------------------------------------- B4: the false note
@@ -409,11 +407,11 @@ def test_b6_the_two_playlist_commands_do_not_contradict_each_other(server, cli_r
     cached figure. A listing has nothing else to print, so it says which number
     it is; `show` has the real contents in hand and names the disagreement.
     """
-    listed = cli_run("playlist", "list")
+    listed = cli_run("playlist", "list", "--fields", "key,media_id,title,items")
     assert listed.code == 0
-    # The listing has only the declared count to print, so it prints it and
-    # says which number it is.
-    assert f'502,"plex://{MACHINE_ID}/502",Example Smart Playlist,5,' in listed.out
+    # The listing has only the declared count to print, so asked for it, it
+    # prints it and says which number it is.
+    assert f'502,"plex://{MACHINE_ID}/502",Example Smart Playlist,5\n' in listed.out
     assert "the count this server declares" in listed
 
     shown = cli_run("playlist", "show", "Example Smart Playlist")
@@ -764,14 +762,17 @@ def test_b15_the_added_date_is_the_one_the_detail_view_prints(server, cli_run):
 
 
 def test_b15_recently_added_tracks_now_say_when(server, cli_run):
-    """`recent` already appends `added` to any libtype that offers it.
+    """The recently-added list must say the thing it is sorted by.
 
-    The branch was there and a track was the one libtype it could not reach, so
-    the recently-added list said everything except the thing it was sorted by.
+    It once said everything except that. It now says it as one `added:` span
+    over the rows rather than a fifth column on each, which kept the default
+    schema above AXI's four; a row's own date is one `--fields` away.
     """
     result = cli_run("recent", "--type", "track")
     assert result.code == 0
-    assert "added" in result.line("tracks[")
+    assert result.line("added:") == "added: 2021-05-02 back to 2020-09-13"
+    dated = cli_run("recent", "--type", "track", "--fields", "key,added")
+    assert dated.line("tracks[").startswith("tracks[6]{key,added}")
 
 
 # ------------------------------------------------------------------------ helpers

@@ -8,7 +8,8 @@ the package, before anybody has decided to use the tool.
 
 - **No connection and no credential.** An agent whose machine has never been
   pointed at a Plex server must still get a clean, useful document and exit 0.
-  So this reads the environment and the command table, and nothing else --
+  So this reads the environment, the command table and the local record the
+  session-end hook keeps (:mod:`plex_axi.sessionlog`), and nothing else --
   which is why it cannot be the no-argument home view, whose whole value is the
   live state it fetches.
 - **No address and no token.** Hook output lands in an agent's context and is
@@ -28,7 +29,11 @@ the package, before anybody has decided to use the tool.
 
 from __future__ import annotations
 
-from .. import playback, writes
+import json
+import os
+import sys
+
+from .. import playback, sessionlog, writes
 from ..argspec import Command, Sub
 from ..config import describe_environment, missing_env_vars, setup_help
 from ..output import HelpBlock
@@ -37,20 +42,28 @@ from .home import DESCRIPTION, executable_path
 COMMAND = Command(
     name="context",
     summary="Print the ambient context a session hook puts in front of an agent",
-    usage="usage: plex-axi context",
+    usage="usage: plex-axi context [end]",
     default_sub="context",
     subs=(
         Sub(
             name="context",
             summary="Describe this installation without connecting to it",
         ),
+        Sub(
+            name="end",
+            summary="Record what this session ran, from a session-end hook's payload on stdin",
+        ),
     ),
     notes=(
         "this is the document `plex-axi setup hooks` installs a SessionStart hook to print",
-        "it reads the environment and the command table only: no connection, no token, no "
-        "server address, and it exits 0 whether or not this machine has a Plex server",
+        "it reads the environment, the command table and the local session record only: no "
+        "connection, no token, no server address, and it exits 0 whether or not this machine "
+        "has a Plex server",
         "for the live library -- the server, its size, what arrived recently and what is "
         "playing -- run `plex-axi` with no arguments instead",
+        "`context end` is the session-end hook: it reads the hook's JSON payload on stdin, "
+        "counts the plex-axi commands in the transcript it names -- command names only, never "
+        "arguments -- and `context` then reports the last session in the same directory",
     ),
     examples=("plex-axi context",),
 )
@@ -91,6 +104,8 @@ VOCABULARY_RULE = (
 def run(ctx, name: str, sub: str, parsed):
     from ..cli import command_order
 
+    if sub == "end":
+        return _end(ctx)
     environ = ctx.environ
     playing = playback.allowed(environ)
     missing = missing_env_vars(environ)
@@ -110,8 +125,35 @@ def run(ctx, name: str, sub: str, parsed):
     doc["media_id"] = PLAYING_HANDOFF_RULE if playing else HANDOFF_RULE
     doc["vocabulary"] = VOCABULARY_RULE
     doc["commands"] = list(command_order(environ))
+    # What the last session in this directory did with the tool, captured by
+    # the session-end hook. Absent rather than "none" when there is nothing:
+    # a line on every session saying nothing happened is pure cost.
+    last = sessionlog.last_session(os.getcwd(), environ)
+    if last:
+        doc["last_session"] = last
     doc["help"] = HelpBlock(_help(missing, playing))
     return doc
+
+
+def _end(ctx):
+    """The session-end hook: record this session, and exit 0 whatever happens.
+
+    A hook that failed would be reported to the user as their session failing to
+    close, so every problem -- no payload, an unreadable transcript, an
+    unwritable state file -- is recorded as nothing and said, never raised.
+    """
+    from ..cli import command_specs
+
+    payload = {}
+    if not sys.stdin.isatty():
+        try:
+            loaded = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            loaded = {}
+        payload = loaded if isinstance(loaded, dict) else {}
+    specs = command_specs(ctx.environ)
+    nouns = {name: [sub.name for sub in spec.subs] for name, spec in specs.items()}
+    return sessionlog.record(payload, nouns, ctx.environ)
 
 
 def _config(environ, missing: list) -> str:

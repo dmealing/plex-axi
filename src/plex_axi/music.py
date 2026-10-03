@@ -378,8 +378,16 @@ def _bracketed(text: str) -> str:
 
 
 #: Fields each libtype can produce, and the minimal default schema. A track row
-#: without an artist and an album is not a music result -- it is a title and a
-#: number, which is what every prior tool in the landscape returns.
+#: without an artist is not a music result -- it is a title and a number, which
+#: is what every prior tool in the landscape returns.
+#:
+#: **Four columns at most, which is AXI's bar for a default list schema.** Every
+#: column is paid once per row, and two of the four are spent on identifiers --
+#: ``key`` for this tool's own follow-ups, ``media_id`` for whatever plays it --
+#: so the defaults carry exactly one descriptive column beyond the title. The
+#: album and the year are one ``--fields`` away; the detail views print both.
+#: The one data-driven exception is :func:`with_track_artist`, which adds a
+#: column only on the compilation rows where the fourth would be misleading.
 #:
 #: **``media_id`` is in every default row, and that is the point of the tool.**
 #: plex-axi ends at a labelled identifier, so a list view that printed only
@@ -391,12 +399,12 @@ def _bracketed(text: str) -> str:
 #: width for it would be a poor trade.
 ROW_FIELDS = {
     "track": (
-        "key,media_id,title,artist,album",
+        "key,media_id,title,artist",
         "key,media_id,title,artist,track_artist,album,year,rating,"
         "duration,plays,skips,index,added,guid",
     ),
     "album": (
-        "key,media_id,title,artist,year",
+        "key,media_id,title,artist",
         "key,media_id,title,artist,year,rating,tracks,added,guid",
     ),
     "artist": (
@@ -517,15 +525,15 @@ def with_track_artist(fields: list, rows: list) -> list:
     and two runs of the same command could return different schemas depending on
     which rows came back. A caller that names its columns gets those columns;
     the data-dependent extra belongs to the default, which is a suggestion
-    rather than a contract.
+    rather than a contract. Nor does it qualify a schema that has no ``artist``
+    column to qualify, which is what `similar`'s default is.
     """
-    if "track_artist" in fields:
+    if "track_artist" in fields or "artist" not in fields:
         return fields
     if not any(row.get("track_artist") for row in rows):
         return fields
     out = list(fields)
-    anchor = out.index("artist") + 1 if "artist" in out else len(out)
-    out.insert(anchor, "track_artist")
+    out.insert(out.index("artist") + 1, "track_artist")
     return out
 
 

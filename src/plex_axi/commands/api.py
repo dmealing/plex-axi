@@ -21,12 +21,14 @@ other command prints, so an agent does not have to parse two formats.
 
 from __future__ import annotations
 
+import shlex
+
 from .. import output
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..output import HelpBlock
+from ..output import HelpBlock, truncate
 from ..plex import translate
-from ._common import parse_pairs
+from ._common import PREVIEW_CHARS, parse_pairs
 
 #: The only method this escape hatch may issue. Anything else is refused by name.
 METHODS = ("GET",)
@@ -44,6 +46,12 @@ _HEAD_METHODS = ("HEAD",)
 #: it would cost more tokens than every list command combined.
 MAX_DEPTH = 3
 
+#: How many children of one tag an element renders before the rest are counted
+#: instead. Depth alone does not bound the size: `/library/sections/<key>/all`
+#: is one level deep and lists every artist in the library, so a depth-bounded
+#: render of it is as long as the library is large.
+MAX_CHILDREN = 20
+
 COMMAND = Command(
     name="api",
     summary="Make an authenticated GET to any Plex API path",
@@ -56,6 +64,12 @@ COMMAND = Command(
             flags=(
                 Flag("--query", "<key=value>", repeat=True, note="query string parameter"),
                 Flag("--depth", "<n>", default=MAX_DEPTH, note="how deep to render nested XML"),
+                Flag(
+                    "--full",
+                    boolean=True,
+                    note=f"render every child and every value whole, instead of the first "
+                    f"{MAX_CHILDREN} of each and an {PREVIEW_CHARS}-character preview",
+                ),
             ),
             summary="Request a Plex API path",
         ),
@@ -67,6 +81,9 @@ COMMAND = Command(
         "endpoints are destructive",
         "the token is sent as a header and never appears in the path this prints",
         "paths are absolute: `library/sections` is refused, `/library/sections` is the path",
+        f"output is bounded by size as well as depth: past {MAX_CHILDREN} children of one tag "
+        "the rest are counted, and a long value is previewed with its full length; `--full` "
+        "lifts both",
     ),
     examples=(
         "plex-axi api /",
@@ -107,31 +124,73 @@ def run(ctx, name: str, sub: str, parsed):
     if data is None:
         doc["result"] = f"{method} succeeded with an empty response"
         return doc
-    doc["result"] = _render(data, depth)
+    seen = _Truncation()
+    doc["result"] = _render(data, depth, full=bool(parsed.get("full")), seen=seen)
+    # Each escape hatch is offered only when this answer actually needed it.
+    again = _invocation(path, query)
     doc["help"] = HelpBlock(
         [
-            "Run the same path with `--depth 5` if a nested element was summarised",
+            *(
+                [
+                    f"Run `{again} --depth {min(depth + 2, 8)}` to expand the elements summarised as "
+                    "`_children`"
+                ]
+                if seen.depth and depth < 8
+                else []
+            ),
+            *([f"Run `{again} --full` for every child and every value whole"] if seen.size else []),
             "A typed command exists for search, detail, genres, similar, recent and sessions",
         ]
     )
     return doc
 
 
-def _render(element, depth: int):
-    """Convert one XML element into the plain shape the output boundary prints."""
-    node = dict(element.attrib)
+class _Truncation:
+    """Which of the two bounds a render hit, so the help names only those."""
+
+    def __init__(self) -> None:
+        self.depth = False
+        self.size = False
+
+
+def _render(element, depth: int, *, full: bool = False, seen: _Truncation | None = None):
+    """Convert one XML element into the plain shape the output boundary prints.
+
+    Bounded two ways. Depth summarises a nested element as ``_children`` counts;
+    size keeps the first :data:`MAX_CHILDREN` of each tag and previews any value
+    longer than :data:`PREVIEW_CHARS`, saying in both cases how much there is.
+    """
+    seen = seen if seen is not None else _Truncation()
+    node = {}
+    for name, value in element.attrib.items():
+        if not full:
+            value, hint = truncate(value, PREVIEW_CHARS, "full")
+            seen.size = seen.size or bool(hint)
+        node[name] = value
     children = list(element)
     if children and depth > 0:
         grouped: dict = {}
         for child in children:
-            grouped.setdefault(child.tag, []).append(_render(child, depth - 1))
-        node.update(grouped)
+            grouped.setdefault(child.tag, []).append(child)
+        for tag, members in grouped.items():
+            shown = members if full else members[:MAX_CHILDREN]
+            node[tag] = [_render(child, depth - 1, full=full, seen=seen) for child in shown]
+            if len(shown) < len(members):
+                seen.size = True
+                node[f"_{tag}"] = f"{len(shown)} of {len(members)} shown"
     elif children:
+        seen.depth = True
         counts: dict = {}
         for child in children:
             counts[child.tag] = counts.get(child.tag, 0) + 1
         node["_children"] = ", ".join(f"{tag} x{n}" for tag, n in sorted(counts.items()))
     return node
+
+
+def _invocation(path: str, query: dict) -> str:
+    """The caller's request as a command line, so a follow-up repeats it exactly."""
+    flags = "".join(f" --query {shlex.quote(f'{k}={v}')}" for k, v in sorted(query.items()))
+    return f"plex-axi api {shlex.quote(path)}{flags}"
 
 
 def _parse_depth(raw) -> int:

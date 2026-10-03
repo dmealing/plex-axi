@@ -34,7 +34,7 @@ import sys
 import pytest
 
 from conftest import TOKEN
-from plex_axi import cli, hooks, playback, writes
+from plex_axi import cli, hooks, playback, sessionlog, writes
 
 EXECUTABLE = "plex-axi"
 
@@ -58,6 +58,7 @@ def test_install_creates_hooks_for_every_default_target(tmp_path):
     assert report["errors"] == []
     assert {target["target"] for target in report["targets"]} == {
         "claude-code",
+        "claude-code-session-end",
         "codex",
         "codex-features",
         "opencode",
@@ -71,7 +72,8 @@ def test_install_creates_hooks_for_every_default_target(tmp_path):
         "timeout": hooks.DEFAULT_TIMEOUT_SECONDS,
         "managed_by": "plex-axi",
     }
-    assert (tmp_path / ".codex" / "hooks.json").exists()
+    assert claude["hooks"]["SessionEnd"][0]["hooks"][0]["command"] == "plex-axi context end"
+    assert "SessionEnd" not in read(tmp_path / ".codex" / "hooks.json")["hooks"]
     assert "hooks = true" in (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
     assert (tmp_path / ".config" / "opencode" / "plugins" / "axi-plex-axi.js").exists()
 
@@ -476,3 +478,253 @@ def test_the_ambient_document_stays_within_its_token_budget(cli_run, plex_env, e
 def test_the_context_command_needs_no_subcommand_and_takes_no_arguments(cli_run):
     assert cli_run("context").code == 0
     assert cli_run("context", "extra").code == 2
+
+
+# ------------------------------------------------- AXI 7: status and remove
+
+
+def test_status_reports_every_target_missing_before_an_install(tmp_path):
+    report = hooks.status(tmp_path, command=EXECUTABLE)
+    assert report["errors"] == []
+    assert {t["target"]: t["status"] for t in report["targets"]} == {
+        "claude-code": "missing",
+        "claude-code-session-end": "missing",
+        "codex": "missing",
+        "codex-features": "missing",
+        "opencode": "missing",
+    }
+    assert not (tmp_path / ".claude").exists(), "status must not write"
+
+
+def test_status_reports_every_target_installed_after_an_install(tmp_path):
+    hooks.install(tmp_path, command=EXECUTABLE)
+    report = hooks.status(tmp_path, command=EXECUTABLE)
+    assert all(t["status"] == "installed" for t in report["targets"])
+
+
+def test_status_names_a_moved_executable_stale(tmp_path):
+    hooks.install(tmp_path, command="/old/place/plex-axi")
+    report = hooks.status(tmp_path, command=EXECUTABLE)
+    states = {t["target"]: t["status"] for t in report["targets"]}
+    assert states["claude-code"] == "stale"
+    assert states["claude-code-session-end"] == "stale"
+    assert states["opencode"] == "stale"
+    assert states["codex-features"] == "installed"
+
+
+def test_status_names_an_unmanaged_opencode_plugin(tmp_path):
+    plugin = tmp_path / ".config" / "opencode" / "plugins" / "axi-plex-axi.js"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text("// somebody else's\n", encoding="utf-8")
+    states = {t["target"]: t["status"] for t in hooks.status(tmp_path)["targets"]}
+    assert states["opencode"] == "unmanaged"
+
+
+def test_remove_takes_out_only_what_this_tool_installed(tmp_path):
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    other = {"type": "command", "command": "other-tool context"}
+    settings.write_text(
+        json.dumps({"model": "x", "hooks": {"SessionStart": [{"hooks": [other]}]}}),
+        encoding="utf-8",
+    )
+    hooks.install(tmp_path, command=EXECUTABLE)
+
+    report = hooks.remove(tmp_path)
+    assert report["errors"] == []
+    assert {t["target"]: t["status"] for t in report["targets"]} == {
+        "claude-code": "removed",
+        "codex": "removed",
+        "codex-features": "kept",
+        "opencode": "removed",
+    }
+    assert read(settings) == {"model": "x", "hooks": {"SessionStart": [{"hooks": [other]}]}}
+    assert read(tmp_path / ".codex" / "hooks.json") == {}
+    assert "hooks = true" in (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert not (tmp_path / ".config" / "opencode" / "plugins" / "axi-plex-axi.js").exists()
+
+
+def test_remove_is_idempotent(tmp_path):
+    """AXI 6: a second removal confirms the state rather than failing."""
+    hooks.install(tmp_path, command=EXECUTABLE)
+    hooks.remove(tmp_path)
+    again = hooks.remove(tmp_path)
+    assert again["errors"] == []
+    assert {t["status"] for t in again["targets"]} <= {"absent", "kept"}
+
+
+def test_remove_never_deletes_an_unmanaged_opencode_plugin(tmp_path):
+    plugin = tmp_path / ".config" / "opencode" / "plugins" / "axi-plex-axi.js"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text("// somebody else's\n", encoding="utf-8")
+    report = hooks.remove(tmp_path)
+    assert {t["target"]: t["status"] for t in report["targets"]}["opencode"] == "unmanaged"
+    assert plugin.read_text(encoding="utf-8") == "// somebody else's\n"
+
+
+def test_remove_then_install_round_trips(tmp_path):
+    hooks.install(tmp_path, command=EXECUTABLE)
+    hooks.remove(tmp_path)
+    report = hooks.install(tmp_path, command=EXECUTABLE)
+    # Codex's features flag was kept, so it is already current.
+    assert all(t["status"] in ("installed", "current") for t in report["targets"])
+    assert all(
+        t["status"] == "installed" for t in hooks.status(tmp_path, command=EXECUTABLE)["targets"]
+    )
+
+
+def test_setup_status_and_remove_exit_zero_and_point_at_each_other(cli_run, tmp_path):
+    missing = cli_run("setup", "status", "--home", str(tmp_path))
+    assert missing.code == 0
+    assert "Run `plex-axi setup hooks`" in missing
+    assert cli_run("setup", "hooks", "--home", str(tmp_path)).code == 0
+    installed = cli_run("setup", "status", "--home", str(tmp_path))
+    assert installed.code == 0
+    assert "Run `plex-axi setup remove`" in installed
+    for _ in range(2):
+        removed = cli_run("setup", "remove", "--home", str(tmp_path))
+        assert removed.code == 0
+
+
+def test_setup_status_and_remove_never_reach_the_plex_server(server, cli_run, tmp_path):
+    cli_run("setup", "status", "--home", str(tmp_path))
+    cli_run("setup", "remove", "--home", str(tmp_path))
+    assert server.requests == []
+
+
+# ------------------------------------------- AXI 7: session-end capture
+
+
+def _transcript(tmp_path, *commands, prose=()):
+    """A synthetic agent transcript: one tool call per command, plus prose."""
+    lines = []
+    for text in prose:
+        lines.append(
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+        )
+    for index, command in enumerate(commands):
+        call = {
+            "type": "tool_use",
+            "id": f"t{index}",
+            "name": "Bash",
+            "input": {"command": command},
+        }
+        lines.append({"type": "assistant", "message": {"content": [call]}})
+    path = tmp_path / "transcript.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(line) for line in lines) + "\nnot json\n", encoding="utf-8"
+    )
+    return path
+
+
+def _end(cli_run, monkeypatch, payload):
+    import io
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    return cli_run("context", "end")
+
+
+def test_session_end_records_command_names_and_never_arguments(cli_run, monkeypatch, tmp_path):
+    transcript = _transcript(
+        tmp_path,
+        "plex-axi search --artist 'Example Artist'",
+        "cd x && PLEX_URL=http://plex.example.com:32400 plex-axi playlist add 'Example "
+        "Playlist' --key 111 --write | head",
+        "plex-axi search --album 'Example Album'",
+        "grep plex-axi notes.md",
+        prose=["You could run plex-axi rate 111 4 --write"],
+    )
+    result = _end(
+        cli_run,
+        monkeypatch,
+        {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)},
+    )
+    assert result.code == 0
+    assert result.line("recorded:") == "recorded: 3 plex-axi command(s) from this session"
+
+    state = (sessionlog.state_path()).read_text(encoding="utf-8")
+    assert "Example" not in state
+    assert "plex.example.com" not in state
+    entry = json.loads(state)[0]
+    assert entry["commands"] == {"search": 2, "playlist add": 1}
+    assert entry["applied"] == 1
+
+
+def test_the_next_context_in_that_directory_reports_the_last_session(
+    cli_run, monkeypatch, tmp_path
+):
+    transcript = _transcript(tmp_path, "plex-axi search --artist x", "plex-axi rate 111 4 --write")
+    _end(cli_run, monkeypatch, {"transcript_path": str(transcript), "cwd": str(tmp_path)})
+
+    monkeypatch.chdir(tmp_path)
+    here = cli_run("context")
+    assert here.code == 0
+    last = here.line("last_session:")
+    assert "rate x1, search x1" in last
+    assert "1 applied with --write or --now" in last
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "last_session" not in cli_run("context").out
+
+
+def test_a_session_that_never_ran_the_tool_records_nothing(cli_run, monkeypatch, tmp_path):
+    transcript = _transcript(tmp_path, "ls -la", prose=["plex-axi search is useful"])
+    result = _end(cli_run, monkeypatch, {"transcript_path": str(transcript), "cwd": "/x"})
+    assert result.code == 0
+    assert result.line("recorded:") == "recorded: nothing"
+    assert "ran no plex-axi command" in result.line("reason:")
+    assert not sessionlog.state_path().exists()
+
+
+@pytest.mark.parametrize("payload", ["", "not json", "[1, 2]", '{"transcript_path": "/nope"}'])
+def test_session_end_exits_zero_whatever_it_is_handed(cli_run, monkeypatch, payload):
+    """A failed session-end hook reads as the user's session failing to close."""
+    import io
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+    result = cli_run("context", "end")
+    assert result.code == 0
+    assert result.line("recorded:") == "recorded: nothing"
+    assert result.line("reason:")
+
+
+def test_session_end_replaces_its_own_record_rather_than_duplicating_it(
+    cli_run, monkeypatch, tmp_path
+):
+    transcript = _transcript(tmp_path, "plex-axi search --artist x")
+    payload = {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)}
+    _end(cli_run, monkeypatch, payload)
+    _end(cli_run, monkeypatch, payload)
+    assert len(json.loads(sessionlog.state_path().read_text(encoding="utf-8"))) == 1
+
+
+def test_session_end_reaches_the_server_zero_times(server, cli_run, monkeypatch, tmp_path):
+    transcript = _transcript(tmp_path, "plex-axi search --artist x")
+    _end(cli_run, monkeypatch, {"transcript_path": str(transcript), "cwd": str(tmp_path)})
+    assert server.requests == []
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        ("plex-axi", [("home", False)]),
+        (".venv/bin/plex-axi --json search --artist x", [("search", False)]),
+        ("env A=1 plex-axi playlist create 'T' --key 1 --write", [("playlist create", True)]),
+        ("echo $(plex-axi rate 1 3 --write)", [("rate", True)]),
+        ("plex-axi search --artist x && plex-axi genres", [("search", False), ("genres", False)]),
+        ("grep plex-axi notes.md", []),
+        ('git commit -m "plex-axi search"', []),
+        ("plex-axi frobnicate", []),
+        ("plex-axi --version", []),
+        (
+            "python3 - <<'EOF'\nplex-axi search --artist x\nEOF\nplex-axi genres",
+            [("genres", False)],
+        ),
+        ("echo 'Run `plex-axi track <key>`'", []),
+    ],
+)
+def test_an_invocation_is_counted_only_in_command_position(command, expected):
+    nouns = {name: [sub.name for sub in spec.subs] for name, spec in cli.command_specs().items()}
+    assert sessionlog.invocations(command, nouns) == expected

@@ -222,7 +222,8 @@ plex-axi playlist create 'Example Playlist' --key 12345 --write
 - only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
 - a playlist is named by its `key` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
-- `items` in a listing is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
+- `items` in a listing (`--fields key,title,items`) is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
+- listing columns: key, media_id, title, smart, items, updated
 - nothing here plays a playlist: both `list` and `show` print the playlist's own media_id, and `show` prints one per track as well
 
 ### `plex-axi rate`
@@ -249,10 +250,12 @@ List the streams the server currently believes are playing.
 
 ```sh
 plex-axi sessions
+plex-axi sessions --fields key,title,artist,device,state
 ```
 
 - music sessions are listed first; anything else is counted, not detailed
 - nothing here can start, stop or address a stream: listing one is a read
+- columns: key, media_id, title, artist, album, device, state, rating
 
 ### `plex-axi api`
 
@@ -271,6 +274,7 @@ plex-axi api /library/sections/1/all --query type=10 --query limit=5
 - write methods are refused here even when writes are enabled: a mutation goes through a typed command that can validate and preview it, and several Plex write endpoints are destructive
 - the token is sent as a header and never appears in the path this prints
 - paths are absolute: `library/sections` is refused, `/library/sections` is the path
+- output is bounded by size as well as depth: past 20 children of one tag the rest are counted, and a long value is previewed with its full length; `--full` lifts both
 
 ### `plex-axi doctor`
 
@@ -288,18 +292,22 @@ plex-axi --section 'Example Music' doctor
 
 ### `plex-axi setup`
 
-Install or repair the session hook that gives an agent ambient context.
+Install, check or remove the session hooks that give an agent ambient context.
 
 - **read-only - this command cannot change anything on the server**
 
 ```sh
 plex-axi setup hooks
+plex-axi setup status
+plex-axi setup remove
 ```
 
 - hooks give ambient context every session; the skill loads on demand instead -- install either, with `plex-axi setup hooks` or `plex-axi skill`
-- the hook runs `plex-axi context`, which reads the environment and the command table: no connection, no token, no server address, and it exits 0 on a machine with no server
+- the session-start hook runs `plex-axi context`, which reads the environment, the command table and the local session record: no connection, no token, no server address, and it exits 0 on a machine with no server
+- Claude Code also gets a session-end hook, `plex-axi context end`, which records which plex-axi commands the session ran -- names and counts, never arguments -- so the next session's context in that directory can say so; Codex and OpenCode have no session-end event to run it from
 - writes four files under your home directory and nothing on the Plex server: .claude/settings.json, .codex/hooks.json, .codex/config.toml and .config/opencode/plugins/
 - installation is idempotent and repairs the recorded path after a reinstall or a move; another tool's hooks are left alone and an unmanaged OpenCode plugin is never overwritten
+- `remove` takes out only the entries this tool marked as its own, and leaves Codex's `[features] hooks = true` on because other tools' Codex hooks depend on it
 
 ### `plex-axi skill`
 
@@ -327,8 +335,9 @@ plex-axi context
 ```
 
 - this is the document `plex-axi setup hooks` installs a SessionStart hook to print
-- it reads the environment and the command table only: no connection, no token, no server address, and it exits 0 whether or not this machine has a Plex server
+- it reads the environment, the command table and the local session record only: no connection, no token, no server address, and it exits 0 whether or not this machine has a Plex server
 - for the live library -- the server, its size, what arrived recently and what is playing -- run `plex-axi` with no arguments instead
+- `context end` is the session-end hook: it reads the hook's JSON payload on stdin, counts the plex-axi commands in the transcript it names -- command names only, never arguments -- and `context` then reports the last session in the same directory
 
 ## Rules of thumb
 

@@ -59,6 +59,8 @@ def executable_path() -> str:
 
 
 def run(ctx, name: str, sub: str, parsed):
+    from ..cli import command_order
+
     doc = {"bin": executable_path(), "description": DESCRIPTION}
     # Stated before anything else that could fail, because "can this change my
     # library?" is a fact about the installation rather than about the server,
@@ -70,25 +72,31 @@ def run(ctx, name: str, sub: str, parsed):
     # gate closed this view is the one it has always been.
     if playback.allowed(ctx.environ):
         doc["playback"] = playback.state(ctx.environ)
+    # Not being able to reach a library is this view's *content* in those two
+    # states, not a failure of it: the bare command answered the question it
+    # was asked -- what is here, and what can I do next -- so it exits 0 with
+    # the state and the next step. A command that was asked to do something
+    # against the library still exits 1 when it cannot; this one was not.
     missing = missing_env_vars(ctx.environ)
     if missing:
-        doc["error"] = f"{' and '.join(missing)} not set in the environment"
-        doc["help"] = HelpBlock(setup_help())
-        doc["__exit_code__"] = 1
+        doc["config"] = (
+            f"{' and '.join(missing)} not set, so no command here can reach a server yet"
+        )
+        doc["commands"] = list(command_order(ctx.environ))
+        doc["help"] = HelpBlock(
+            [*setup_help(), "Run `plex-axi --help` for the whole command reference"]
+        )
         return doc
 
-    config = ctx.config()
-    doc["url"] = config.base_url
-
     try:
+        config = ctx.config()
+        doc["url"] = config.base_url
         server = ctx.server()
         section = ctx.section()
     except AnyAxiError as exc:
-        doc["error"] = exc.message
-        doc["help"] = HelpBlock(
-            [*help_lines_for(exc), "Run `plex-axi doctor` to see which check fails"]
-        )
-        doc["__exit_code__"] = 1
+        doc["server"] = f"not reached: {exc.message}"
+        lines = [*help_lines_for(exc), "Run `plex-axi doctor` to see which check fails"]
+        doc["help"] = HelpBlock(list(dict.fromkeys(lines)))
         return doc
 
     doc["server"] = f"{server.friendlyName} (Plex Media Server {server.version})"

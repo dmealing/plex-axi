@@ -106,12 +106,18 @@ def test_the_count_is_exact_and_costs_no_extra_body(server, cli_run):
     assert result.line("count:") == "count: 2 of 3 total"
 
 
-def test_the_minimum_track_row_carries_the_artist_and_the_album(server, cli_run):
-    """M4: a track row without those two is not a music result."""
+def test_the_minimum_track_row_carries_the_artist_and_stops_at_four(server, cli_run):
+    """M4: a track row without an artist is not a music result.
+
+    AXI 2: and a default list schema is three or four columns, not five. The
+    album is one `--fields` away rather than a column on every row.
+    """
     result = cli_run("search", "--track", "Example Track", "--no-group")
     assert result.code == 0
-    header = result.line("tracks[")
-    assert "{key,media_id,title,artist,album" in header
+    assert result.line("tracks[").endswith("{key,media_id,title,artist}:")
+    wider = cli_run("search", "--track", "Example Track", "--no-group", "--fields", "key,album")
+    assert wider.line("tracks[").endswith("{key,album}:")
+    assert "Example Album" in wider
 
 
 def test_a_compilation_reports_the_performer_as_well_as_the_album_artist(server, cli_run):
@@ -274,7 +280,7 @@ def test_an_out_of_range_rating_is_rejected_in_stars_not_in_plex_points(server, 
 def test_searching_albums_and_artists_uses_their_own_endpoints(server, cli_run):
     albums = cli_run("search", "--artist", "Example Artist", "--type", "album")
     assert albums.code == 0
-    assert albums.line("albums[").startswith("albums[2]{key,media_id,title,artist,year}")
+    assert albums.line("albums[").startswith("albums[2]{key,media_id,title,artist}:")
 
     artists = cli_run("search", "--genre", "Jazz", "--type", "artist")
     assert artists.code == 0
