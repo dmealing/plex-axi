@@ -210,8 +210,9 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   current directory for `context`. See "The session integration".
 - `users.py` — `--user`: one plex.tv call, parsed with the standard library. Deliberately not the
   client library's own user switch; see the sharp edge below.
-- `hooks.py` — the session integration AXI §7 calls the *primary* discovery path, and the one
-  place this repository writes to a machine rather than to a library: the `SessionStart` hook for
+- `hooks.py` — the session integration AXI §7 calls the *primary* discovery path, and the place
+  this repository writes to a machine rather than to a library (`sessionlog.py` keeps the state
+  file): the `SessionStart` hook for
   Claude Code and Codex, the managed OpenCode plugin, and the atomic writes and path repair that
   keep a reinstall from duplicating an entry. Installed only from `plex-axi setup hooks`. See
   "The session integration" below, because the one thing it does not inherit from the sibling is
@@ -777,8 +778,9 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   live state — nothing at that rating key, no music library, an ambiguous section — exits 1. A zero
   result from a well-formed search exits **0**: an empty answer is an answer. Two more exit 0 by
   AXI's rule and must stay that way: a mutation whose desired state already holds (`playlist add`
-  of a held track, `playlist remove` of an absent one, a repeated `playlist create`, `setup
-  remove` twice) answers `already: … (no-op)`, because a retried command has to converge rather
+  of a held track, `playlist remove` of an absent one, a repeated `playlist create`) answers
+  `already: … (no-op)`, and a second `setup remove` reports every target `absent`, because a
+  retried command has to converge rather
   than fail on its own earlier success; and the bare home view reports an unconfigured or
   unreachable server as its *content*, with the next step, because it was asked what is here rather
   than told to do something. Every other command that cannot reach the server still exits 1.
