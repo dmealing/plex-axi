@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/dmealing/plex-axi/compare/v0.6.1...v0.7.0) (2026-10-03)
+
+
+### Features
+
+* close the AXI principle gaps found by the 0.6.1 audit ([#28](https://github.com/dmealing/plex-axi/issues/28)) ([e01ce74](https://github.com/dmealing/plex-axi/commit/e01ce7441525d97c300da4d6b25482e1fab21108))
+
 ## [0.6.1](https://github.com/dmealing/plex-axi/compare/v0.6.0...v0.6.1) (2026-08-29)
 
 
