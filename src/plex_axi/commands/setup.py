@@ -7,7 +7,8 @@ tool shipped only the second for three releases.
 
 **Why `setup` carries `hooks` and not `skill`, unlike the sibling AXI CLI.**
 There, `setup skill` is the only spelling the skill has. Here `plex-axi skill`
-already exists, is what CI runs as `plex-axi skill --check`, and is named in the
+already exists, is what `scripts/ci-local.sh` runs as `plex-axi skill --check`,
+and is named in the
 generated skill and the README. Adding `setup skill` as a second door onto the
 same room would give an agent two names for one idea -- the thing this project
 refused when it declined to ship `--count` alongside `--limit`, and the

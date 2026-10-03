@@ -1,7 +1,8 @@
 """`plex-axi skill` -- write, or verify, the installable Agent Skill.
 
 The skill is generated from the CLI's own command table rather than hand-written,
-so it cannot describe a flag that does not exist. `--check` is what CI runs: it
+so it cannot describe a flag that does not exist. `--check` is what
+`scripts/ci-local.sh` runs: it
 fails when the committed copy no longer matches the commands, which is the only
 way a static document stays true to a moving one.
 """

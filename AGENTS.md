@@ -30,8 +30,8 @@ scripts/leakcheck.py --demo              # self-test: proves every rule still fi
 scripts/install-hooks.sh                 # sets core.hooksPath to .githooks
 ```
 
-CI runs `--demo` before the real scan, so a scanner that stopped detecting anything fails the build
-rather than passing silently. If the scanner flags a line that legitimately needs the shape, add
+`scripts/ci-local.sh` runs `--demo` before the real scan, so a scanner that stopped detecting
+anything fails the check rather than passing silently. If the scanner flags a line that legitimately needs the shape, add
 `leakcheck: allow=<rule>` on that line — scoped to that one rule, never blanket. Do not weaken a
 rule to make a commit pass, and do not bypass the hooks.
 
@@ -975,7 +975,7 @@ by everybody who installed the hook.
 **Four smaller decisions, each a deliberate divergence from the sibling.**
 
 - **`setup` carries `hooks` and not `skill`.** There, `setup skill` is the skill's only spelling.
-  Here `plex-axi skill` already exists, is what CI runs as `--check`, and is named in the README
+  Here `plex-axi skill` already exists, is what `scripts/ci-local.sh` runs as `--check`, and is named in the README
   and in the generated skill; adding `setup skill` would be two names for one idea — the thing
   this project refused when it declined to ship `--count` beside `--limit`, and the ambiguity the
   shared-package extraction exists to end. The *choice* between the two paths is explained in
@@ -1245,7 +1245,7 @@ and removing them from every module is a separate change from moving a floor. No
 multi-line f-string expression need 3.12; the test fixtures use `.format` for that reason.
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's command table. Change the commands, then run
-`.venv/bin/plex-axi skill` and commit the result; CI fails if the two disagree. The by-path spelling
+`.venv/bin/plex-axi skill` and commit the result; `scripts/ci-local.sh` fails if the two disagree. The by-path spelling
 is the point: a bare `plex-axi` is whatever is installed on the machine, which would regenerate the
 file from a *different* command table than the one being changed.
 
@@ -1317,7 +1317,9 @@ Three workflows, split by where the work is cheap:
 
 - **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
-  nightly `schedule`, and `workflow_dispatch`. Never pull requests.
+  nightly `schedule`, and `workflow_dispatch`. Never pull requests. Each job runs one section of
+  `scripts/ci-local.sh`. GitHub Actions is disabled on this repository, so today those checks run
+  only through that script, which the no-mistakes gate runs on every change (`.no-mistakes.yaml`).
 - **`.github/workflows/hygiene.yml`** — the leak scan and the pull-request-body check, on
   `ubuntu-latest`, on `pull_request` (including `edited`). It scans the tracked tree *and* the pull
   request's own title and body. Exactly one GitHub-hosted job per PR, and it takes seconds; the two
@@ -1459,9 +1461,12 @@ A change that makes one of those fail is a regression in the guard, not a discov
   last release tag. It deliberately does **not** `needs:` the release-please job — it has to fail on
   its own account, including on a run where release-please itself errored. It exists because a hook
   cannot see a message typed into GitHub's squash-merge box.
-- `.github/workflows/ci.yml` runs the same audit nightly, so an allowance that has outlived its
-  cause surfaces without waiting for a merge, and installs `node` in the `test` job so the
-  agreement between the engines is enforced rather than skipped. Nightly matters more than it looks
+- `scripts/ci-local.sh --only commits` runs the same audit on every gate run — without a GitHub
+  token the git-side half still runs and only the pull request bodies go unread, which its SKIP
+  line says — and `ci.yml` calls it nightly, so an allowance that has outlived its cause surfaces
+  without waiting for a merge; `ci.yml` also installs `node` in the `test` job so the agreement
+  between the engines is enforced rather than skipped, which a local run does only where `node` is
+  on `PATH`. With Actions disabled the nightly runs nowhere, and that matters more than it looks
   now that the audit reads pull request bodies: a body edited a week after the merge changes what
   the next release contains, with nothing else having run in between.
 - `.github/workflows/hygiene.yml` gained a step, which is the one exception to "keep this workflow

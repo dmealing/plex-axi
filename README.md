@@ -437,7 +437,7 @@ npx skills add dmealing/plex-axi --skill plex-axi
 ```
 
 `skills/plex-axi/SKILL.md` is generated from the CLI's own command table by `plex-axi skill`, and
-CI runs `plex-axi skill --check`, so it cannot describe a flag that does not exist or drift from
+`scripts/ci-local.sh` runs `plex-axi skill --check`, so it cannot describe a flag that does not exist or drift from
 the commands it documents.
 
 ## Design notes
@@ -480,7 +480,7 @@ the same reason, so nothing resolves to a copy installed elsewhere. `scripts/lea
 virtualenv — it is standard library only, so the git hooks can run it.
 
 This repository is public and a music library is full of identifying content, so a leak guard runs
-in a pre-commit hook, a commit-msg hook, CI, and — on every open, push *and edit* — over the pull
+in a pre-commit hook, a commit-msg hook, `scripts/ci-local.sh`, and — on every open, push *and edit* — over the pull
 request's own title and body. That last one is not a file: a title and a body are published the
 moment they are written, are in no checkout and pass under no hook, and tooling routinely writes
 into a body, where an embedded script's worktree variable or a `pytest` header's `rootdir:` line is
