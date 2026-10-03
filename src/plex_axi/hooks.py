@@ -18,8 +18,8 @@ for three separate reasons, any one of which would be enough:
 
 - **It would need credentials.** A hook runs at the start of every session,
   before anybody has decided to use the tool. ``plex-axi`` with no ``PLEX_URL``
-  reports ``NOT_CONFIGURED`` and exits 1, so on every machine that has the
-  package and no server the hook would open each session with a failure.
+  has no library to show, so on every machine that has the package and no
+  server the hook would open each session with setup advice instead of context.
 - **It would touch the network.** The home view opens a connection and issues
   several requests -- the section, three item counts, the mood vocabulary, the
   recently-added albums, the sessions. Paying that on every session start, for a
@@ -31,9 +31,17 @@ for three separate reasons, any one of which would be enough:
   narrower one.
 
 So the hook runs :data:`CONTEXT_COMMAND` instead -- `plex-axi context`, which
-reads the environment and the command table and nothing else. It never opens a
-connection, never needs a token, prints no address, and exits 0 whether or not
-this machine has a Plex server at all. See :mod:`plex_axi.commands.context`.
+reads the environment, the command table and this machine's own session record
+and nothing else. It never opens a connection, never needs a token, prints no
+address, and exits 0 whether or not this machine has a Plex server at all. See
+:mod:`plex_axi.commands.context`.
+
+**The lifecycle's other end.** Claude Code also gets a ``SessionEnd`` hook,
+`plex-axi context end`, which records which commands the session ran -- names
+and counts, never arguments -- so the next session's context in the same
+directory can say so. See :mod:`plex_axi.sessionlog`. `plex-axi setup status`
+reports every target without writing, and `plex-axi setup remove` takes out
+exactly the entries this installer marked as its own.
 """
 
 from __future__ import annotations
@@ -62,8 +70,17 @@ MANAGED_KEY = "managed_by"
 #: docstring for why the no-argument home view cannot be what a hook prints.
 CONTEXT_COMMAND = "context"
 
+#: The arguments the session-end hook runs: the capture half of AXI section 7's
+#: lifecycle, which records what the session did so the next session's context
+#: can say so. See :mod:`plex_axi.sessionlog`.
+SESSION_END_ARGS = (CONTEXT_COMMAND, "end")
+
+START = "SessionStart"
+END = "SessionEnd"
+
 DEFAULT_TIMEOUT_SECONDS = 10
 OPENCODE_MANAGED_PREFIX = "plex-axi managed opencode plugin:"
+OPENCODE_MANAGED = f"{OPENCODE_MANAGED_PREFIX} {MARKER}"
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -123,7 +140,7 @@ def current_executable() -> str:
     return portable_command(exec_path)
 
 
-def hook_command(executable: str) -> str:
+def hook_command(executable: str, args: tuple = (CONTEXT_COMMAND,)) -> str:
     """The whole command line a JSON hook entry records.
 
     Quoted, which the sibling's is not and does not need to be: its command is a
@@ -131,7 +148,7 @@ def hook_command(executable: str) -> str:
     field the agent hands to a shell. This one carries an argument after the
     path, so an unquoted space would split the executable in two.
     """
-    return f"{shlex.quote(executable)} {CONTEXT_COMMAND}"
+    return " ".join([shlex.quote(executable), *args])
 
 
 # ------------------------------------------------------------- JSON settings
@@ -153,8 +170,8 @@ def _managed_hook(command: str, timeout: int) -> dict:
     return {"type": "command", "command": command, "timeout": timeout, MANAGED_KEY: MARKER}
 
 
-def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
-    """Return ``(settings, changed)`` with this tool's SessionStart hook current.
+def compute_hook_update(settings: dict, command: str, timeout: int, event: str = START) -> tuple:
+    """Return ``(settings, changed)`` with this tool's hook for ``event`` current.
 
     Repeat installs with an unchanged path are silent no-ops; a changed path is
     repaired in place rather than duplicated. The scan covers every group, not
@@ -171,7 +188,7 @@ def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
         updated["hooks"] = hooks
         changed = True
 
-    legacy = hooks.get("session_start")
+    legacy = hooks.get("session_start") if event == START else None
     if isinstance(legacy, list):
         kept = [hook for hook in legacy if not _is_managed(hook)]
         if len(kept) != len(legacy):
@@ -181,10 +198,10 @@ def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
             else:
                 hooks.pop("session_start", None)
 
-    groups = hooks.get("SessionStart")
+    groups = hooks.get(event)
     if not isinstance(groups, list):
         groups = []
-        hooks["SessionStart"] = groups
+        hooks[event] = groups
         changed = True
 
     have_managed = False
@@ -217,6 +234,62 @@ def compute_hook_update(settings: dict, command: str, timeout: int) -> tuple:
         groups.append({"matcher": "", "hooks": [_managed_hook(command, timeout)]})
         return updated, True
     return (updated, True) if changed else (settings, False)
+
+
+def compute_hook_removal(settings: dict) -> tuple:
+    """Return ``(settings, changed)`` with every entry this tool manages removed.
+
+    Only entries carrying the marker go -- another tool's hooks and a user's own
+    wrapper stay, as they do through an install -- and a group, an event or the
+    ``hooks`` table left empty by the removal goes with it, so removing what was
+    installed leaves the file as it was found.
+    """
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return settings, False
+    updated = json.loads(json.dumps(settings))
+    hooks = updated["hooks"]
+    changed = False
+    for event in ("session_start", START, END):
+        entries = hooks.get(event)
+        if not isinstance(entries, list):
+            continue
+        kept = []
+        for entry in entries:
+            if _is_managed(entry):
+                changed = True
+                continue
+            if isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
+                remaining = [hook for hook in entry["hooks"] if not _is_managed(hook)]
+                if len(remaining) != len(entry["hooks"]):
+                    changed = True
+                    if not remaining:
+                        continue
+                    entry["hooks"] = remaining
+            kept.append(entry)
+        if kept:
+            hooks[event] = kept
+        else:
+            hooks.pop(event, None)
+    if not hooks:
+        updated.pop("hooks", None)
+    return (updated, True) if changed else (settings, False)
+
+
+def managed_state(settings: dict, command: str, timeout: int, event: str) -> str:
+    """``installed``, ``stale`` or ``missing``: this tool's ``event`` hook in ``settings``."""
+    groups = (settings.get("hooks") or {}).get(event) if isinstance(settings, dict) else None
+    found = [
+        hook
+        for group in groups or []
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list)
+        for hook in group["hooks"]
+        if _is_managed(hook)
+    ]
+    if not found:
+        return "missing"
+    current = len(found) == 1 and found[0] == _managed_hook(command, timeout)
+    return "installed" if current else "stale"
 
 
 def compute_codex_config_update(content: str) -> tuple:
@@ -287,7 +360,7 @@ def opencode_plugin_source(executable: str, timeout: int) -> str:
     the joined command line the JSON hooks record: this spawns without a shell,
     so a joined string would be looked up as one filename.
     """
-    header = f"{OPENCODE_MANAGED_PREFIX} {MARKER}"
+    header = OPENCODE_MANAGED
     return f"""// {header}
 // Generated by `plex-axi setup hooks`. Remove the managed marker above before editing.
 import {{ spawn }} from "node:child_process";
@@ -373,31 +446,149 @@ def install(
     line = hook_command(executable)
     report: dict = {"command": line, "targets": [], "errors": []}
 
-    for label, path in (
-        ("claude-code", home / ".claude" / "settings.json"),
-        ("codex", home / ".codex" / "hooks.json"),
-    ):
-        report["targets"].append(_install_json_hook(label, path, line, timeout, report))
-
-    report["targets"].append(_install_codex_features(home / ".codex" / "config.toml", report))
-    report["targets"].append(
-        _install_opencode(
-            home / ".config" / "opencode" / "plugins" / f"axi-{MARKER}.js",
-            executable,
-            timeout,
-            report,
+    for label, path, event, args in _json_targets(home):
+        report["targets"].append(
+            _install_json_hook(label, path, hook_command(executable, args), timeout, report, event)
         )
-    )
+
+    report["targets"].append(_install_codex_features(_codex_config(home), report))
+    report["targets"].append(_install_opencode(_opencode_plugin(home), executable, timeout, report))
     return report
 
 
-def _install_json_hook(label: str, path: Path, command: str, timeout: int, report: dict) -> dict:
+def _json_targets(home: Path) -> tuple:
+    """Each JSON hook this tool installs: ``(label, file, event, arguments)``.
+
+    Claude Code gets the session-end capture as well as the session-start
+    context; Codex has no session-end event, only a per-turn ``Stop``, so it
+    gets the context alone. See :mod:`plex_axi.sessionlog`.
+    """
+    claude = home / ".claude" / "settings.json"
+    return (
+        ("claude-code", claude, START, (CONTEXT_COMMAND,)),
+        ("claude-code-session-end", claude, END, SESSION_END_ARGS),
+        ("codex", home / ".codex" / "hooks.json", START, (CONTEXT_COMMAND,)),
+    )
+
+
+def _codex_config(home: Path) -> Path:
+    return home / ".codex" / "config.toml"
+
+
+def _opencode_plugin(home: Path) -> Path:
+    return home / ".config" / "opencode" / "plugins" / f"axi-{MARKER}.js"
+
+
+def _read_settings(path: Path) -> dict:
+    current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    return current if isinstance(current, dict) else {}
+
+
+def status(
+    home: Path | None = None,
+    *,
+    command: str | None = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict:
+    """Report every session integration without writing anything.
+
+    ``installed`` is current, ``stale`` is this tool's entry recording a
+    different executable or a duplicate (`setup hooks` repairs it), ``missing``
+    is absent, and ``unmanaged`` is an OpenCode plugin at this tool's path that
+    this tool did not write.
+    """
+    home = Path(home) if home else Path.home()
+    executable = command or current_executable()
+    report: dict = {"command": hook_command(executable), "targets": [], "errors": []}
+    for label, path, event, args in _json_targets(home):
+        try:
+            state = managed_state(
+                _read_settings(path), hook_command(executable, args), timeout, event
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            report["errors"].append(f"{path}: {exc}")
+            state = "unreadable"
+        report["targets"].append({"target": label, "status": state})
+
+    try:
+        config = _codex_config(home)
+        content = config.read_text(encoding="utf-8") if config.exists() else ""
+        _, changed, problem = compute_codex_config_update(content)
+        state = "installed" if content and not changed and problem is None else "missing"
+    except OSError as exc:
+        report["errors"].append(f"{config}: {exc}")
+        state = "unreadable"
+    report["targets"].append({"target": "codex-features", "status": state})
+
+    plugin = _opencode_plugin(home)
+    try:
+        current = plugin.read_text(encoding="utf-8") if plugin.exists() else None
+        if current is None:
+            state = "missing"
+        elif OPENCODE_MANAGED not in current:
+            state = "unmanaged"
+        else:
+            state = (
+                "installed" if current == opencode_plugin_source(executable, timeout) else "stale"
+            )
+    except OSError as exc:
+        report["errors"].append(f"{plugin}: {exc}")
+        state = "unreadable"
+    report["targets"].append({"target": "opencode", "status": state})
+    return report
+
+
+def remove(home: Path | None = None) -> dict:
+    """Remove every session integration this tool installed. Idempotent.
+
+    Each target reports ``removed`` or ``absent``. Two things stay, by design:
+    Codex's ``[features] hooks = true``, which is shared with every other tool
+    that installs a Codex hook and is not this tool's to switch off, and an
+    OpenCode plugin at this tool's path that this tool did not write.
+    """
+    home = Path(home) if home else Path.home()
+    report: dict = {"targets": [], "errors": []}
+    seen: set = set()
+    for label, path, _event, _args in _json_targets(home):
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            updated, changed = compute_hook_removal(_read_settings(path))
+            if changed:
+                write_atomic(path, json.dumps(updated, indent=2) + "\n")
+            state = "removed" if changed else "absent"
+        except (OSError, json.JSONDecodeError) as exc:
+            report["errors"].append(f"{path}: {exc}")
+            state = "failed"
+        report["targets"].append({"target": label, "status": state})
+
+    report["targets"].append({"target": "codex-features", "status": "kept"})
+
+    plugin = _opencode_plugin(home)
+    try:
+        current = plugin.read_text(encoding="utf-8") if plugin.exists() else None
+        if current is None:
+            state = "absent"
+        elif OPENCODE_MANAGED not in current:
+            state = "unmanaged"
+        else:
+            plugin.unlink()
+            state = "removed"
+    except OSError as exc:
+        report["errors"].append(f"{plugin}: {exc}")
+        state = "failed"
+    report["targets"].append({"target": "opencode", "status": state})
+    return report
+
+
+def _install_json_hook(
+    label: str, path: Path, command: str, timeout: int, report: dict, event: str = START
+) -> dict:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        if not isinstance(current, dict):
-            current = {}
-        updated, changed = compute_hook_update(current, command, timeout)
+        current = _read_settings(path)
+        updated, changed = compute_hook_update(current, command, timeout, event)
         if changed:
             write_atomic(path, json.dumps(updated, indent=2) + "\n")
         return {"target": label, "status": "installed" if changed else "current"}
@@ -423,11 +614,10 @@ def _install_codex_features(path: Path, report: dict) -> dict:
 
 
 def _install_opencode(path: Path, executable: str, timeout: int, report: dict) -> dict:
-    managed = f"{OPENCODE_MANAGED_PREFIX} {MARKER}"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         current = path.read_text(encoding="utf-8") if path.exists() else None
-        if current is not None and managed not in current:
+        if current is not None and OPENCODE_MANAGED not in current:
             report["errors"].append(f"{path}: refusing to overwrite an unmanaged plugin")
             return {"target": "opencode", "status": "skipped"}
         source = opencode_plugin_source(executable, timeout)

@@ -228,6 +228,8 @@ def test_sessions_report_what_the_server_believes_is_playing(server, cli_run):
     result = cli_run("sessions")
     assert result.code == 0
     assert result.line("count:") == "count: 1 active"
+    # The player state is aggregated rather than a fifth column on every row.
+    assert result.line("states:") == "states: 1 playing"
     # B3: a real `<Player>` carries no `title`, so this column read an attribute
     # that is never there and was empty on every real session. `device` is the
     # name of the box; `product` and `platform` are the fallbacks behind it.

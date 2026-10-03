@@ -37,7 +37,7 @@ from ..errors import AxiError, UsageError
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import parse_limit, project, select_fields
+from ._common import fields_flag, more_hint, parse_limit, project, select_fields
 
 #: The one playlist type this tool will look at. Passed on every listing, which
 #: is the guard the rest of the landscape leaves out.
@@ -45,6 +45,18 @@ AUDIO = "audio"
 
 DEFAULT_LIMIT = 100
 DEFAULT_ITEM_LIMIT = 50
+
+#: The `--limit` ceilings of the two list views. `parse_limit` refuses past them
+#: and the reveal hints quote them, so both read the same number.
+MAX_LIMIT = 1000
+MAX_ITEM_LIMIT = 500
+
+#: Every column a listing row can carry, and the four it carries by default.
+#: ``smart`` is the default's fourth because it decides what a caller can do
+#: next -- a smart playlist cannot be added to -- where ``items`` is a count the
+#: server caches and gets wrong (see :func:`_list`), so it is asked for by name.
+PLAYLIST_FIELDS = ["key", "media_id", "title", "smart", "items", "updated"]
+PLAYLIST_DEFAULT_FIELDS = ["key", "media_id", "title", "smart"]
 
 _KEY_FLAG = Flag(
     "--key",
@@ -66,7 +78,10 @@ COMMAND = Command(
     subs=(
         Sub(
             name="list",
-            flags=(Flag("--limit", "<n>", default=DEFAULT_LIMIT),),
+            flags=(
+                Flag("--limit", "<n>", default=DEFAULT_LIMIT),
+                Flag("--fields", "<a,b,c>", note="replaces the default columns"),
+            ),
             summary="List the audio playlists",
         ),
         Sub(
@@ -105,10 +120,15 @@ COMMAND = Command(
         "same server are deliberately invisible here",
         "a smart playlist's contents are a saved search and cannot be edited by adding "
         "items; the command says so rather than letting the server refuse",
+        "repeating one of these writes is safe: when the playlist already holds "
+        "everything a `create` or `add` names, or none of what a `remove` names, the "
+        "command answers `already: … (no-op)` and exits 0 rather than failing",
         "a playlist is named by its `key` from `playlist list`, or by its exact "
         "case-folded title; on a miss the real keys and titles are handed back",
-        "`items` in a listing is the count the server declares, which for a smart "
-        "playlist is cached; `playlist show` reports what it actually holds",
+        "`items` in a listing (`--fields key,title,items`) is the count the server "
+        "declares, which for a smart playlist is cached; `playlist show` reports what it "
+        "actually holds",
+        f"listing columns: {', '.join(PLAYLIST_FIELDS)}",
         "nothing here plays a playlist: both `list` and `show` print the playlist's own "
         "media_id, and `show` prints one per track as well",
     ),
@@ -141,7 +161,9 @@ def run(ctx, name: str, sub: str, parsed):
 
 
 def _list(ctx, parsed):
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=1000)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=MAX_LIMIT)
+    chosen = parsed.get("fields")
+    fields = select_fields(chosen, PLAYLIST_FIELDS, PLAYLIST_DEFAULT_FIELDS)
     server = ctx.server()
     playlists = _audio_playlists(server)
     shown = playlists[:limit]
@@ -157,28 +179,34 @@ def _list(ctx, parsed):
         )
         return doc
 
-    doc["playlists"] = [_playlist_row(p, server.machineIdentifier) for p in shown]
-    # `items` is the count the *server* declares, and on a smart playlist it is
-    # a cached figure that drifts from what the saved search currently returns
-    # -- seen on a real server as a declared 0 against 81 actual items, and off
-    # by one even on a static list. Fetching the truth costs one request per
-    # playlist; saying which number this is costs one line.
-    doc["note"] = (
-        "items is the count this server declares; a smart playlist's is cached and "
-        "`playlist show` may return a different number, which is the real one"
-    )
-    doc["help"] = HelpBlock(
-        [
-            f"Run `plex-axi playlist show {shown[0].ratingKey}` for one playlist's tracks",
-            "Run `plex-axi playlist add '<title>' --key <rating_key>` to preview an addition",
-        ]
-    )
+    rows = [_playlist_row(p, server.machineIdentifier) for p in shown]
+    doc["playlists"] = project(rows, fields)
+    if "items" in fields:
+        # `items` is the count the *server* declares, and on a smart playlist it
+        # is a cached figure that drifts from what the saved search currently
+        # returns -- seen on a real server as a declared 0 against 81 actual
+        # items, and off by one even on a static list. Fetching the truth costs
+        # one request per playlist; saying which number this is costs one line.
+        doc["note"] = (
+            "items is the count this server declares; a smart playlist's is cached and "
+            "`playlist show` may return a different number, which is the real one"
+        )
+    help_lines = [
+        f"Run `plex-axi playlist show {shown[0].ratingKey}` for one playlist's tracks",
+        "Run `plex-axi playlist add '<title>' --key <rating_key>` to preview an addition",
+    ]
+    if len(shown) < len(playlists):
+        carried = fields_flag(chosen)
+        help_lines.append(
+            more_hint(f"plex-axi playlist list{carried}", len(playlists), MAX_LIMIT, "playlists")
+        )
+    doc["help"] = HelpBlock(help_lines)
     return doc
 
 
 def _show(ctx, parsed):
     title = parsed.positionals[0]
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_ITEM_LIMIT)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_ITEM_LIMIT, maximum=MAX_ITEM_LIMIT)
     server = ctx.server()
     playlist = _resolve(server, title)
     items = _items(playlist)
@@ -235,14 +263,23 @@ def _show(ctx, parsed):
         # Counted, not detailed: a non-track item in an audio playlist is not
         # something a music tool should be rendering rows for.
         doc["other"] = f"{len(items) - len(tracks)} item(s) that are not tracks"
-    doc["help"] = HelpBlock(
-        [
-            f"Run `plex-axi track {rows[0]['key']}` for one track's tags, analysis version "
-            "and file details",
-            f"Run `plex-axi playlist remove '{playlist.title}' --key {rows[0]['key']}` to preview "
-            "removing one",
-        ]
-    )
+    help_lines = [
+        f"Run `plex-axi track {rows[0]['key']}` for one track's tags, analysis version "
+        "and file details",
+        f"Run `plex-axi playlist remove '{playlist.title}' --key {rows[0]['key']}` to preview "
+        "removing one",
+    ]
+    if len(rows) < len(tracks):
+        carried = fields_flag(chosen)
+        help_lines.append(
+            more_hint(
+                f"plex-axi playlist show {int(playlist.ratingKey)}{carried}",
+                len(tracks),
+                MAX_ITEM_LIMIT,
+                "tracks",
+            )
+        )
+    doc["help"] = HelpBlock(help_lines)
     return doc
 
 
@@ -253,13 +290,29 @@ def _create(ctx, title, keys, parsed):
     server = ctx.server()
     existing = _find(_audio_playlists(server), title)
     if existing is not None:
+        held = _items(existing) if not existing.smart else []
+        missing = _not_held(held, keys)
+        if not existing.smart and not missing:
+            # The state a repeated create asks for already holds: an ordinary
+            # playlist by that name containing every requested item. Confirmed
+            # and exit 0, rather than refused, so a retried command converges
+            # instead of failing on its own earlier success.
+            return _no_op(
+                existing,
+                held,
+                f"already exists and holds all {len(keys)} requested item(s) (no-op)",
+            )
+        lines = []
+        if not existing.smart:
+            key_flags = " ".join(f"--key {key}" for key in missing)
+            lines.append(
+                f"Run `plex-axi playlist add '{existing.title}' {key_flags} --write` to add "
+                "the missing items to it"
+            )
+        lines.append(f"Run `plex-axi playlist show '{existing.title}'` to see what it holds")
         raise AxiError(
             f"an audio playlist called {existing.title!r} already exists on this server",
-            help_lines=[
-                f"Run `plex-axi playlist add '{existing.title}' "
-                f"--key {keys[0]} --write` to add to it",
-                f"Run `plex-axi playlist show '{existing.title}'` to see what it holds",
-            ],
+            help_lines=lines,
             code="PLAYLIST_EXISTS",
         )
 
@@ -292,9 +345,18 @@ def _add(ctx, title, keys, parsed):
     server = ctx.server()
     playlist = _resolve(server, title)
     _refuse_smart(playlist, action="add items to")
-    items = _fetch_items(server, keys)
+    held = _items(playlist)
+    missing = _not_held(held, keys)
+    if not missing:
+        return _no_op(playlist, held, f"already holds all {len(keys)} requested item(s) (no-op)")
+    items = _fetch_items(server, missing)
 
-    doc = {"playlist": playlist.title, "smart": False, "holds": f"{len(_items(playlist))} items"}
+    doc = {"playlist": playlist.title, "smart": False, "holds": f"{len(held)} items"}
+    if len(missing) < len(keys):
+        # Only what is not already there is added, and the rest is named: an
+        # addition repeated after a partial success converges on one copy of
+        # each item instead of doubling the ones that landed the first time.
+        doc["already_held"] = [int(key) for key in keys if key not in missing]
     if not parsed.get("write"):
         doc["would_add"] = _item_rows(items)
         doc["preview"] = writes.preview_note(_invocation("add", title, keys))
@@ -319,21 +381,19 @@ def _remove(ctx, title, keys, parsed):
     held = _items(playlist)
     wanted = {str(key) for key in keys}
     going, repeated = _memberships(held, wanted)
-    absent = sorted(wanted - {str(getattr(item, "ratingKey", "")) for item in held})
-
-    if absent:
-        raise AxiError(
-            f"{', '.join(absent)} is not in {playlist.title!r}"
-            if len(absent) == 1
-            else f"{', '.join(absent)} are not in {playlist.title!r}",
-            help_lines=[
-                f"Run `plex-axi playlist show '{playlist.title}'` for the keys it does hold",
-                "A rating key is local to this server and moves when an item is re-matched",
-            ],
-            code="NOT_IN_PLAYLIST",
-        )
+    absent = _not_held(held, keys)
+    if not going:
+        # Nothing named is in the playlist, which is the state a removal asks
+        # for: a repeated removal confirms it rather than failing on its own
+        # earlier success. The note keeps the one thing the old refusal said
+        # that is still worth saying, for the key that was never there at all.
+        doc = _no_op(playlist, held, f"holds none of the {len(keys)} named item(s) (no-op)")
+        doc["note"] = "a rating key is local to this server and moves when an item is re-matched"
+        return doc
 
     doc = {"playlist": playlist.title, "smart": False, "holds": f"{len(held)} items"}
+    if absent:
+        doc["already_absent"] = [int(key) for key in absent]
     if repeated:
         # One removal per key, and said out loud. A playlist may hold the same
         # track twice; deleting every membership from one `--key` would remove
@@ -365,6 +425,22 @@ _MUTATORS = {"create": _create, "add": _add, "remove": _remove}
 
 
 # -------------------------------------------------------------------- helpers
+
+
+def _not_held(held: list, keys: list) -> list:
+    """The requested keys the playlist does not hold, in the order they were asked for."""
+    present = {str(getattr(item, "ratingKey", "")) for item in held}
+    return [key for key in keys if str(key) not in present]
+
+
+def _no_op(playlist, held: list, already: str) -> dict:
+    """The answer to a write whose desired state already holds: exit 0, nothing sent."""
+    return {
+        "playlist": playlist.title,
+        "smart": bool(playlist.smart),
+        "holds": f"{len(held)} items",
+        "already": already,
+    }
 
 
 def _memberships(held: list, wanted: set) -> tuple:

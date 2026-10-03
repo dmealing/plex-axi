@@ -184,24 +184,46 @@ def test_the_home_view_shows_live_content_not_a_manual(server, cli_run):
     assert "help[" in result
 
 
-def test_the_home_view_without_configuration_says_what_to_set(cli_run):
+def test_the_home_view_without_configuration_is_content_not_a_failure(cli_run):
+    """AXI 8: the bare command answers "what is here and what next" with exit 0.
+
+    An unconfigured machine is a state to report, not an error: the view says
+    what is missing, what to set, and what the tool can do once it is.
+    """
     result = cli_run(env={})
-    assert result.code == EXIT_ERROR
-    assert "PLEX_URL and PLEX_TOKEN not set" in result
-    assert "export PLEX_URL" in result
-
-
-def test_the_home_view_with_an_unreachable_server_points_at_doctor(unreachable, cli_run):
-    result = cli_run()
-    assert result.code == EXIT_ERROR
-    assert "plex-axi doctor" in result
-
-
-def test_version_is_reported_without_touching_the_server(cli_run):
-    result = cli_run("--version")
     assert result.code == EXIT_OK
-    assert result.line("tool:") == "tool: plex-axi"
-    assert result.line("version:")
+    assert result.line("bin:").startswith("bin: ")
+    assert "PLEX_URL and PLEX_TOKEN not set" in result.line("config:")
+    assert "export PLEX_URL" in result
+    assert "search" in result.line("commands[")
+    assert "error:" not in result.out
+
+
+def test_the_home_view_with_an_unreachable_server_is_content_and_points_at_doctor(
+    unreachable, cli_run
+):
+    result = cli_run()
+    assert result.code == EXIT_OK
+    assert result.line("server:").startswith("server: ")
+    assert "not reached" in result.line("server:")
+    assert "plex-axi doctor" in result
+    assert "error:" not in result.out
+
+
+def test_a_command_that_needs_the_server_still_fails_when_it_cannot_reach_it(unreachable, cli_run):
+    """Only the home view treats an unreachable server as content."""
+    assert cli_run("search", "--artist", "Example Artist").code == EXIT_ERROR
+
+
+@pytest.mark.parametrize("flag", ["--version", "-v", "-V"])
+def test_version_is_the_bare_version_without_touching_the_server(cli_run, flag):
+    """AXI 10: -v, -V and --version print the bare version and exit 0."""
+    from plex_axi import __version__
+
+    result = cli_run(flag)
+    assert result.code == EXIT_OK
+    assert result.out == f"{__version__}\n"
+    assert cli_run("--json", flag).out == f"{__version__}\n"
 
 
 def test_a_bad_timeout_is_a_usage_error(server, cli_run):

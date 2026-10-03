@@ -16,9 +16,10 @@ from ..argspec import Command, Flag, Sub
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import parse_libtype, parse_limit, project, select_fields
+from ._common import fields_flag, parse_libtype, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
+MAX_LIMIT = 500
 
 #: The typed method for each libtype. The generic `/library/recentlyAdded` is
 #: deliberately not reachable from here: it spans video too.
@@ -58,7 +59,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 def run(ctx, name: str, sub: str, parsed):
     libtype = parse_libtype(parsed.get("type"), default="album")
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=MAX_LIMIT)
     section = ctx.section()
 
     try:
@@ -67,12 +68,8 @@ def run(ctx, name: str, sub: str, parsed):
         raise translate(exc, what=f"recently added {libtype}s") from None
 
     rows = rows_for(libtype, items, section._server.machineIdentifier)
-    available = [*available_fields(libtype)]
-    default = default_fields(libtype)
-    if "added" in available and "added" not in default:
-        default = [*default, "added"]
     chosen = parsed.get("fields")
-    fields = select_fields(chosen, available, default)
+    fields = select_fields(chosen, available_fields(libtype), default_fields(libtype))
     if libtype == "track" and not chosen:
         fields = with_track_artist(fields, rows)
 
@@ -84,12 +81,38 @@ def run(ctx, name: str, sub: str, parsed):
         )
         return doc
 
+    added = _added_span(rows)
+    if added:
+        doc["added"] = added
     doc[f"{libtype}s"] = project(rows, fields)
-    doc["help"] = HelpBlock(
-        [
-            f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
-            "its tags, and the durable guid",
-            f"Run `plex-axi recent --limit {limit * 5}` to look further back",
-        ]
-    )
+    # Every flag that shaped this answer is carried into the follow-up, so
+    # "look further back" means further back through *these* rows rather than
+    # through the album default the bare command would fall back to.
+    carried = f"--type {libtype}{fields_flag(chosen)}"
+    lines = [
+        f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
+        "its tags, and the durable guid",
+        f"Run `plex-axi recent {carried} --limit {min(limit * 5, MAX_LIMIT)}` to look further back",
+    ]
+    if "added" not in fields:
+        lines.append(
+            f"Run `plex-axi recent --type {libtype} --fields key,title,added` for each row's date"
+        )
+    doc["help"] = HelpBlock(lines)
     return doc
+
+
+def _added_span(rows: list) -> str:
+    """When the rows shown arrived, as one line rather than one column per row.
+
+    The list is ordered by this date, so the span says what a per-row column
+    would -- how far back the answer reaches -- for the price of one line instead
+    of a fifth column on every row, which is what kept the default schema here
+    above AXI's four.
+    """
+    dates = sorted(row["added"] for row in rows if row.get("added"))
+    if not dates:
+        return ""
+    if dates[0] == dates[-1]:
+        return dates[0]
+    return f"{dates[-1]} back to {dates[0]}"

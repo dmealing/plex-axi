@@ -21,12 +21,17 @@ from axi_toolkit.plex.ids import validate_rating_key
 
 from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
-from ..music import available_fields, default_fields, rows_for, with_track_artist
+from ..music import available_fields, rows_for
 from ..output import HelpBlock
 from ..plex import translate
 from ._common import article, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
+
+#: Four columns, AXI's bar for a default list. ``distance`` is the column this
+#: command exists to surface, so it takes the place a track list gives the
+#: artist; the artist is one ``--fields`` away and the help line says so.
+DEFAULT_FIELDS = ["distance", "key", "media_id", "title"]
 
 COMMAND = Command(
     name="similar",
@@ -106,14 +111,9 @@ def run(ctx, name: str, sub: str, parsed):
     for row, distance in zip(rows, distances):
         row["distance"] = distance
 
-    chosen = parsed.get("fields")
     fields = select_fields(
-        chosen,
-        [*available_fields("track"), "distance"],
-        ["distance", *default_fields("track")],
+        parsed.get("fields"), [*available_fields("track"), "distance"], DEFAULT_FIELDS
     )
-    if not chosen:
-        fields = with_track_artist(fields, rows)
 
     doc = {
         "seed": f"{seed.title} - {getattr(seed, 'grandparentTitle', '') or ''}".strip(" -"),
@@ -142,6 +142,8 @@ def run(ctx, name: str, sub: str, parsed):
     doc["help"] = HelpBlock(
         [
             "Run `plex-axi track <key>` for a result's tags, analysis version and file details",
+            f"Run `plex-axi similar {key} --fields distance,key,title,artist` for who each one "
+            "is by",
             "distance is the server's own measure; sort order is the server's, closest first",
         ]
     )

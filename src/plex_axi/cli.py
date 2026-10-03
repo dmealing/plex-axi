@@ -666,7 +666,10 @@ def main(argv: list | None = None, *, environ=None) -> int:
 
     try:
         if _wants_version(globals_):
-            output.write({"tool": "plex-axi", "version": __version__}, mode)
+            # The bare version, in every output mode: AXI asks for exactly that
+            # from -v, -V and --version, because harnesses probe it to decide
+            # whether a tool is installed and current and compare the string.
+            output.write_text(__version__)
             return EXIT_OK
 
         # The command table this installation has, resolved once. With the
@@ -703,7 +706,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
             globals_.update(parsed.globals)
             mode = _mode(globals_)
             if _wants_version(globals_):
-                output.write({"tool": "plex-axi", "version": __version__}, mode)
+                output.write_text(__version__)
                 return EXIT_OK
 
         if globals_.get("debug"):

@@ -205,10 +205,14 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 - `cloud.py` — the Sonos route: one `sonos.plex.tv` call with `requests`, parsed with the standard
   library, on the same pattern as `users.py` and for the same reason. Imported lazily, and only
   when `PLEX_ACCOUNT_TOKEN` is set.
+- `sessionlog.py` — the session-end capture: counts the `plex-axi` commands in an agent's transcript
+  (names only, never arguments) into a local state file, and reads back the last session in the
+  current directory for `context`. See "The session integration".
 - `users.py` — `--user`: one plex.tv call, parsed with the standard library. Deliberately not the
   client library's own user switch; see the sharp edge below.
-- `hooks.py` — the session integration AXI §7 calls the *primary* discovery path, and the one
-  place this repository writes to a machine rather than to a library: the `SessionStart` hook for
+- `hooks.py` — the session integration AXI §7 calls the *primary* discovery path, and the place
+  this repository writes to a machine rather than to a library (`sessionlog.py` keeps the state
+  file): the `SessionStart` hook for
   Claude Code and Codex, the managed OpenCode plugin, and the atomic writes and path repair that
   keep a reinstall from duplicating an entry. Installed only from `plex-axi setup hooks`. See
   "The session integration" below, because the one thing it does not inherit from the sibling is
@@ -685,9 +689,10 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   invented the attribute.
 - **`playlist.leafCount` is what the server declares, not what the playlist holds.** For a smart
   playlist it is a cached figure and drifts — 0 declared against 81 actual on a real server — and it
-  is off by one even on a static list. `playlist list` has nothing else to print, so it prints the
-  declared count and names it as such; `playlist show` has the real contents and reports the
-  disagreement. The two commands must never contradict each other in silence.
+  is off by one even on a static list. `playlist list` has nothing else to print, so it leaves the
+  column out of its default and, when `--fields` asks for `items`, prints the declared count and
+  names it as such; `playlist show` has the real contents and reports the disagreement. The two
+  commands must never contradict each other in silence.
 - **A boolean key in `filters` may not have a sibling.** `_validateAdvancedSearch` raises
   *"Multiple keys in the same dictionary with and/or is not allowed"* the moment `{'or': [...]}`
   shares a dictionary with anything else, so a parenthesised OR has to be composed as
@@ -729,12 +734,11 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   `plexapi.myplex` all stay on `tests/test_no_dispatch.py`'s forbidden list.
 - **Plex Home users are not in the sharing record**, so `--user` cannot reach them. The error says
   so and points at exporting that user's own `PLEX_TOKEN`, rather than reporting them as absent.
-- **Adding a column to `ROW_FIELDS` changes what `recent` prints by default.** `recent.run` appends
-  `added` to the default row of *any* libtype that advertises it, so the branch was already written
-  for a column a track did not have. Giving `track_row` an `added` column therefore did two things
-  at once: `--fields key,added` stopped being an unknown-field usage error on a track, and the
-  recently-added list stopped omitting the one thing it is sorted by. Both are wanted; a column
-  added later without wanting the second would need that branch looked at first.
+- **`recent` says when as one line, not as a column.** The recently-added list once omitted the one
+  thing it is sorted by, and the first fix appended `added` to every libtype's default row — which
+  made `recent` the widest default list in the tool, five to seven columns against AXI's four. It
+  now prints an `added: <newest> back to <oldest>` span over the rows shown and leaves the per-row
+  date to `--fields`, with a help line saying so. Do not put the column back into the default.
 - **Sort fields are libtype-scoped on the wire.** `recentlyAddedAlbums` builds
   `sort=album.addedAt:desc`, not `sort=addedAt:desc`. Anything parsing a sort parameter has to strip
   the scope.
@@ -772,7 +776,14 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
 - **Exit codes follow one rule.** A static invocation problem — unknown flag, unknown command, a
   rating key that is not a number, a write method on `api` — exits 2. An outcome of a lookup against
   live state — nothing at that rating key, no music library, an ambiguous section — exits 1. A zero
-  result from a well-formed search exits **0**: an empty answer is an answer.
+  result from a well-formed search exits **0**: an empty answer is an answer. Two more exit 0 by
+  AXI's rule and must stay that way: a mutation whose desired state already holds (`playlist add`
+  of a held track, `playlist remove` of an absent one, a repeated `playlist create`) answers
+  `already: … (no-op)`, and a second `setup remove` reports every target `absent`, because a
+  retried command has to converge rather
+  than fail on its own earlier success; and the bare home view reports an unconfigured or
+  unreachable server as its *content*, with the next step, because it was asked what is here rather
+  than told to do something. Every other command that cannot reach the server still exits 1.
 
 ### The six `plex://` forms
 
@@ -819,6 +830,16 @@ one detail request per row to finish the job. So `search`, `pick`, `recent`, `si
 machine identifier as a **required** argument so a new surface cannot forget it. The `guid` stays in
 the detail views: it is the identifier a human writes down rather than the one a consumer takes, and
 form 6 means it is not always even that — doubling every row's width for it is a poor trade.
+
+**And no default row is wider than four columns.** AXI's bar for a default list schema is three or
+four fields, and two of the four here are always `key` and `media_id`, so every surface spends
+its remaining two on the title and the one column that decides the next step: `artist` on a track
+or album, `distance` on `similar`, `device` on `sessions`, `smart` on `playlist list`. What was
+dropped is one `--fields` away on every one of them, and what a summary line can say instead is
+said there — `recent`'s `added:` span, `sessions`' `states:` counts.
+`tests/test_principles.py` sweeps every list surface and fails a fifth default column. The only
+exception is data-driven: `with_track_artist` adds `track_artist` on a compilation row, where
+`artist` alone would read "Various Artists" for every track.
 
 **A playlist has a `media_id` too, and this was checked rather than assumed.** `playlist list` and
 `playlist show` both print one for the playlist *itself*, beside the `key`, because "play this whole
@@ -921,9 +942,9 @@ sibling's hook runs its bare executable, whose no-argument view is live state. H
 no-argument view is `commands/home.py`, and running it from a hook fails on three separate counts,
 each of which alone would be fatal:
 
-- **It needs credentials.** With `PLEX_URL` unset it reports `NOT_CONFIGURED` and exits 1, so on
-  every machine that has the package and no server the hook would open every session with a
-  failure.
+- **It needs credentials.** With `PLEX_URL` unset it has no library to show — only setup advice —
+  so on every machine that has the package and no server the hook would open every session with
+  instructions instead of context.
 - **It touches the network.** It resolves the section, asks three item counts, the mood
   vocabulary, the recently-added albums and the sessions. A hook runs before anybody has decided
   to use the tool; it may not spend that.
@@ -932,8 +953,8 @@ each of which alone would be fatal:
   narrower one — and this repository's whole discipline is that a server's address is a thing you
   do not write down.
 
-So the hook runs **`plex-axi context`** (`commands/context.py`), which reads the environment and
-the command table and nothing else. `tests/test_hooks.py` asserts that rather than describing it:
+So the hook runs **`plex-axi context`** (`commands/context.py`), which reads the environment, the
+command table and the local session record and nothing else. `tests/test_hooks.py` asserts that rather than describing it:
 the document reaches the server **zero times** — on `server.requests`, not on an exit code, for the
 same reason `tests/test_writes.py` does — exits 0 with no environment at all, and prints neither
 the base URL nor the token on either stream, including the one URL shape where the address is
@@ -982,12 +1003,44 @@ by everybody who installed the hook.
   no release of this tool shipped a hook before this one, so there is no unmarked entry in the wild
   to adopt, and adopting by command substring would reintroduce the bug.
 
+**The lifecycle has a second end, and only Claude Code gets it.** AXI §7 asks for session-end
+capture as well as session-start context, so `setup hooks` also installs `plex-axi context end` as
+Claude Code's `SessionEnd` hook. It reads the hook payload on stdin, walks the transcript it names
+for `tool_use` shell commands, and counts the `plex-axi` invocations in *command position* —
+`grep plex-axi notes.md` and a commit message naming the tool are not runs — into
+`$XDG_STATE_HOME/plex-axi/sessions.json`. Three rules hold it and `tests/test_hooks.py` pins each:
+
+- **Command names and counts, never arguments.** The record is read back into every later
+  session's context, a wider surface than the shell it was typed in, and arguments are where artist
+  names and a mistyped token live. `context` prints one `last_session:` line, and only for the
+  directory it runs in.
+- **It exits 0 whatever it is handed.** A failed session-end hook is reported to the user as their
+  session failing to close, so no payload, a bad transcript or an unwritable state file each record
+  `nothing` with a `reason:`.
+- **Codex and OpenCode are left out deliberately.** Codex's events stop at a per-turn `Stop` and
+  OpenCode's plugin has no session-end event; wiring the capture to a per-turn event would re-read
+  the whole transcript on every reply.
+
+`setup status` reports each target `installed`, `stale` (a moved executable or a duplicate),
+`missing` or `unmanaged` and writes nothing; `setup remove` takes out exactly the marker-carrying
+entries, drops any group, event or `hooks` table the removal empties, deletes the OpenCode plugin
+only when it is managed, and leaves Codex's `[features] hooks = true` alone because other tools'
+Codex hooks depend on it. Both mirror the AXI SDK's `sessionStartHookStatus` and
+`uninstallSessionStartHooks`; the sibling AXI CLI has neither.
+
 **Neither `setup` nor `context` is subject to the promotion rule below.** That rule asks what a
 typed command does that `api` cannot, and `api` is a GET proxy onto a Plex server. These two do not
 address the server at all — one configures this machine, the other describes the installation — so
 the question does not apply to them rather than being answered generously.
 
-**Verification status: the OpenCode plugin was run, the two JSON hooks were not.** The generated
+**Verification status: the OpenCode plugin was run, the two JSON hooks were not, and neither was
+the session-end capture.** The transcript shape `sessionlog` reads — Claude Code's JSONL with
+`tool_use` blocks carrying `input.command` — was confirmed by running the parse over a real session
+transcript on a development machine, which is also what showed that backtick-quoted mentions and
+here-document bodies had to stop counting. The `SessionEnd` hook itself has not yet fired from a
+restarted agent. The count is a matcher, not a shell parser: an invocation inside a quoted string
+after `&&` (a `python -c` script, say) can still be counted, which is why the record is phrased as
+what the session used rather than as an audit. The generated
 plugin was executed under Node against a real build of this package and did push the context
 document into `output.system`, so that route is confirmed end to end. The Claude Code and Codex
 entries were verified as *written* — correct file, correct shape, correct command — and the command
@@ -1518,3 +1571,10 @@ MIT. Two constraints that came out of surveying the landscape and still hold:
 The client library is BSD-3-Clause and the community OpenAPI specification that documents Plex's
 media-query language is MIT; both are compatible, and the spec is the thing to cite rather than
 re-derive.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

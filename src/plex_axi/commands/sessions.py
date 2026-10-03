@@ -14,22 +14,37 @@ from __future__ import annotations
 from axi_toolkit.plex.filters import stars
 from axi_toolkit.plex.ids import media_id_for
 
-from ..argspec import Command, Sub
+from ..argspec import Command, Flag, Sub
 from ..music import number
 from ..output import HelpBlock
 from ..plex import translate
+from ._common import project, select_fields
+
+#: Every column a session row can carry, and the four it carries by default.
+#: Where the music is playing is the column this command exists for, so it is
+#: the fourth; the player's state is counted in the summary line instead, and
+#: the artist, album and rating are one ``--fields`` away.
+FIELDS = ["key", "media_id", "title", "artist", "album", "device", "state", "rating"]
+DEFAULT_FIELDS = ["key", "media_id", "title", "device"]
 
 COMMAND = Command(
     name="sessions",
     summary="List the streams the server currently believes are playing",
-    usage="usage: plex-axi sessions",
+    usage="usage: plex-axi sessions [--fields <a,b,c>]",
     default_sub="sessions",
-    subs=(Sub(name="sessions", summary="List active sessions"),),
+    subs=(
+        Sub(
+            name="sessions",
+            flags=(Flag("--fields", "<a,b,c>", note="replaces the default columns"),),
+            summary="List active sessions",
+        ),
+    ),
     notes=(
         "music sessions are listed first; anything else is counted, not detailed",
         "nothing here can start, stop or address a stream: listing one is a read",
+        f"columns: {', '.join(FIELDS)}",
     ),
-    examples=("plex-axi sessions",),
+    examples=("plex-axi sessions", "plex-axi sessions --fields key,title,artist,device,state"),
 )
 
 
@@ -38,6 +53,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
+    fields = select_fields(parsed.get("fields"), FIELDS, DEFAULT_FIELDS)
     server = ctx.server()
     try:
         sessions = list(server.sessions())
@@ -53,7 +69,9 @@ def run(ctx, name: str, sub: str, parsed):
         return doc
 
     if music:
-        doc["music"] = [_row(session, server.machineIdentifier) for session in music]
+        rows = [_row(session, server.machineIdentifier) for session in music]
+        doc["states"] = _states(rows)
+        doc["music"] = project(rows, fields)
     else:
         doc["music"] = "0 of the active streams is music"
     if other:
@@ -69,6 +87,20 @@ def run(ctx, name: str, sub: str, parsed):
             ]
         )
     return doc
+
+
+def _states(rows: list) -> str:
+    """How many music sessions are in each player state, as one phrase.
+
+    The aggregate that lets the default row drop its ``state`` column: an agent
+    asking "is anything actually playing?" reads it here without a fifth column
+    on every row, and ``--fields ...,state`` says which one is which.
+    """
+    counts: dict = {}
+    for row in rows:
+        state = row.get("state") or "unknown"
+        counts[state] = counts.get(state, 0) + 1
+    return ", ".join(f"{n} {state}" for state, n in counts.items())
 
 
 def _row(session, machine_identifier: str) -> dict:

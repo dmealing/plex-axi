@@ -40,8 +40,8 @@ grouped: title
 filters[2]{field,operator,value}:
   artist.title,contains,Example Artist
   track.title,contains,Example Track
-tracks[1]{key,media_id,title,artist,album}:
-  111,"plex://<machineIdentifier>/111",Example Track,Example Artist,Example Album
+tracks[1]{key,media_id,title,artist}:
+  111,"plex://<machineIdentifier>/111",Example Track,Example Artist
 item:
   media_id: "plex://<machineIdentifier>/111"
   rating_key: 111
@@ -153,10 +153,17 @@ the columns once and each row is one line:
 
 ```
 count: 2 of 47 total
-tracks[2]{key,media_id,title,artist,album}:
-  111,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/111",Example Track,Example Artist,Example Album
-  112,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/112",Second Example,Example Artist,Example Album
+tracks[2]{key,media_id,title,artist}:
+  111,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/111",Example Track,Example Artist
+  112,"plex://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/112",Second Example,Example Artist
 ```
+
+Every list prints **four columns at most by default** — two identifiers, the title and one more —
+and takes `--fields` for the rest: `--fields key,title,album,year` on a search, `--fields
+key,title,items` on `playlist list`, `--fields key,title,artist,state` on `sessions`. A track list
+adds `track_artist` only on the compilation rows where the album artist alone would say "Various
+Artists". Long values are previewed with their full length and a `--full` escape hatch, and `api`
+caps each repeated element at twenty children for the same reason.
 
 - `--human` renders aligned tables for a person.
 - `--json` emits raw JSON, for anything that would rather parse than read.
@@ -164,7 +171,9 @@ tracks[2]{key,media_id,title,artist,album}:
   so a wrong flag corrects itself in one turn. stderr carries only diagnostics (`--debug`), which
   agents do not read.
 - Exit codes: `0` success — **including a search that matched nothing**, because an empty answer is
-  an answer; `1` the outcome of a lookup against live state (nothing at that rating key, no music
+  an answer, a write whose result already holds (adding a track a playlist already has, removing
+  one it does not, repeating a create), which is reported as a no-op, and the bare `plex-axi` home
+  view, which reports an unconfigured or unreachable server as its content with the next step; `1` the outcome of a lookup against live state (nothing at that rating key, no music
   library on the server, an ambiguous section); `2` a usage error (unknown command, unknown flag, a
   rating key that is not a number, a write method on `api`).
 - Unknown flags and extra arguments are **rejected by name** rather than ignored, with that
@@ -381,12 +390,24 @@ OpenCode. It is idempotent, repairs the recorded path after a reinstall or a mov
 tools' hooks alone, and refuses to overwrite a plugin it does not manage. It writes to your own
 home directory and to nothing on the Plex server.
 
+```sh
+plex-axi setup status    # installed, stale, missing or unmanaged, per target; writes nothing
+plex-axi setup remove    # takes out exactly what `setup hooks` put in; safe to repeat
+```
+
+Claude Code also gets a `SessionEnd` hook, `plex-axi context end`, which counts the `plex-axi`
+commands the session ran — command names only, never their arguments, so no artist, title or
+token is ever written down — into `~/.local/state/plex-axi/sessions.json`. The next session's
+context in the same directory then carries one `last_session:` line saying what was done there.
+Codex and OpenCode have no session-end event, so they get the context alone. `setup remove` leaves
+Codex's `[features] hooks = true` in place, because other tools' Codex hooks depend on it.
+
 What the hook puts in front of a session is `plex-axi context` — and unlike most AXI tools, that is
 deliberately *not* the no-argument view. A hook runs at the start of every session, on every
 machine that has the package, before anybody has decided to use the tool, so it must not need a
 token, must not open a connection, and must not put your server's address into an agent's context.
-`context` reads the environment and the command table and nothing else, and exits 0 whether or not
-this machine has a Plex server at all:
+`context` reads the environment, the command table and that local session record and nothing else,
+and exits 0 whether or not this machine has a Plex server at all:
 
 ```
 $ plex-axi context

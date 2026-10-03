@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+
 from axi_toolkit.plex.filters import LIBTYPES
 
 from ..errors import UsageError
@@ -51,6 +53,26 @@ def parse_libtype(raw, *, default: str = "track") -> str:
             code="BAD_TYPE",
         )
     return value
+
+
+def more_hint(command: str, total: int, cap: int, noun: str) -> str:
+    """The follow-up that reveals the rest of a list cut short by ``--limit``.
+
+    ``cap`` is the command's own ``--limit`` ceiling: a hint past it would be
+    advice to run something the command refuses.
+    """
+    if total <= cap:
+        return f"Run `{command} --limit {total}` for all {total} {noun}"
+    return f"Run `{command} --limit {cap}` for the first {cap} of {total} {noun}"
+
+
+def fields_flag(chosen) -> str:
+    """The caller's own ``--fields`` value, quoted, for a follow-up that repeats it.
+
+    A reveal hint that drops the named columns would suggest a different answer
+    than the one the caller was just shown.
+    """
+    return f" --fields {shlex.quote(chosen)}" if chosen else ""
 
 
 def select_fields(raw, available: list, default: list) -> list:

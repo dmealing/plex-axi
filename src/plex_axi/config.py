@@ -181,3 +181,21 @@ def describe_environment(environ=None) -> dict:
         "token_var": token_var or "",
         "token_set": bool(token),
     }
+
+
+def config_state(environ, missing: list) -> str:
+    """Which variables are set -- never what they hold.
+
+    Named from :func:`describe_environment` rather than from the
+    primary spellings, so an installation configured through one of the accepted
+    aliases is told the name of the variable it actually set.
+
+    Reported as an ordinary fact rather than as an error even when both are
+    absent, because the session hook and the bare home view both print it, and
+    either opening with a failure would report the machine's ordinary state as a
+    fault.
+    """
+    if missing:
+        return f"{' and '.join(missing)} not set, so no command here can reach a server yet"
+    described = describe_environment(environ)
+    return f"{described['url_var']} and {described['token_var']} are set"

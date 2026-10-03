@@ -2133,6 +2133,16 @@ class UnreachableSession:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_session_state(monkeypatch, tmp_path_factory):
+    """The session-end capture's state file, kept out of the real home directory.
+
+    `plex-axi context` reads it on every run, so a developer's own recorded
+    sessions would otherwise leak into every test of the ambient document.
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("state")))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_output():
     """Registered secrets are process-global; no test may inherit another's."""
     from plex_axi import output

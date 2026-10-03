@@ -370,25 +370,128 @@ def test_a_playlist_that_holds_only_albums_is_a_zero_not_a_crash(server, cli_run
     assert "INTERNAL_ERROR" not in shown
 
 
-def test_creating_a_playlist_that_exists_is_refused_with_the_command_that_works(
+def test_repeating_a_create_confirms_the_playlist_rather_than_failing(
     server, cli_run, writable_env
 ):
+    """AXI 6: the playlist and its items already exist, so the create is a no-op."""
     result = cli_run(
         "playlist", "create", "Example Playlist", "--key", "111", "--write", env=writable_env
     )
-    assert result.code == 1
-    assert "PLAYLIST_EXISTS" in result
-    assert "playlist add 'Example Playlist'" in result
+    assert result.code == 0
+    assert "no-op" in result.line("already:")
     assert server.writes == []
 
 
-def test_removing_something_that_is_not_in_the_playlist_is_refused(server, cli_run, writable_env):
+def test_a_create_whose_title_holds_other_items_is_refused_with_the_command_that_works(
+    server, cli_run, writable_env
+):
+    """The name is taken by a playlist that does not hold what was asked for:
+    that is not the state the caller wanted, and creating would not reach it."""
+    result = cli_run(
+        "playlist",
+        "create",
+        "Example Playlist",
+        "--key",
+        "111",
+        "--key",
+        "122",
+        "--write",
+        env=writable_env,
+    )
+    assert result.code == 1
+    assert "PLAYLIST_EXISTS" in result
+    assert "playlist add 'Example Playlist' --key 122 --write" in result
+    assert server.writes == []
+
+
+def test_a_repeated_create_in_full_converges(server, cli_run, writable_env):
+    """Create, then the same create again: one playlist, and the second exits 0."""
+    argv = ("playlist", "create", "Fresh Playlist", "--key", "111", "--key", "112", "--write")
+    first = cli_run(*argv, env=writable_env)
+    assert first.code == 0
+    writes_after_first = len(server.writes)
+    second = cli_run(*argv, env=writable_env)
+    assert second.code == 0
+    assert "no-op" in second.line("already:")
+    assert len(server.writes) == writes_after_first
+
+
+def test_removing_something_that_is_not_in_the_playlist_is_a_no_op(server, cli_run, writable_env):
+    """AXI 6: the item is already absent, which is the state a removal asks for."""
     result = cli_run(
         "playlist", "remove", "Example Playlist", "--key", "122", "--write", env=writable_env
     )
-    assert result.code == 1
-    assert "NOT_IN_PLAYLIST" in result
+    assert result.code == 0
+    assert "no-op" in result.line("already:")
     assert server.writes == []
+
+
+def test_a_repeated_removal_converges_instead_of_failing(server, cli_run, writable_env):
+    argv = ("playlist", "remove", "Example Playlist", "--key", "111", "--write")
+    first = cli_run(*argv, env=writable_env)
+    assert first.code == 0
+    assert first.line("applied:") == "applied: removed 1 item(s)"
+    second = cli_run(*argv, env=writable_env)
+    assert second.code == 0
+    assert "no-op" in second.line("already:")
+
+
+def test_a_removal_of_one_present_and_one_absent_key_removes_the_present_one(
+    server, cli_run, writable_env
+):
+    result = cli_run(
+        "playlist",
+        "remove",
+        "Example Playlist",
+        "--key",
+        "111",
+        "--key",
+        "122",
+        "--write",
+        env=writable_env,
+    )
+    assert result.code == 0
+    assert result.line("already_absent[") == "already_absent[1]: 122"
+    assert result.line("applied:") == "applied: removed 1 item(s)"
+
+
+def test_adding_a_track_the_playlist_already_holds_is_a_no_op(server, cli_run, writable_env):
+    """AXI 6: `playlist add` twice once added the track twice."""
+    result = cli_run(
+        "playlist", "add", "Example Playlist", "--key", "111", "--write", env=writable_env
+    )
+    assert result.code == 0
+    assert "no-op" in result.line("already:")
+    assert server.writes == []
+
+
+def test_a_repeated_addition_adds_once(server, cli_run, writable_env):
+    argv = ("playlist", "add", "Example Playlist", "--key", "122", "--write")
+    first = cli_run(*argv, env=writable_env)
+    assert first.code == 0
+    assert first.line("holds:") == "holds: 3 items"
+    second = cli_run(*argv, env=writable_env)
+    assert second.code == 0
+    assert "no-op" in second.line("already:")
+    shown = cli_run("playlist", "show", "Example Playlist")
+    assert shown.line("count:") == "count: 3 of 3 items"
+
+
+def test_an_addition_skips_what_is_held_and_adds_the_rest(server, cli_run, writable_env):
+    result = cli_run(
+        "playlist",
+        "add",
+        "Example Playlist",
+        "--key",
+        "111",
+        "--key",
+        "122",
+        "--write",
+        env=writable_env,
+    )
+    assert result.code == 0
+    assert result.line("already_held[") == "already_held[1]: 111"
+    assert result.line("applied:") == "applied: added 1 item(s)"
 
 
 def test_removing_a_track_a_playlist_holds_twice_removes_one_copy(
