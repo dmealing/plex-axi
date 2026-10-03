@@ -56,13 +56,14 @@
 # and one entry in SECTIONS. Nothing else needs to change.
 set -uo pipefail
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+root=$(dirname "$self")/..
 cd "$root" || exit 1
 
 SECTIONS=(leakcheck commits lint test skill)
 MATRIX_PYTHONS=${MATRIX_PYTHONS:-"3.10 3.11 3.12"}
 
-usage() { sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -uo/p' "$self" | sed '$d; s/^# \{0,1\}//'; }
 
 only=()
 matrix=0
