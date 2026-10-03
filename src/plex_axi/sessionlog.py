@@ -39,6 +39,8 @@ import re
 import shlex
 from pathlib import Path
 
+from .hooks import write_atomic
+
 #: How many sessions the state file remembers, across every directory.
 KEEP = 50
 
@@ -185,8 +187,6 @@ def record(payload: dict, nouns: dict, environ=None, *, today: str | None = None
         ]
         sessions.append(entry)
         path.parent.mkdir(parents=True, exist_ok=True)
-        from .hooks import write_atomic
-
         write_atomic(path, json.dumps(sessions[-KEEP:], indent=2) + "\n")
     except OSError as exc:
         return _nothing(f"the state file could not be written ({type(exc).__name__})")

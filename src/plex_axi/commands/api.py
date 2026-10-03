@@ -128,20 +128,16 @@ def run(ctx, name: str, sub: str, parsed):
     doc["result"] = _render(data, depth, full=bool(parsed.get("full")), seen=seen)
     # Each escape hatch is offered only when this answer actually needed it.
     again = _invocation(path, query)
-    doc["help"] = HelpBlock(
-        [
-            *(
-                [
-                    f"Run `{again} --depth {min(depth + 2, 8)}` to expand the elements summarised as "
-                    "`_children`"
-                ]
-                if seen.depth and depth < 8
-                else []
-            ),
-            *([f"Run `{again} --full` for every child and every value whole"] if seen.size else []),
-            "A typed command exists for search, detail, genres, similar, recent and sessions",
-        ]
-    )
+    lines = []
+    if seen.depth and depth < 8:
+        lines.append(
+            f"Run `{again} --depth {min(depth + 2, 8)}` to expand the elements summarised as "
+            "`_children`"
+        )
+    if seen.size:
+        lines.append(f"Run `{again} --full` for every child and every value whole")
+    lines.append("A typed command exists for search, detail, genres, similar, recent and sessions")
+    doc["help"] = HelpBlock(lines)
     return doc
 
 
@@ -153,19 +149,18 @@ class _Truncation:
         self.size = False
 
 
-def _render(element, depth: int, *, full: bool = False, seen: _Truncation | None = None):
+def _render(element, depth: int, *, full: bool, seen: _Truncation):
     """Convert one XML element into the plain shape the output boundary prints.
 
     Bounded two ways. Depth summarises a nested element as ``_children`` counts;
     size keeps the first :data:`MAX_CHILDREN` of each tag and previews any value
     longer than :data:`PREVIEW_CHARS`, saying in both cases how much there is.
     """
-    seen = seen if seen is not None else _Truncation()
     node = {}
     for name, value in element.attrib.items():
-        if not full:
-            value, hint = truncate(value, PREVIEW_CHARS, "full")
-            seen.size = seen.size or bool(hint)
+        if not full and len(value) > PREVIEW_CHARS:
+            value, _ = truncate(value, PREVIEW_CHARS, "")
+            seen.size = True
         node[name] = value
     children = list(element)
     if children and depth > 0:

@@ -12,6 +12,8 @@ buries the news in its own tracklist.
 
 from __future__ import annotations
 
+import shlex
+
 from ..argspec import Command, Flag, Sub
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
@@ -19,6 +21,7 @@ from ..plex import translate
 from ._common import parse_libtype, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
+MAX_LIMIT = 500
 
 #: The typed method for each libtype. The generic `/library/recentlyAdded` is
 #: deliberately not reachable from here: it spans video too.
@@ -58,7 +61,7 @@ def COMMAND_FOR(name: str) -> Command:
 
 def run(ctx, name: str, sub: str, parsed):
     libtype = parse_libtype(parsed.get("type"), default="album")
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=MAX_LIMIT)
     section = ctx.section()
 
     try:
@@ -87,22 +90,17 @@ def run(ctx, name: str, sub: str, parsed):
     # Every flag that shaped this answer is carried into the follow-up, so
     # "look further back" means further back through *these* rows rather than
     # through the album default the bare command would fall back to.
-    carried = f"--type {libtype}" + (f" --fields {chosen}" if chosen else "")
-    doc["help"] = HelpBlock(
-        [
-            f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
-            "its tags, and the durable guid",
-            f"Run `plex-axi recent {carried} --limit {limit * 5}` to look further back",
-            *(
-                []
-                if "added" in fields
-                else [
-                    f"Run `plex-axi recent --type {libtype} --fields key,title,added` for each "
-                    "row's date"
-                ]
-            ),
-        ]
-    )
+    carried = f"--type {libtype}" + (f" --fields {shlex.quote(chosen)}" if chosen else "")
+    lines = [
+        f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
+        "its tags, and the durable guid",
+        f"Run `plex-axi recent {carried} --limit {min(limit * 5, MAX_LIMIT)}` to look further back",
+    ]
+    if "added" not in fields:
+        lines.append(
+            f"Run `plex-axi recent --type {libtype} --fields key,title,added` for each row's date"
+        )
+    doc["help"] = HelpBlock(lines)
     return doc
 
 

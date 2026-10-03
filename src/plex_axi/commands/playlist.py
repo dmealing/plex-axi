@@ -29,6 +29,8 @@ exercise before they were a Plex question.
 
 from __future__ import annotations
 
+import shlex
+
 from axi_toolkit.plex.ids import media_id_for, validate_rating_key
 
 from .. import writes
@@ -188,7 +190,7 @@ def _list(ctx, parsed):
         "Run `plex-axi playlist add '<title>' --key <rating_key>` to preview an addition",
     ]
     if len(shown) < len(playlists):
-        carried = f" --fields {chosen}" if chosen else ""
+        carried = f" --fields {shlex.quote(chosen)}" if chosen else ""
         help_lines.append(
             more_hint(f"plex-axi playlist list{carried}", len(playlists), 1000, "playlists")
         )
@@ -262,7 +264,7 @@ def _show(ctx, parsed):
         "removing one",
     ]
     if len(rows) < len(tracks):
-        carried = f" --fields {chosen}" if chosen else ""
+        carried = f" --fields {shlex.quote(chosen)}" if chosen else ""
         help_lines.append(
             more_hint(
                 f"plex-axi playlist show {int(playlist.ratingKey)}{carried}",

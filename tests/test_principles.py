@@ -198,3 +198,9 @@ def test_the_version_probe_needs_no_command_table(monkeypatch, capsys):
     monkeypatch.setattr(cli, "modules", lambda environ=None: pytest.fail("loaded the table"))
     assert cli.main(["--version"], environ={}) == 0
     assert capsys.readouterr().out == f"{__version__}\n"
+
+
+def test_recents_look_further_back_hint_stays_within_its_own_limit(server, cli_run):
+    """A suggestion the command would refuse is not a next step."""
+    result = cli_run("recent", "--limit", "200")
+    assert "Run `plex-axi recent --type album --limit 500` to look further back" in result

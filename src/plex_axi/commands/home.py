@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .. import playback, writes
 from ..argspec import Command, Sub
-from ..config import missing_env_vars, setup_help
+from ..config import config_state, missing_env_vars, setup_help
 from ..errors import AnyAxiError, help_lines_for
 from ..music import date_only
 from ..output import HelpBlock
@@ -79,9 +79,7 @@ def run(ctx, name: str, sub: str, parsed):
     # against the library still exits 1 when it cannot; this one was not.
     missing = missing_env_vars(ctx.environ)
     if missing:
-        doc["config"] = (
-            f"{' and '.join(missing)} not set, so no command here can reach a server yet"
-        )
+        doc["config"] = config_state(ctx.environ, missing)
         doc["commands"] = list(command_order(ctx.environ))
         doc["help"] = HelpBlock(
             [*setup_help(), "Run `plex-axi --help` for the whole command reference"]

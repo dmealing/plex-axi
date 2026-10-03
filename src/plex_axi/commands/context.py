@@ -35,7 +35,7 @@ import sys
 
 from .. import playback, sessionlog, writes
 from ..argspec import Command, Sub
-from ..config import describe_environment, missing_env_vars, setup_help
+from ..config import config_state, missing_env_vars, setup_help
 from ..output import HelpBlock
 from .home import DESCRIPTION, executable_path
 
@@ -113,7 +113,7 @@ def run(ctx, name: str, sub: str, parsed):
     doc = {
         "bin": executable_path(),
         "description": DESCRIPTION,
-        "config": _config(environ, missing),
+        "config": config_state(environ, missing),
         # The same one-liner the home view prints, from the same function. An
         # agent that reads "disabled" here does not plan a rating it cannot
         # write, and does not read the refusal as a broken installation.
@@ -154,23 +154,6 @@ def _end(ctx):
     specs = command_specs(ctx.environ)
     nouns = {name: [sub.name for sub in spec.subs] for name, spec in specs.items()}
     return sessionlog.record(payload, nouns, ctx.environ)
-
-
-def _config(environ, missing: list) -> str:
-    """Which variables are set -- never what they hold.
-
-    Named from :func:`plex_axi.config.describe_environment` rather than from the
-    primary spellings, so an installation configured through one of the accepted
-    aliases is told the name of the variable it actually set.
-
-    Reported as an ordinary fact rather than as an error even when both are
-    absent, because a hook that opened a session with a failure would be
-    reporting the machine's ordinary state as a fault.
-    """
-    if missing:
-        return f"{' and '.join(missing)} not set, so no command here can reach a server yet"
-    described = describe_environment(environ)
-    return f"{described['url_var']} and {described['token_var']} are set"
 
 
 def _help(missing: list, playing: bool) -> list:
