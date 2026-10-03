@@ -978,19 +978,32 @@ def test_the_release_audit_requires_the_pull_request_bodies():
     Asserted on the parsed step rather than the file: both workflows also carry
     a comment quoting the command, and prose is not wiring.
     """
-    for name in ("release.yml", "ci.yml"):
-        audits = [
-            step
-            for step in _audit_steps(_workflow(name))
-            if "--since-release" in step["run"].split()
-        ]
-        assert audits, f"{name} runs no audit over the release range"
-        for step in audits:
-            tokens = step["run"].split()
-            assert "--pull-requests" in tokens, name
-            following = tokens[tokens.index("--pull-requests") + 1 :][:1]
-            assert following == ["require"], name
-            assert "GITHUB_TOKEN" in (step.get("env") or {}), name
+    audits = [
+        step
+        for step in _audit_steps(_workflow("release.yml"))
+        if "--since-release" in step["run"].split()
+    ]
+    assert audits, "release.yml runs no audit over the release range"
+    for step in audits:
+        tokens = step["run"].split()
+        assert "--pull-requests" in tokens
+        following = tokens[tokens.index("--pull-requests") + 1 :][:1]
+        assert following == ["require"]
+        assert "GITHUB_TOKEN" in (step.get("env") or {})
+
+    # ci.yml delegates the audit to scripts/ci-local.sh, which passes `require`
+    # whenever a token exists -- and the step hands it one.
+    delegated = [
+        step
+        for job in (_workflow("ci.yml").get("jobs") or {}).values()
+        for step in job.get("steps") or []
+        if (step.get("run") or "").split() == ["scripts/ci-local.sh", "--only", "commits"]
+    ]
+    assert delegated, "ci.yml runs no audit over the release range"
+    for step in delegated:
+        assert "GITHUB_TOKEN" in (step.get("env") or {})
+    local = (REPO_ROOT / "scripts" / "ci-local.sh").read_text(encoding="utf-8")
+    assert "--since-release --pull-requests require" in local
 
 
 def test_a_pull_request_is_checked_before_it_can_be_merged():
