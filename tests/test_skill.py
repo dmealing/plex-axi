@@ -15,7 +15,7 @@ def _rendered() -> str:
 
 
 def test_the_committed_skill_matches_the_command_table():
-    """CI runs `plex-axi skill --check`; this is the same assertion, offline."""
+    """`scripts/ci-local.sh` runs `plex-axi skill --check`; this is the same assertion."""
     committed = skill.target_path(REPO_ROOT).read_text(encoding="utf-8")
     assert committed == _rendered()
 
