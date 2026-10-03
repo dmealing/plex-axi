@@ -12,13 +12,11 @@ buries the news in its own tracklist.
 
 from __future__ import annotations
 
-import shlex
-
 from ..argspec import Command, Flag, Sub
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import parse_libtype, parse_limit, project, select_fields
+from ._common import fields_flag, parse_libtype, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 500
@@ -90,7 +88,7 @@ def run(ctx, name: str, sub: str, parsed):
     # Every flag that shaped this answer is carried into the follow-up, so
     # "look further back" means further back through *these* rows rather than
     # through the album default the bare command would fall back to.
-    carried = f"--type {libtype}" + (f" --fields {shlex.quote(chosen)}" if chosen else "")
+    carried = f"--type {libtype}{fields_flag(chosen)}"
     lines = [
         f"Run `plex-axi {libtype} <key>` for what a row omits: when it was last played, "
         "its tags, and the durable guid",

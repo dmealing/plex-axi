@@ -52,6 +52,10 @@ MAX_DEPTH = 3
 #: render of it is as long as the library is large.
 MAX_CHILDREN = 20
 
+#: The deepest `--depth` a caller may ask for. `_parse_depth` refuses past it and
+#: the depth hint only offers an expansion while the render is below it.
+DEPTH_CEILING = 8
+
 COMMAND = Command(
     name="api",
     summary="Make an authenticated GET to any Plex API path",
@@ -129,10 +133,10 @@ def run(ctx, name: str, sub: str, parsed):
     # Each escape hatch is offered only when this answer actually needed it.
     again = _invocation(path, query)
     lines = []
-    if seen.depth and depth < 8:
+    if seen.depth and depth < DEPTH_CEILING:
+        deeper = min(depth + 2, DEPTH_CEILING)
         lines.append(
-            f"Run `{again} --depth {min(depth + 2, 8)}` to expand the elements summarised as "
-            "`_children`"
+            f"Run `{again} --depth {deeper}` to expand the elements summarised as `_children`"
         )
     if seen.size:
         lines.append(f"Run `{again} --full` for every child and every value whole")
@@ -197,9 +201,9 @@ def _parse_depth(raw) -> int:
             help_lines=[f"Run the command again with `--depth {MAX_DEPTH}`"],
             code="BAD_DEPTH",
         ) from None
-    if not 0 <= value <= 8:
+    if not 0 <= value <= DEPTH_CEILING:
         raise UsageError(
-            f"--depth is between 0 and 8, got {value}",
+            f"--depth is between 0 and {DEPTH_CEILING}, got {value}",
             help_lines=[f"Run the command again with `--depth {MAX_DEPTH}`"],
             code="BAD_DEPTH",
         )

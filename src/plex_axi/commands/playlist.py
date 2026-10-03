@@ -29,8 +29,6 @@ exercise before they were a Plex question.
 
 from __future__ import annotations
 
-import shlex
-
 from axi_toolkit.plex.ids import media_id_for, validate_rating_key
 
 from .. import writes
@@ -39,7 +37,7 @@ from ..errors import AxiError, UsageError
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import more_hint, parse_limit, project, select_fields
+from ._common import fields_flag, more_hint, parse_limit, project, select_fields
 
 #: The one playlist type this tool will look at. Passed on every listing, which
 #: is the guard the rest of the landscape leaves out.
@@ -47,6 +45,11 @@ AUDIO = "audio"
 
 DEFAULT_LIMIT = 100
 DEFAULT_ITEM_LIMIT = 50
+
+#: The `--limit` ceilings of the two list views. `parse_limit` refuses past them
+#: and the reveal hints quote them, so both read the same number.
+MAX_LIMIT = 1000
+MAX_ITEM_LIMIT = 500
 
 #: Every column a listing row can carry, and the four it carries by default.
 #: ``smart`` is the default's fourth because it decides what a caller can do
@@ -155,7 +158,7 @@ def run(ctx, name: str, sub: str, parsed):
 
 
 def _list(ctx, parsed):
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=1000)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=MAX_LIMIT)
     chosen = parsed.get("fields")
     fields = select_fields(chosen, PLAYLIST_FIELDS, PLAYLIST_DEFAULT_FIELDS)
     server = ctx.server()
@@ -190,9 +193,9 @@ def _list(ctx, parsed):
         "Run `plex-axi playlist add '<title>' --key <rating_key>` to preview an addition",
     ]
     if len(shown) < len(playlists):
-        carried = f" --fields {shlex.quote(chosen)}" if chosen else ""
+        carried = fields_flag(chosen)
         help_lines.append(
-            more_hint(f"plex-axi playlist list{carried}", len(playlists), 1000, "playlists")
+            more_hint(f"plex-axi playlist list{carried}", len(playlists), MAX_LIMIT, "playlists")
         )
     doc["help"] = HelpBlock(help_lines)
     return doc
@@ -200,7 +203,7 @@ def _list(ctx, parsed):
 
 def _show(ctx, parsed):
     title = parsed.positionals[0]
-    limit = parse_limit(parsed.get("limit"), default=DEFAULT_ITEM_LIMIT)
+    limit = parse_limit(parsed.get("limit"), default=DEFAULT_ITEM_LIMIT, maximum=MAX_ITEM_LIMIT)
     server = ctx.server()
     playlist = _resolve(server, title)
     items = _items(playlist)
@@ -264,12 +267,12 @@ def _show(ctx, parsed):
         "removing one",
     ]
     if len(rows) < len(tracks):
-        carried = f" --fields {shlex.quote(chosen)}" if chosen else ""
+        carried = fields_flag(chosen)
         help_lines.append(
             more_hint(
                 f"plex-axi playlist show {int(playlist.ratingKey)}{carried}",
                 len(tracks),
-                500,
+                MAX_ITEM_LIMIT,
                 "tracks",
             )
         )
@@ -296,20 +299,17 @@ def _create(ctx, title, keys, parsed):
                 held,
                 f"already exists and holds all {len(keys)} requested item(s) (no-op)",
             )
+        lines = []
+        if not existing.smart:
+            key_flags = " ".join(f"--key {key}" for key in missing)
+            lines.append(
+                f"Run `plex-axi playlist add '{existing.title}' {key_flags} --write` to add "
+                "the missing items to it"
+            )
+        lines.append(f"Run `plex-axi playlist show '{existing.title}'` to see what it holds")
         raise AxiError(
             f"an audio playlist called {existing.title!r} already exists on this server",
-            help_lines=[
-                *(
-                    [
-                        f"Run `plex-axi playlist add '{existing.title}' "
-                        f"{' '.join(f'--key {key}' for key in missing)} --write` to add the "
-                        "missing items to it"
-                    ]
-                    if not existing.smart
-                    else []
-                ),
-                f"Run `plex-axi playlist show '{existing.title}'` to see what it holds",
-            ],
+            help_lines=lines,
             code="PLAYLIST_EXISTS",
         )
 
