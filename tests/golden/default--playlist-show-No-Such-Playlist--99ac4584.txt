@@ -1,0 +1,10 @@
+$ plex-axi playlist show 'No Such Playlist'
+environment: default
+exit: 1
+
+error: no audio playlist called 'No Such Playlist' on this server
+code: NO_SUCH_PLAYLIST
+help[3]:
+  audio playlists (key and title): 501 'Example Playlist', 502 'Example Smart Playlist'
+  Titles match exactly; pass one of those, or the key beside it, rather than a description of it
+  Run `plex-axi playlist create 'No Such Playlist' --key <rating_key> --write` to make it

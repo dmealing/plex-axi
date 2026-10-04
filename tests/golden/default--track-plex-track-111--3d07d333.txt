@@ -1,0 +1,9 @@
+$ plex-axi track plex://track/111
+environment: default
+exit: 2
+
+error: "'plex://track/111' is a media id, not a rating key"
+code: MEDIA_ID_NOT_RATING_KEY
+help[2]:
+  Pass the number after the last slash, which is what `rating_key:` reports
+  Run `plex-axi track <rating_key>`

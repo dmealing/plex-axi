@@ -1,0 +1,9 @@
+$ plex-axi rate 111 --stars 4 --clear
+environment: default
+exit: 2
+
+error: "--stars and --clear ask for different things; pass one"
+code: CONFLICTING_FLAGS
+help[2]:
+  Run `plex-axi rate 111 --stars 4 --write` to set a rating
+  Run `plex-axi rate 111 --clear --write` to remove one

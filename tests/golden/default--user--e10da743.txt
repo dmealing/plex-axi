@@ -1,0 +1,9 @@
+$ plex-axi --user
+environment: default
+exit: 2
+
+error: "--user needs a Plex username"
+code: BAD_USER
+help[2]:
+  Run `plex-axi --user '<plex-username>' <command>`
+  `--user` is admin-only and needs a plex.tv round-trip; every other flag here works against the local server alone

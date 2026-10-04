@@ -1,0 +1,8 @@
+$ plex-axi playlist create '' --key 111
+environment: default
+exit: 2
+
+error: "a playlist needs a title, and this one is empty"
+code: EMPTY_TITLE
+help[1]:
+  Run `plex-axi playlist create '<title>' --key <rating_key>` to preview one

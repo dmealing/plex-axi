@@ -1,0 +1,9 @@
+$ plex-axi api /no/such/path
+environment: default
+exit: 1
+
+error: the path /no/such/path was not found on this server
+code: NOT_FOUND
+help[2]:
+  Run `plex-axi api /` to confirm the server answers at all
+  Run `plex-axi api /library/sections` to list the paths below a section

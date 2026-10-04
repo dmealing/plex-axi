@@ -1,0 +1,8 @@
+$ plex-axi search --artist x
+environment: bad-url
+exit: 1
+
+error: "PLEX_URL must use http or https, got 'ftp'"
+code: BAD_URL
+help[1]:
+  Set PLEX_URL to your server's local address, e.g. export PLEX_URL=http://plex.example.com:32400

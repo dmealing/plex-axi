@@ -1,0 +1,10 @@
+$ plex-axi doctor
+environment: unconfigured
+exit: 1
+
+healthy: false
+checks[1]{check,status,detail}:
+  environment,fail,PLEX_URL and PLEX_TOKEN not set
+help[2]:
+  Set PLEX_URL to your server's local address, e.g. export PLEX_URL=http://plex.example.com:32400
+  Set PLEX_TOKEN to a Plex access token; see https://support.plex.tv/articles/204059436

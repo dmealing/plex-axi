@@ -1,0 +1,9 @@
+$ plex-axi search --artist x --limit 501
+environment: default
+exit: 2
+
+error: "--limit is capped at 500, got 501"
+code: BAD_LIMIT
+help[2]:
+  Run the command again with `--limit 500`
+  Narrow the search instead; a list an agent cannot read is not a result

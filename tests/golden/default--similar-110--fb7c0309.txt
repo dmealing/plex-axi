@@ -1,0 +1,8 @@
+$ plex-axi similar 110
+environment: default
+exit: 1
+
+error: "110 is an album, and sonic similarity is per track"
+code: WRONG_ITEM_TYPE
+help[1]:
+  Run `plex-axi search --artist '<name>' --type track` to find a track key

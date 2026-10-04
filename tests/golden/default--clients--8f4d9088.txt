@@ -1,0 +1,9 @@
+$ plex-axi clients
+environment: default
+exit: 2
+
+error: "plex-axi has no `clients` command: clients and speakers are deliberately out of scope"
+code: OUT_OF_SCOPE
+help[2]:
+  This tool reads a music library and stops at a media id; it never dispatches playback
+  commands: search, pick, genres, moods, styles, track, album, artist, similar, recent, playlist, rate, sessions, api, doctor, setup, skill, context

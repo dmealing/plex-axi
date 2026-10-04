@@ -1,0 +1,9 @@
+$ plex-axi search --artist x --sort nosuch:desc
+environment: default
+exit: 2
+
+error: this server does not offer that sort for a track
+code: UNKNOWN_SORT_FIELD
+help[2]:
+  sort fields for track: titleSort, addedAt, userRating, random, guid, id, index, summary, tagline, updatedAt, absoluteIndex
+  Run the same search with `--sort addedAt:desc` for newest first

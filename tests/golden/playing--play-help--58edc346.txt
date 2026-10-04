@@ -1,0 +1,27 @@
+$ plex-axi play --help
+environment: playing
+exit: 0
+
+usage: plex-axi play <rating_key> [--client <title>] [--now]
+description: Start a track, album, artist or audio playlist on one Plex client
+access:
+  dispatching - starts playback on a client; needs PLEX_AXI_ALLOW_PLAYBACK=true in the environment, and without --now it names the target and sends nothing
+flags{play}:
+  --client <title-or-machine-id> (matched exactly, case-folded; `plex-axi clients` lists both), --now (start it; without this the command names the target and sends nothing)
+note:
+  the rating key is the one `search`, `pick` and `playlist` print; a guid is refused with the reason, exactly as everywhere else
+note:
+  a playlist is played as a playlist: `playlist list` prints its rating key beside its media_id, and either resolves here
+note:
+  the target is never guessed: with several available `--client` is required, and with exactly one the answer says which it was and that it was the only candidate
+note:
+  starting playback is all this does -- there is no pause, stop, volume, next or queue command, and there is not going to be one
+note:
+  a `sonos` target is reached through Plex's cloud rather than through this server, so anything watching the server for a session will lag the command
+note:
+  this command exists only while PLEX_AXI_ALLOW_PLAYBACK=true
+examples:
+  plex-axi clients
+  plex-axi play 12345
+  plex-axi play 12345 --client 'Example Client'
+  plex-axi play 12345 --client 'Example Client' --now

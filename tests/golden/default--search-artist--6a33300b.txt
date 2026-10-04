@@ -1,0 +1,9 @@
+$ plex-axi search --artist ' , '
+environment: default
+exit: 2
+
+error: "--artist needs some text to search for, got ' , '"
+code: EMPTY_VALUE
+help[2]:
+  A comma separates alternatives on the server, so a value that is only commas and spaces would match every item in the library
+  Run the command again with `--artist '<text>'`

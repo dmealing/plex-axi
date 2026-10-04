@@ -1,0 +1,9 @@
+$ plex-axi play 900
+environment: playing
+exit: 1
+
+error: "900 is a movie on this server, and plex-axi plays music only"
+code: WRONG_ITEM_TYPE
+help[2]:
+  playable kinds: track, album, artist, playlist
+  Run `plex-axi search --artist '<name>'` to find a music rating key

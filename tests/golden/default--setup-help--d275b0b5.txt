@@ -1,0 +1,32 @@
+$ plex-axi setup --help
+environment: default
+exit: 0
+
+usage: plex-axi setup <hooks|status|remove> [--home <path>]
+description: Install, check or remove the session hooks that give an agent ambient context
+access:
+  read-only - this command cannot change anything on the server
+subcommands[3]:
+  hooks, status, remove
+flags{hooks}:
+  --home <path> (act under a different home directory)
+flags{status}:
+  --home <path> (act under a different home directory)
+flags{remove}:
+  --home <path> (act under a different home directory)
+note:
+  hooks give ambient context every session; the skill loads on demand instead -- install either, with `plex-axi setup hooks` or `plex-axi skill`
+note:
+  the session-start hook runs `plex-axi context`, which reads the environment, the command table and the local session record: no connection, no token, no server address, and it exits 0 on a machine with no server
+note:
+  Claude Code also gets a session-end hook, `plex-axi context end`, which records which plex-axi commands the session ran -- names and counts, never arguments -- so the next session's context in that directory can say so; Codex and OpenCode have no session-end event to run it from
+note:
+  writes four files under your home directory and nothing on the Plex server: .claude/settings.json, .codex/hooks.json, .codex/config.toml and .config/opencode/plugins/
+note:
+  installation is idempotent and repairs the recorded path after a reinstall or a move; another tool's hooks are left alone and an unmanaged OpenCode plugin is never overwritten
+note:
+  `remove` takes out only the entries this tool marked as its own, and leaves Codex's `[features] hooks = true` on because other tools' Codex hooks depend on it
+examples:
+  plex-axi setup hooks
+  plex-axi setup status
+  plex-axi setup remove

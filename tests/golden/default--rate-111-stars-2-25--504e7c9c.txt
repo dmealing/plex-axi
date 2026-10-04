@@ -1,0 +1,8 @@
+$ plex-axi rate 111 --stars 2.25
+environment: default
+exit: 2
+
+error: "--stars is in half stars, got 2.25"
+code: BAD_RATING
+help[1]:
+  Run `plex-axi rate 111 --stars 2` for the nearest half star

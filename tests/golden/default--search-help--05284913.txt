@@ -1,0 +1,9 @@
+$ plex-axi search help
+environment: default
+exit: 2
+
+error: unexpected argument 'help' for `search`
+code: UNEXPECTED_ARGUMENT
+help[2]:
+  `search` takes its values as flags, not as bare words; a value with a space in it needs quoting
+  Run `plex-axi search --help` for the flags it takes

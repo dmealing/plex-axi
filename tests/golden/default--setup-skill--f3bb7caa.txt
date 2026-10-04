@@ -1,0 +1,10 @@
+$ plex-axi setup skill
+environment: default
+exit: 2
+
+error: unknown subcommand 'skill' for `setup`
+code: UNKNOWN_SUBCOMMAND
+help[3]:
+  subcommands: hooks, status, remove
+  `skill` is a command of its own: run `plex-axi skill`
+  Run `plex-axi setup --help` for what each takes

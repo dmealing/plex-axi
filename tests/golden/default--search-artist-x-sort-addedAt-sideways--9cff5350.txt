@@ -1,0 +1,9 @@
+$ plex-axi search --artist x --sort addedAt:sideways
+environment: default
+exit: 2
+
+error: "--sort direction must be asc or desc, got 'sideways'"
+code: BAD_SORT
+help[2]:
+  Run the command again with `--sort addedAt:desc`
+  The field half is checked against this server; only the direction is fixed

@@ -1,0 +1,9 @@
+$ plex-axi track 999999
+environment: default
+exit: 1
+
+error: track 999999 was not found on this server
+code: NOT_FOUND
+help[2]:
+  Run `plex-axi search --track '<title>'` to find this server's rating key
+  A rating key from another server, or from before a library rebuild, will not resolve here

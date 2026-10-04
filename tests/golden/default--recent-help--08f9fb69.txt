@@ -1,0 +1,17 @@
+$ plex-axi recent --help
+environment: default
+exit: 0
+
+usage: plex-axi recent [--type album] [flags]
+description: List what was added to the music library most recently
+access:
+  read-only - this command cannot change anything on the server
+flags{recent}:
+  --type <track|album|artist> (default album), --limit <n> (default 20), --fields <a,b,c> (replaces the default columns)
+note:
+  scoped to the music library: the server-wide recently-added list spans video too
+note:
+  dates are in this machine's local time zone, not the server's and not UTC
+examples:
+  plex-axi recent
+  plex-axi recent --type track --limit 50

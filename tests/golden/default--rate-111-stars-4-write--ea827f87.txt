@@ -1,0 +1,10 @@
+$ plex-axi rate 111 --stars 4 --write
+environment: default
+exit: 1
+
+error: "refusing to rate 111: writes are disabled (PLEX_AXI_ALLOW_WRITES is not set)"
+code: WRITES_DISABLED
+help[3]:
+  Writes are the operator's decision: ask them to set PLEX_AXI_ALLOW_WRITES=true in the environment this tool is launched from, and do not set it yourself
+  Once they have, the same command with --write applies the change, and without it previews the change
+  Nothing was sent to the server; every other command in plex-axi reads

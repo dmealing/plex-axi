@@ -1,0 +1,10 @@
+$ plex-axi playlist add 502 --key 111
+environment: writable
+exit: 1
+
+error: "cannot add items to 'Example Smart Playlist': it is a smart playlist"
+code: SMART_PLAYLIST
+help[3]:
+  A smart playlist's contents are a saved search that Plex re-runs; its items are a result, not a list, and adding to it is not something the server offers
+  Run `plex-axi playlist show 'Example Smart Playlist'` to see what the search currently returns
+  Run `plex-axi playlist create '<title>' --key <rating_key> --write` for an ordinary playlist you can edit

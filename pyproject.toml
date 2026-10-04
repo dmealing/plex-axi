@@ -61,6 +61,11 @@ dev = [
   # into what GitHub will run rather than matching it as text.
   "pyyaml>=6",
   "ruff>=0.5",
+  # The official TOON decoder (MIT, no dependencies). The encoder is this
+  # project's own, so default output is decoded with somebody else's and
+  # compared with `--json`: an encoder checked only against itself agrees
+  # with itself.
+  "toon-format>=1.0",
 ]
 
 [project.scripts]
@@ -92,5 +97,12 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `-m "not live"`: tests/live/ talks to a real Plex Media Server and is opt-in.
+# The default run, scripts/ci-local.sh and the gate never select it; run it with
+# scripts/live-test.sh, which passes `-m live` and so overrides this.
+addopts = "-q -m 'not live'"
+markers = [
+  "live: needs a real Plex Media Server (PLEX_URL and PLEX_TOKEN); run with scripts/live-test.sh",
+  "live_write: a live test that writes, self-reversing; also needs PLEX_AXI_LIVE_WRITES=1",
+]
 filterwarnings = ["error::DeprecationWarning:plex_axi.*"]

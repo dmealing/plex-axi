@@ -1,0 +1,8 @@
+$ plex-axi tracks
+environment: default
+exit: 2
+
+error: "unknown command: tracks; use `track` instead"
+code: UNKNOWN_COMMAND
+help[1]:
+  Run `plex-axi track --help` for its flags

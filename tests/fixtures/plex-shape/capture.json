@@ -1,0 +1,761 @@
+{
+  "captured": {
+    "date": "2026-10-04",
+    "note": "names only: no attribute value from the library is recorded here",
+    "server_version": "1.42.2"
+  },
+  "elements": {
+    "album.detail": [
+      "addedAt",
+      "art",
+      "guid",
+      "index",
+      "key",
+      "lastViewedAt",
+      "leafCount",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "loudnessAnalysisVersion",
+      "originallyAvailableAt",
+      "parentGuid",
+      "parentKey",
+      "parentRatingKey",
+      "parentThumb",
+      "parentTitle",
+      "rating",
+      "ratingKey",
+      "studio",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "viewCount",
+      "viewedLeafCount",
+      "year"
+    ],
+    "album.detail.children": [
+      "Field",
+      "Format",
+      "Genre",
+      "Guid",
+      "Image",
+      "Mood",
+      "Style",
+      "Subformat",
+      "UltraBlurColors"
+    ],
+    "album.row": [
+      "addedAt",
+      "art",
+      "guid",
+      "index",
+      "key",
+      "lastViewedAt",
+      "loudnessAnalysisVersion",
+      "originallyAvailableAt",
+      "parentGuid",
+      "parentKey",
+      "parentRatingKey",
+      "parentThumb",
+      "parentTitle",
+      "rating",
+      "ratingKey",
+      "skipCount",
+      "studio",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "viewCount",
+      "year"
+    ],
+    "artist.detail": [
+      "addedAt",
+      "art",
+      "guid",
+      "index",
+      "key",
+      "lastViewedAt",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "ratingKey",
+      "skipCount",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "viewCount"
+    ],
+    "artist.detail.children": [
+      "Country",
+      "Field",
+      "Genre",
+      "Guid",
+      "Image",
+      "Location",
+      "Mood",
+      "Similar",
+      "Style",
+      "UltraBlurColors"
+    ],
+    "artist.row": [
+      "addedAt",
+      "art",
+      "guid",
+      "index",
+      "key",
+      "lastRatedAt",
+      "lastViewedAt",
+      "ratingKey",
+      "skipCount",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "userRating",
+      "viewCount"
+    ],
+    "clients.tag": [],
+    "hub": [
+      "context",
+      "hubIdentifier",
+      "more",
+      "size",
+      "style",
+      "title",
+      "type"
+    ],
+    "hub.album": [
+      "addedAt",
+      "art",
+      "guid",
+      "index",
+      "key",
+      "lastViewedAt",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "loudnessAnalysisVersion",
+      "originallyAvailableAt",
+      "parentGuid",
+      "parentKey",
+      "parentRatingKey",
+      "parentThumb",
+      "parentTitle",
+      "rating",
+      "ratingKey",
+      "score",
+      "studio",
+      "summary",
+      "thumb",
+      "title",
+      "type",
+      "updatedAt",
+      "viewCount",
+      "year"
+    ],
+    "hub.album.tag": [
+      "Directory"
+    ],
+    "hub.artist": [
+      "addedAt",
+      "childCount",
+      "guid",
+      "index",
+      "key",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "ratingKey",
+      "score",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt"
+    ],
+    "hub.artist.tag": [
+      "Directory"
+    ],
+    "hub.track": [
+      "addedAt",
+      "art",
+      "duration",
+      "grandparentArt",
+      "grandparentGuid",
+      "grandparentKey",
+      "grandparentRatingKey",
+      "grandparentThumb",
+      "grandparentTitle",
+      "guid",
+      "index",
+      "key",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "parentGuid",
+      "parentIndex",
+      "parentKey",
+      "parentRatingKey",
+      "parentStudio",
+      "parentThumb",
+      "parentTitle",
+      "parentYear",
+      "ratingCount",
+      "ratingKey",
+      "score",
+      "summary",
+      "thumb",
+      "title",
+      "type",
+      "updatedAt"
+    ],
+    "hub.track.tag": [
+      "Track"
+    ],
+    "media": [
+      "audioChannels",
+      "audioCodec",
+      "bitrate",
+      "container",
+      "duration",
+      "hasVoiceActivity",
+      "id"
+    ],
+    "myplex": [
+      "authToken",
+      "mappingError",
+      "mappingState",
+      "privateAddress",
+      "privatePort",
+      "publicAddress",
+      "publicPort",
+      "signInState",
+      "subscriptionActive",
+      "subscriptionFeatures",
+      "subscriptionState",
+      "username"
+    ],
+    "myplex.tag": [
+      "MyPlex"
+    ],
+    "part": [
+      "container",
+      "duration",
+      "file",
+      "hasThumbnail",
+      "id",
+      "key",
+      "size"
+    ],
+    "part.checked": [
+      "accessible",
+      "container",
+      "duration",
+      "exists",
+      "file",
+      "hasThumbnail",
+      "id",
+      "key",
+      "size"
+    ],
+    "playlist": [
+      "addedAt",
+      "composite",
+      "duration",
+      "guid",
+      "icon",
+      "key",
+      "lastViewedAt",
+      "leafCount",
+      "playlistType",
+      "ratingKey",
+      "smart",
+      "summary",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "viewCount"
+    ],
+    "playlist.item": [
+      "addedAt",
+      "art",
+      "duration",
+      "grandparentArt",
+      "grandparentGuid",
+      "grandparentKey",
+      "grandparentRatingKey",
+      "grandparentThumb",
+      "grandparentTitle",
+      "guid",
+      "index",
+      "key",
+      "lastRatedAt",
+      "lastViewedAt",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "originalTitle",
+      "parentGuid",
+      "parentIndex",
+      "parentKey",
+      "parentRatingKey",
+      "parentStudio",
+      "parentThumb",
+      "parentTitle",
+      "parentYear",
+      "playlistItemID",
+      "ratingCount",
+      "ratingKey",
+      "skipCount",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "userRating",
+      "viewCount"
+    ],
+    "playlist.items.container": [
+      "composite",
+      "duration",
+      "leafCount",
+      "offset",
+      "playlistType",
+      "ratingKey",
+      "size",
+      "smart",
+      "title",
+      "totalSize"
+    ],
+    "root": [
+      "allowCameraUpload",
+      "allowChannelAccess",
+      "allowMediaDeletion",
+      "allowSharing",
+      "allowSync",
+      "allowTuners",
+      "apiVersion",
+      "backgroundProcessing",
+      "certificate",
+      "companionProxy",
+      "countryCode",
+      "diagnostics",
+      "eventStream",
+      "friendlyName",
+      "hubSearch",
+      "itemClusters",
+      "livetv",
+      "machineIdentifier",
+      "mediaProviders",
+      "multiuser",
+      "musicAnalysis",
+      "myPlex",
+      "myPlexMappingState",
+      "myPlexSigninState",
+      "myPlexSubscription",
+      "myPlexUsername",
+      "offlineTranscode",
+      "ownerFeatures",
+      "platform",
+      "platformVersion",
+      "pluginHost",
+      "pushNotifications",
+      "readOnlyLibraries",
+      "size",
+      "streamingBrainABRVersion",
+      "streamingBrainVersion",
+      "sync",
+      "transcoderActiveVideoSessions",
+      "transcoderAudio",
+      "transcoderLyrics",
+      "transcoderPhoto",
+      "transcoderSubtitles",
+      "transcoderVideo",
+      "transcoderVideoBitrates",
+      "transcoderVideoQualities",
+      "transcoderVideoResolutions",
+      "updatedAt",
+      "updater",
+      "version",
+      "voiceSearch"
+    ],
+    "search.container": [
+      "allowSync",
+      "art",
+      "identifier",
+      "librarySectionID",
+      "librarySectionTitle",
+      "librarySectionUUID",
+      "mediaTagPrefix",
+      "mediaTagVersion",
+      "nocache",
+      "offset",
+      "size",
+      "thumb",
+      "title1",
+      "title2",
+      "totalSize",
+      "viewGroup",
+      "viewMode"
+    ],
+    "section": [
+      "agent",
+      "allowSync",
+      "content",
+      "contentChangedAt",
+      "createdAt",
+      "directory",
+      "filters",
+      "hidden",
+      "key",
+      "language",
+      "metadataAgentProviderGroupId",
+      "refreshing",
+      "scannedAt",
+      "scanner",
+      "title",
+      "type",
+      "updatedAt",
+      "uuid"
+    ],
+    "setting": [
+      "advanced",
+      "default",
+      "enumValues",
+      "group",
+      "hidden",
+      "id",
+      "label",
+      "summary",
+      "type",
+      "value"
+    ],
+    "setting.ids": [
+      "albumPosters",
+      "albumReviews",
+      "albumSort",
+      "artistBios",
+      "augmentWithSharedContent",
+      "concerts",
+      "enableTrackOffsets",
+      "genres",
+      "hidden",
+      "musicAnalysis",
+      "popularTracks",
+      "respectTags",
+      "useExternalLyrics"
+    ],
+    "track.detail": [
+      "addedAt",
+      "art",
+      "duration",
+      "grandparentArt",
+      "grandparentGuid",
+      "grandparentKey",
+      "grandparentRatingKey",
+      "grandparentThumb",
+      "grandparentTitle",
+      "guid",
+      "index",
+      "key",
+      "librarySectionID",
+      "librarySectionKey",
+      "librarySectionTitle",
+      "originalTitle",
+      "parentGuid",
+      "parentIndex",
+      "parentKey",
+      "parentRatingKey",
+      "parentStudio",
+      "parentThumb",
+      "parentTitle",
+      "parentYear",
+      "ratingCount",
+      "ratingKey",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt"
+    ],
+    "track.detail.children": [
+      "Genre",
+      "Guid",
+      "Image",
+      "Media",
+      "Mood"
+    ],
+    "track.row": [
+      "addedAt",
+      "art",
+      "duration",
+      "grandparentArt",
+      "grandparentGuid",
+      "grandparentKey",
+      "grandparentRatingKey",
+      "grandparentThumb",
+      "grandparentTitle",
+      "guid",
+      "index",
+      "key",
+      "lastRatedAt",
+      "lastViewedAt",
+      "originalTitle",
+      "parentGuid",
+      "parentIndex",
+      "parentKey",
+      "parentRatingKey",
+      "parentStudio",
+      "parentThumb",
+      "parentTitle",
+      "parentYear",
+      "primaryExtraKey",
+      "ratingCount",
+      "ratingKey",
+      "skipCount",
+      "summary",
+      "thumb",
+      "title",
+      "titleSort",
+      "type",
+      "updatedAt",
+      "userRating",
+      "viewCount"
+    ]
+  },
+  "field_types": {
+    "audioLanguage": [
+      [
+        "=",
+        "is"
+      ],
+      [
+        "!=",
+        "is not"
+      ]
+    ],
+    "boolean": [
+      [
+        "=",
+        "is true"
+      ],
+      [
+        "!=",
+        "is false"
+      ]
+    ],
+    "date": [
+      [
+        "<<=",
+        "is before"
+      ],
+      [
+        ">>=",
+        "is after"
+      ]
+    ],
+    "integer": [
+      [
+        "=",
+        "is"
+      ],
+      [
+        "!=",
+        "is not"
+      ],
+      [
+        ">>=",
+        "is greater than"
+      ],
+      [
+        "<<=",
+        "is less than"
+      ]
+    ],
+    "resolution": [
+      [
+        "=",
+        "is"
+      ]
+    ],
+    "string": [
+      [
+        "=",
+        "contains"
+      ],
+      [
+        "!=",
+        "does not contain"
+      ],
+      [
+        "==",
+        "is"
+      ],
+      [
+        "!==",
+        "is not"
+      ],
+      [
+        "<=",
+        "begins with"
+      ],
+      [
+        ">=",
+        "ends with"
+      ]
+    ],
+    "subtitleLanguage": [
+      [
+        "=",
+        "is"
+      ],
+      [
+        "!=",
+        "is not"
+      ]
+    ],
+    "tag": [
+      [
+        "=",
+        "is"
+      ],
+      [
+        "!=",
+        "is not"
+      ]
+    ]
+  },
+  "types": {
+    "album": {
+      "fields": {
+        "album.addedAt": "date",
+        "album.collection": "tag",
+        "album.decade": "integer",
+        "album.format": "tag",
+        "album.genre": "tag",
+        "album.label": "tag",
+        "album.lastViewedAt": "date",
+        "album.mood": "tag",
+        "album.originallyAvailableAt": "date",
+        "album.rating": "integer",
+        "album.source": "tag",
+        "album.studio": "string",
+        "album.style": "tag",
+        "album.subformat": "tag",
+        "album.title": "string",
+        "album.unmatched": "boolean",
+        "album.userRating": "integer",
+        "album.viewCount": "integer",
+        "album.year": "integer"
+      },
+      "filters": [
+        "collection",
+        "decade",
+        "format",
+        "genre",
+        "label",
+        "mood",
+        "source",
+        "studio",
+        "style",
+        "subformat",
+        "unmatched",
+        "year"
+      ],
+      "sorts": [
+        "addedAt",
+        "artist.titleSort,album.titleSort,album.index,album.id,album.originallyAvailableAt",
+        "lastViewedAt",
+        "originallyAvailableAt",
+        "random",
+        "rating",
+        "titleSort",
+        "userRating",
+        "viewCount"
+      ]
+    },
+    "artist": {
+      "fields": {
+        "artist.addedAt": "date",
+        "artist.collection": "tag",
+        "artist.country": "tag",
+        "artist.genre": "tag",
+        "artist.lastViewedAt": "date",
+        "artist.mood": "tag",
+        "artist.style": "tag",
+        "artist.title": "string",
+        "artist.unmatched": "boolean",
+        "artist.userRating": "integer"
+      },
+      "filters": [
+        "collection",
+        "country",
+        "genre",
+        "mood",
+        "style",
+        "unmatched"
+      ],
+      "sorts": [
+        "addedAt",
+        "lastViewedAt",
+        "random",
+        "titleSort",
+        "userRating",
+        "viewCount"
+      ]
+    },
+    "track": {
+      "fields": {
+        "track.addedAt": "date",
+        "track.genre": "tag",
+        "track.lastRatedAt": "date",
+        "track.lastSkippedAt": "date",
+        "track.lastViewedAt": "date",
+        "track.location": "tag",
+        "track.mediaBitrate": "integer",
+        "track.mediaSize": "integer",
+        "track.mood": "tag",
+        "track.skipCount": "integer",
+        "track.source": "tag",
+        "track.title": "string",
+        "track.trash": "boolean",
+        "track.userRating": "integer",
+        "track.viewCount": "integer"
+      },
+      "filters": [
+        "genre",
+        "location",
+        "mood",
+        "source",
+        "userRating"
+      ],
+      "sorts": [
+        "addedAt",
+        "artist.titleSort,album.titleSort,album.year,track.absoluteIndex,track.index,track.titleSort,track.id",
+        "lastRatedAt",
+        "lastViewedAt",
+        "mediaBitrate",
+        "random",
+        "ratingCount",
+        "titleSort",
+        "userRating",
+        "viewCount"
+      ]
+    }
+  }
+}

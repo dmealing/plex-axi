@@ -1,0 +1,10 @@
+$ plex-axi playlist add 501 --key 900 --write
+environment: writable
+exit: 1
+
+error: "cannot add items to 'Example Playlist': those items are not all the same kind of media"
+code: MIXED_MEDIA_TYPES
+help[3]:
+  Plex holds one media type per playlist, and an audio playlist takes music only
+  Run `plex-axi track <key>` on each of 900 to see which is not music
+  A rating key from a film or photo library resolves here but cannot go in

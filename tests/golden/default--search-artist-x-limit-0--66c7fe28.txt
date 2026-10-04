@@ -1,0 +1,8 @@
+$ plex-axi search --artist x --limit 0
+environment: default
+exit: 2
+
+error: "--limit must be at least 1, got 0"
+code: BAD_LIMIT
+help[1]:
+  Run the command again with `--limit 20`

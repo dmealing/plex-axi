@@ -1,0 +1,8 @@
+$ plex-axi rate 900 --stars 4
+environment: writable
+exit: 1
+
+error: "900 is a movie on this server, and plex-axi rates music only"
+code: WRONG_ITEM_TYPE
+help[1]:
+  Run `plex-axi search --artist '<name>' --type track` to find a music key

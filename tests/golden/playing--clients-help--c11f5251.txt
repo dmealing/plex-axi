@@ -1,0 +1,22 @@
+$ plex-axi clients --help
+environment: playing
+exit: 0
+
+usage: plex-axi clients
+description: List the players this server can start music on
+access:
+  read-only - this command cannot change anything on the server
+flags{clients}:
+  (none)
+note:
+  only targets advertising the `playback` capability are listed; the rest are counted, because a client that cannot play will accept the command and do nothing
+note:
+  a Plex client is visible only while its app is running and on the same network as the server, so this list is a snapshot rather than an inventory
+note:
+  the `sonos` route is consulted only when PLEX_ACCOUNT_TOKEN is set, and the answer says which routes ran
+note:
+  no network address is printed for any target; `--client` takes the title or the machine_id
+note:
+  this command exists only while PLEX_AXI_ALLOW_PLAYBACK=true
+examples:
+  plex-axi clients

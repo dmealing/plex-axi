@@ -1,0 +1,9 @@
+$ plex-axi pick --not-played-since soon
+environment: default
+exit: 2
+
+error: "--not-played-since needs a period like 30d, 6mon or 2y, or a date as YYYY-MM-DD, got 'soon'"
+code: BAD_PERIOD
+help[2]:
+  Run the command again with `--not-played-since 30d`
+  units: s seconds, m minutes, h hours, d days, w weeks, mon months, y years

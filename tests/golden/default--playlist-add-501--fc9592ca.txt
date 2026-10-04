@@ -1,0 +1,9 @@
+$ plex-axi playlist add 501
+environment: default
+exit: 2
+
+error: `playlist add` needs at least one --key
+code: MISSING_KEY
+help[2]:
+  Run `plex-axi playlist add 501 --key <rating_key>`
+  Run `plex-axi search --artist '<name>'` to find rating keys

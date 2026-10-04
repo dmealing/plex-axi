@@ -1,0 +1,8 @@
+$ plex-axi --timeout
+environment: default
+exit: 2
+
+error: "--timeout needs a value"
+code: BAD_TIMEOUT
+help[1]:
+  Run `plex-axi --timeout 60 <command>`

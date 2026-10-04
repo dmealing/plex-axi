@@ -1,0 +1,8 @@
+$ plex-axi playlist show
+environment: default
+exit: 2
+
+error: plex-axi playlist show needs <title-or-key>
+code: MISSING_ARGUMENT
+help[1]:
+  Run `plex-axi playlist show <title-or-key>`

@@ -1,0 +1,17 @@
+$ plex-axi similar --help
+environment: default
+exit: 0
+
+usage: plex-axi similar <rating_key> [flags]
+description: List tracks Plex's analysis finds sonically similar, with distances
+access:
+  read-only - this command cannot change anything on the server
+flags{similar}:
+  --limit <n> (default 20), --max-distance <0.0-1.0> (smaller is closer; the server's own default is 0.25), --fields <a,b,c> (replaces the default columns)
+note:
+  distance is the server's own sonic distance: 0 is identical, larger is further away
+note:
+  a seed with no `analysis` version has not been analysed and can return nothing at all
+examples:
+  plex-axi similar 12345
+  plex-axi similar 12345 --max-distance 0.1 --limit 5

@@ -1,0 +1,9 @@
+$ plex-axi api library/sections
+environment: default
+exit: 2
+
+error: "a Plex API path begins with a slash, got 'library/sections'"
+code: RELATIVE_PATH
+help[2]:
+  Run `plex-axi api /library/sections`
+  Run `plex-axi api /` to see what this server answers at the root

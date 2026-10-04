@@ -1,0 +1,9 @@
+$ plex-axi search --artist x
+environment: bad-token
+exit: 1
+
+error: PLEX_TOKEN contains whitespace or a control character
+code: BAD_TOKEN
+help[2]:
+  A Plex token is a single unbroken string; check for a line break
+  If it was read from a file, strip the trailing newline, e.g. PLEX_TOKEN=$(tr -d '\n' < token.txt)

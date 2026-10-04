@@ -1,0 +1,9 @@
+$ plex-axi api /library/sections/3/refresh
+environment: default
+exit: 2
+
+error: "/library/sections/3/refresh changes something on the server when it is requested, and `api` only reads"
+code: STATE_CHANGING_PATH
+help[2]:
+  Plex acts on a GET at this path: ratings, play counts, scans and commands relayed to a client are all requests of that kind
+  Run `plex-axi rate --help` or `plex-axi playlist --help` for the writes this tool does offer, each gated and previewable

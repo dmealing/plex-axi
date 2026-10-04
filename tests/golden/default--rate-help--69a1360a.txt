@@ -1,0 +1,20 @@
+$ plex-axi rate --help
+environment: default
+exit: 0
+
+usage: plex-axi rate <rating_key|media_id> --stars <0.5-5> [--write]
+description: Set or clear your rating on one track, album or artist
+access:
+  mutating - needs PLEX_AXI_ALLOW_WRITES=true in the environment; without --write it previews the change and sends nothing
+flags{rate}:
+  --stars <0.5-5> (in half stars, the same scale every rating here prints in; `--clear` is how a rating is removed), --clear (remove the rating instead of setting one), --write (apply it; without this the command shows the change and sends nothing)
+note:
+  the rating printed afterwards is read back from the server, not echoed from the request
+note:
+  a rating is per-account state, not library metadata; editing metadata stays out of scope
+note:
+  rating something to the value it already has is a no-op and exits 0
+examples:
+  plex-axi rate 12345 --stars 4
+  plex-axi rate 12345 --stars 4 --write
+  plex-axi rate 12345 --clear --write

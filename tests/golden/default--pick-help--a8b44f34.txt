@@ -1,0 +1,22 @@
+$ plex-axi pick --help
+environment: default
+exit: 0
+
+usage: plex-axi pick [--rated-min <stars>] [--genre <name>] [flags]
+description: Choose tracks to play now, filtered and shuffled by the server
+access:
+  read-only - this command cannot change anything on the server
+flags{pick}:
+  --rated-min <stars> (0-5 stars, the scale ratings print in; 0 filters nothing, so `--rated-min 0.5` is what asks for the rated ones), --genre <name> (run `plex-axi genres` for this library's list), --not-played-since <period> (e.g. 30d, 6mon, 2y; never-played tracks count as well, and the result says so if this server cannot include them), --exclude-live (drop pressings Plex tags Compilation or Live), --limit <n> (default 10, how many to pick), --fields <a,b,c> (replaces the default columns; see `plex-axi search --help`)
+note:
+  every filter is a Plex predicate evaluated server-side; anything this server does not offer is reported under `unapplied`, never applied client-side
+note:
+  the shuffle is the server's `sort=random` over the whole match set, not a shuffle of one page
+note:
+  identical titles are collapsed with Plex's own `group=title`, so one song does not fill the list from three pressings; with `--not-played-since` the row shown for a title may be a different pressing from the one that matched, and `pressings` says when that happened
+note:
+  ratings are stars (0-5) in and out, so a rating in a result can be passed back
+examples:
+  plex-axi pick
+  plex-axi pick --rated-min 4 --limit 20
+  plex-axi pick --genre Jazz --not-played-since 30d --exclude-live

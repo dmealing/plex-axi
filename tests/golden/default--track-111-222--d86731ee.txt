@@ -1,0 +1,8 @@
+$ plex-axi track 111 222
+environment: default
+exit: 2
+
+error: unexpected argument '222' for `track`
+code: UNEXPECTED_ARGUMENT
+help[1]:
+  Run `plex-axi track <rating_key>`

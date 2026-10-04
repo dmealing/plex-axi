@@ -1,0 +1,19 @@
+$ plex-axi doctor --help
+environment: default
+exit: 0
+
+usage: plex-axi doctor
+description: Check the environment, the server, the music library and its filters
+access:
+  read-only - this command cannot change anything on the server
+flags{doctor}:
+  (none)
+note:
+  exits non-zero when any check fails, so it works as a CI or hook gate
+note:
+  `sonic analysis` is reported and never fails the run: a library with it off is healthy, and `similar` simply has nothing to return
+note:
+  a rejected token is reported as invalid or expired separately, because Plex answers 401 to both and only the response text tells them apart
+examples:
+  plex-axi doctor
+  plex-axi --section 'Example Music' doctor

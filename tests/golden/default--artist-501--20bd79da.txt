@@ -1,0 +1,8 @@
+$ plex-axi artist 501
+environment: default
+exit: 1
+
+error: "501 is a playlist on this server, not an artist"
+code: WRONG_ITEM_TYPE
+help[1]:
+  Run `plex-axi search --artist '<name>' --type artist` to find an artist

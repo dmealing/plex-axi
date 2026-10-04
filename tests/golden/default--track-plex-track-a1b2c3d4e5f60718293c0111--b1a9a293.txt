@@ -1,0 +1,9 @@
+$ plex-axi track plex://track/a1b2c3d4e5f60718293c0111
+environment: default
+exit: 2
+
+error: "'plex://track/a1b2c3d4e5f60718293c0111' is a guid, not a rating key"
+code: GUID_NOT_RATING_KEY
+help[2]:
+  A guid names an item in Plex's catalogue; a rating key names a row on this server
+  Run `plex-axi search --track '<title>'` to get this server's rating key
