@@ -1,0 +1,21 @@
+$ plex-axi album --help
+environment: default
+exit: 0
+
+usage: plex-axi album <rating_key|media_id> [flags]
+description: Show one album in full: the fields a list row leaves out
+access:
+  read-only - this command cannot change anything on the server
+flags{album}:
+  --full (print the whole summary instead of a preview)
+note:
+  rating is in stars (0-5), the same scale as `search --rated-min`
+note:
+  takes the `key` or the `media_id` a row prints; dates are in this machine's local time zone
+note:
+  rating_key is local to this server; guid is the identifier that survives a re-match
+note:
+  run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports
+examples:
+  plex-axi album 12345
+  plex-axi search --artist 'Example Artist' --type album

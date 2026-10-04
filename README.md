@@ -38,8 +38,8 @@ $ plex-axi search --artist "Example Artist" --track "Example Track"
 count: 1 of 1 total
 grouped: title
 filters[2]{field,operator,value}:
-  artist.title,contains,Example Artist
-  track.title,contains,Example Track
+  artist.title or track.originalTitle,has words beginning,Example Artist
+  track.title,has words beginning,Example Track
 tracks[1]{key,media_id,title,artist}:
   111,"plex://<machineIdentifier>/111",Example Track,Example Artist
 item:
@@ -194,8 +194,20 @@ vendored into the suite and every one of them has to pass.
   back to `--rated-min`.
 - **Genres and styles live on the artist**, not the track — that is how Plex tags a music library.
   `plex-axi genres` prints the exact strings the server will accept; pass one of those, not a synonym.
+- **A name matches by word, not by substring.** Each word typed has to *begin* a word of the title,
+  in the order typed: `exa tra` finds "Example Track" and `xample` finds nothing. That is the
+  server's rule, and the echoed filter says `has words beginning` rather than the server's own
+  label, "contains". Punctuation is searched both ways — an apostrophe, quote, hyphen or ellipsis
+  typed in ASCII also matches its typographic form, which is what most catalogue titles carry — and
+  a comma in a value is dropped, because the server reads it as OR.
+- **`--artist` on a track search also matches the track's performer**, so a performer who appears
+  only on compilations — where the album artist is "Various Artists" — is found by name.
 - **A zero result is an answer.** It names the filters that matched nothing and the command that
-  lists the real vocabulary.
+  lists the real vocabulary. When a name matched nothing, the nearest real titles are listed under
+  `nearest`, from the server's own free-text search — the one place it folds accents — so the next
+  search is on a string the library actually holds.
+- **Anything a row prints as an identifier is accepted back.** Every command that takes a rating
+  key takes the `media_id` from the same row too, once it has checked the id names this server.
 - **Every row carries a `media_id`.** That is what the tool is for: a labelled identifier a media
   consumer accepts, on every row of every list, so nothing needs a follow-up call to be usable.
 - **`--fields` replaces the default columns**, it does not add to them. The default set is a
@@ -218,7 +230,7 @@ vendored into the suite and every one of them has to pass.
 
 | Command | What it changes |
 |---|---|
-| `rate <rating_key> --stars <0-5>` | your rating on one track, album or artist — per account, not library metadata |
+| `rate <rating_key> --stars <0.5-5>` | your rating on one track, album or artist — per account, not library metadata |
 | `playlist create\|add\|remove` | the contents of an audio playlist |
 
 Both are behind the same two-part gate, and the order matters:
@@ -237,13 +249,21 @@ $ plex-axi rate 12345 --stars 5
 error: "refusing to rate 12345: writes are disabled (PLEX_AXI_ALLOW_WRITES is not set)"
 code: WRITES_DISABLED
 help[3]:
-  Run `export PLEX_AXI_ALLOW_WRITES=true`, then run the command again with --write
+  Writes are the operator's decision: ask them to set PLEX_AXI_ALLOW_WRITES=true in the environment this tool is launched from, and do not set it yourself
   ...
 ```
 
-`plex-axi api` stays **GET only** whatever the gate says. A raw path that could POST would make the
-gate meaningless — anything a typed command refused could be reissued by hand — and several Plex
-write endpoints are destructive.
+The refusal names the variable for the operator and deliberately prints no command that sets it:
+a line beginning `Run` is one an agent executes, and an agent with a shell could open the gate it
+had just been refused by.
+
+`plex-axi api` stays **GET only** whatever the gate says, and a GET is not enough on its own. A raw
+path that could POST would make the gate meaningless — anything a typed command refused could be
+reissued by hand — and Plex also *acts* on a plain GET at several paths: `/:/rate` sets a rating,
+`/library/sections/<n>/refresh` starts a scan, a `/player/` path relays a command to a client. So
+`api` refuses those paths by name as well as refusing the write methods, before any request is
+sent, with either gate open or closed. It also prints `<redacted>` for any attribute the server
+names as a credential: `/myplex/account` carries the owner's plex.tv account token.
 
 There is still no metadata editing and no server administration, and no transport control: `play`
 starts one thing on one target and nothing in this tool can pause, skip or stop it.
@@ -414,7 +434,7 @@ $ plex-axi context
 bin: ~/.local/bin/plex-axi
 description: "Structured, per-field music search and diagnosis against a Plex Media Server. Prefer this over raw curl or a free-text search for anything about a music library."
 config: PLEX_URL and PLEX_TOKEN are set
-writes: disabled (export PLEX_AXI_ALLOW_WRITES=true to enable)
+writes: disabled (the operator enables them with PLEX_AXI_ALLOW_WRITES=true)
 search: "one flag per field -- --artist, --album, --track, --genre, --mood, --style, --year, --rated-min -- because Plex matches them separately; --query searches one unstructured string and is the fallback, not the default"
 media_id: "every row carries one, spelled plex://<machine-id>/<rating-key>, and that is where this tool ends: it leaves dispatch to whatever owns the speakers"
 vocabulary: "--genre and --style match the artist, --mood the type being searched; run `plex-axi genres` (or `moods`, `styles`) for the exact strings this server will accept"
@@ -460,6 +480,34 @@ the commands it documents.
   which is asserted by a test: that surface resolves speakers by name and dispatches to them, and
   keeping it out of the process is what stops "play one thing on one named target" growing into a
   control plane by accident.
+- **How a typed name is matched, and why it is more than one predicate.** Measured against a real
+  server, Plex's title filter does three things its own label ("contains") does not say: it splits
+  a value on commas into alternatives, and an empty alternative matches everything; it matches word
+  prefixes in order, not substrings; and it folds nothing — an ASCII apostrophe does not match the
+  typographic one most catalogue titles carry, and an unaccented letter does not match an accented
+  one. Roughly one track in sixteen on an ordinary library has typographic punctuation, so a name
+  typed the way anybody types it missed, and the recovery hint looped between two zero results.
+  The design, in four parts:
+  1. *Clean the value.* Commas become spaces and whitespace is collapsed; a value with nothing left
+     is refused before the request, because it would match the whole library.
+  2. *Send each punctuation spelling.* A value holding `'`, `"`, `-` or `...` is sent as typed and
+     in its typographic spellings, as alternatives in one predicate — the comma-OR, used on purpose.
+     At most four, and a value with no punctuation costs nothing.
+  3. *On a track search, `--artist` is the album artist OR the performer.* A compilation track's
+     album artist is "Various Artists", so the performer field is ORed in, server-side, in one
+     parenthesised group. The server accepts that field and does not advertise it, so the rows are
+     checked: if not one of them carries the name, the field did not run, the search is repeated on
+     the album artist alone, and the result says so.
+  4. *On zero results, ask the server what was meant.* Accents cannot be expanded into spellings,
+     so the server's own free-text search — the one place it folds them — is asked for the nearest
+     titles, which are printed under `nearest` as exact strings to search on. It is offered, never
+     substituted: the free-text search is the weak path this tool exists to replace.
+
+  What this deliberately does not do is filter or re-rank rows in Python. Every predicate is still
+  evaluated by Plex over the whole library, so totals stay exact and `--limit` still means what it
+  says. The rules are pure functions in `plex_axi.matching`, with no server in them. Because this
+  changes what a search returns, it is re-checked against a real server with the live suite's
+  sweeps (`scripts/live-test.sh -k search`) before a release.
 - Development notes, including every sharp edge behind the code, are in [AGENTS.md](AGENTS.md).
 
 ## Contributing
@@ -520,7 +568,34 @@ of this history and nothing here restricts them; the one shape to know is that a
 at a line start is refused, and the same phrase one word further along the line is fine. Run
 `scripts/commitcheck.py --rules` for the grammar rule and its citation.
 
-Tests never need a live Plex server or a real token, and must not start to.
+The default suite never needs a live Plex server or a real token, and must not start to. It runs
+the real client library against a double, and four checks keep that honest: a **shape contract**
+(`tests/test_shape_contract.py`) holds every table and element in the double to a names-only capture
+of a real server, refreshed with `scripts/shape-capture.py --write`; **golden files** under
+`tests/golden/` pin every help, error and refusal text byte for byte (accept a deliberate change
+with `PLEX_AXI_UPDATE_GOLDEN=1 .venv/bin/pytest tests/test_golden.py`); every suggested command is
+parsed with the CLI's own parser and run through a real shell; and default output is decoded with
+the official TOON decoder and compared with `--json`.
+
+**The live suite is opt-in and separate.** `tests/live/` talks to a real server and is deselected
+by default — `pytest`, `scripts/ci-local.sh` and the gate never run it:
+
+```sh
+export PLEX_URL=... PLEX_TOKEN=...       # for the length of one shell session
+scripts/live-test.sh                     # reads and previews only
+scripts/live-test.sh --writes            # also the two self-reversing writes
+```
+
+Every invocation goes through a recording proxy that forwards GETs only, so "reaches the server zero
+times" is observed on the wire; a non-GET is answered 403 unless a write test armed it, and a
+playback request is never forwarded at all. Nothing is played, nothing is scanned, and plex.tv is
+never reached. `--writes` sets and clears one unrated track's rating and creates and deletes one
+playlist named `zz-plex-axi-live-test-<epoch>`, each restored and verified against the raw API.
+Samples are chosen from the live library by *shape* at run time — a title with a typographic
+apostrophe, a title with a comma — so no real name is written into this repository. Captured output
+goes to the git-ignored `.live-output/`; it holds real library content, so never commit or paste
+it. **A change to what the server is asked, or to what is read from its answer, is not finished
+until this has been run.**
 
 ## Changelog
 

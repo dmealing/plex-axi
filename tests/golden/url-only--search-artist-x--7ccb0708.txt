@@ -1,0 +1,10 @@
+$ plex-axi search --artist x
+environment: url-only
+exit: 1
+
+error: PLEX_TOKEN is not set in the environment
+code: NOT_CONFIGURED
+help[3]:
+  Set PLEX_URL to your server's local address, e.g. export PLEX_URL=http://plex.example.com:32400
+  Set PLEX_TOKEN to a Plex access token; see https://support.plex.tv/articles/204059436
+  Run `plex-axi doctor` to verify the connection once both are set

@@ -1,0 +1,9 @@
+$ plex-axi rate 111
+environment: default
+exit: 2
+
+error: rate needs a rating to set
+code: MISSING_RATING
+help[2]:
+  Run `plex-axi rate 111 --stars 4 --write`
+  Run `plex-axi rate 111 --clear --write` to remove the rating instead

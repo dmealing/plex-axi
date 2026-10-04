@@ -101,9 +101,10 @@ def test_the_count_is_exact_and_costs_no_extra_body(server, cli_run):
         r for r in _search_requests(server) if r["headers"].get("X-Plex-Container-Size") == "0"
     ]
     assert probes, "no exact-count probe was made"
-    # Four tracks by that artist, three distinct titles: the total is the total
-    # of the query that was actually run, grouping included.
-    assert result.line("count:") == "count: 2 of 3 total"
+    # Four tracks by that artist and one compilation track they perform on, four
+    # distinct titles: the total is the total of the query that was actually
+    # run, grouping included.
+    assert result.line("count:") == "count: 2 of 4 total"
 
 
 def test_the_minimum_track_row_carries_the_artist_and_stops_at_four(server, cli_run):
@@ -176,12 +177,14 @@ def test_an_empty_result_names_the_filters_and_hands_back_the_vocabulary(server,
 
 
 def test_the_filter_echo_names_the_operator_the_server_actually_applies(server, cli_run):
-    """``=`` means "contains" on a string field and "is" on a tag.
+    """``=`` means "is" on a tag, and on a title it matches word prefixes.
 
     The echo is a promise about the predicate that ran. Label a tag field
     "contains" and an agent will reasonably try substrings and synonyms the
-    server refuses to match -- which is why the label is read from the same
-    operator table the search validated against, not spelled out once.
+    server refuses to match -- which is why a tag's label is read from the same
+    operator table the search validated against. A title is the one exception:
+    the server's own label for it *is* "contains", and that is not what it does
+    (live defect D24), so the tool says what was measured.
     """
     result = cli_run("search", "--genre", "Jazz")
     assert result.code == 0
@@ -189,7 +192,7 @@ def test_the_filter_echo_names_the_operator_the_server_actually_applies(server, 
 
     result = cli_run("search", "--track", "Example Track")
     assert result.code == 0
-    assert "track.title,contains,Example Track" in result.out
+    assert "track.title,has words beginning,Example Track" in result.out
 
     result = cli_run("search", "--rated-min", "4")
     assert result.code == 0

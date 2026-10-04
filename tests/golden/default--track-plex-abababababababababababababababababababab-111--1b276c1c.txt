@@ -1,0 +1,9 @@
+$ plex-axi track plex://abababababababababababababababababababab/111
+environment: default
+exit: 1
+
+error: "'plex://abababababababababababababababababababab/111' is a media id for a different server"
+code: MEDIA_ID_OTHER_SERVER
+help[2]:
+  A rating key is a row number on one server, so that number names something else here
+  Run `plex-axi search --track '<title>'` to find the item on this server

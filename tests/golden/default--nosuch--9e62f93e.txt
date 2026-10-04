@@ -1,0 +1,9 @@
+$ plex-axi nosuch
+environment: default
+exit: 2
+
+error: "unknown command: nosuch"
+code: UNKNOWN_COMMAND
+help[2]:
+  commands: search, pick, genres, moods, styles, track, album, artist, similar, recent, playlist, rate, sessions, api, doctor, setup, skill, context
+  Run `plex-axi --help` for the full reference

@@ -15,3 +15,8 @@ venv/
 # never travels with the repository.
 .claude/
 .codex/
+
+# Captured output of the live suite: real library content, never committed.
+.live-output/
+# Serena's per-checkout project cache.
+.serena/

@@ -31,14 +31,17 @@ from __future__ import annotations
 
 from axi_toolkit.plex.filters import (
     BARE_OPERATOR,
+    FIELD_MAP,
     LIBTYPES,
     assert_server_side,
+    build_filters,
     stars,
 )
 from axi_toolkit.plex.ids import media_id_for
 
-from . import output
+from . import matching, output
 from .errors import AnyAxiError, AxiError, UsageError
+from .matching import TEXT_OPERATOR, loosely_matches, spellings
 from .plex import MUSIC_SECTION_TYPE, translate
 
 #: The `MusicSection` method for each libtype. Named explicitly rather than
@@ -121,6 +124,268 @@ def label_filters(section, described: list, *, libtype: str) -> list:
             continue
         row["operator"] = _operator_title(section, row["field"], libtype=libtype)
     return described
+
+
+def sonic_analysis(section):
+    """Whether this library's sonic analysis is switched on: True, False or None.
+
+    Read from the library's own ``musicAnalysis`` preference. It used to be
+    inferred from the mood vocabulary, on the reasoning that the analysis writes
+    moods -- but the metadata agent writes moods too, so a library with the
+    analysis off and two hundred moods was reported as analysed while `similar`
+    returned nothing for every seed. ``None`` means the server did not say.
+    """
+    try:
+        data = section._server.query(f"/library/sections/{section.key}/prefs")
+    except Exception as exc:
+        output.debug(f"library preferences not read ({type(exc).__name__})")
+        return None
+    for setting in data.iter("Setting"):
+        if setting.attrib.get("id") == "musicAnalysis":
+            return str(setting.attrib.get("value", "")).strip().lower() in ("true", "1")
+    return None
+
+
+# ------------------------------------------------------- the search, planned
+#
+# `axi_toolkit.plex.filters.build_filters` turns each flag into one predicate.
+# What follows is the part that depends on how a *server* reads a title, which
+# was measured rather than read off its metadata -- see :mod:`plex_axi.matching`.
+
+#: The flags whose value is free text matched against a title.
+TEXT_FLAGS = ("artist", "album", "track")
+
+#: Who is playing, as opposed to whose record it is on. A track on a compilation
+#: has "Various Artists" for an album artist, so a search on ``artist.title``
+#: alone cannot find a performer who has no album of their own in the library.
+#:
+#: **The server does not advertise this field, and it honours it anyway** --
+#: measured, the same way the client library's own hand-added fields were. So
+#: :func:`offer_performer` adds it to the section's field table the way the
+#: client library adds ``group``, and :func:`performer_honoured` checks the rows
+#: that came back rather than trusting that it ran: an unadvertised field is
+#: exactly the kind a different build could drop without saying so.
+PERFORMER_FIELD = "track.originalTitle"
+
+
+def clean_text(raw, *, flag: str) -> str:
+    """One typed value, cleaned, or a refusal naming the flag it came from.
+
+    The rule is :func:`plex_axi.matching.clean_text`; this is where it meets a
+    command line, because only here is it known which flag to name.
+    """
+    value = matching.clean_text(raw)
+    if not value:
+        raise UsageError(
+            f"{flag} needs some text to search for, got {str(raw)!r}",
+            help_lines=[
+                "A comma separates alternatives on the server, so a value that is only "
+                "commas and spaces would match every item in the library",
+                f"Run the command again with `{flag} '<text>'`",
+            ],
+            code="EMPTY_VALUE",
+        )
+    return value
+
+
+def parse_year(raw) -> str:
+    """A release year, checked before the server sees it."""
+    value = matching.year(raw)
+    if value is None:
+        raise UsageError(
+            f"--year needs one four-digit year, got {str(raw)!r}",
+            help_lines=[
+                "Run the command again with `--year 1977`",
+                "A range is not a filter this command builds; run one search per year",
+            ],
+            code="BAD_YEAR",
+        )
+    return value
+
+
+class SearchPlan:
+    """One search, decided from the arguments alone: no server in the picture."""
+
+    __slots__ = ("described", "filters", "matching", "note", "performer", "texts", "title")
+
+    def __init__(self):
+        self.filters: dict = {}
+        self.described: list = []
+        self.note = ""
+        #: What was done to the typed text before it was sent, said in the
+        #: result so the echo is not read as the literal request.
+        self.matching: list = []
+        #: Flag name to cleaned value, for the nearest-title fallback.
+        self.texts: dict = {}
+        self.title = None
+        self.performer = False
+
+
+class _Values:
+    """A parsed invocation with some values replaced, for the shared builder."""
+
+    def __init__(self, parsed, replaced: dict):
+        self._parsed = parsed
+        self._replaced = replaced
+
+    def get(self, name, default=None):
+        if name in self._replaced:
+            return self._replaced[name]
+        return self._parsed.get(name, default)
+
+
+def plan_search(parsed, libtype: str, *, performer: bool = True) -> SearchPlan:
+    """Turn the flags into a filter expression, static checks first.
+
+    ``performer=False`` builds the same search on the album artist alone, which
+    is what a server that does not apply :data:`PERFORMER_FIELD` is given.
+    """
+    plan = SearchPlan()
+    replaced: dict = {}
+    for flag in TEXT_FLAGS:
+        raw = parsed.get(flag)
+        if raw in (None, ""):
+            continue
+        replaced[flag] = plan.texts[flag] = clean_text(raw, flag=f"--{flag}")
+        if plan.texts[flag] != str(raw):
+            plan.matching.append(
+                f"--{flag} was searched as {plan.texts[flag]!r}: the server reads a comma as "
+                "OR and a doubled space as an empty word, so both are taken out"
+            )
+    year = parsed.get("year")
+    if year not in (None, ""):
+        replaced["year"] = parse_year(year)
+    query = parsed.get("query")
+    if query not in (None, ""):
+        plan.texts["query"] = clean_text(query, flag="--query")
+
+    filters, plan.described, plan.note = build_filters(_Values(parsed, replaced), libtype)
+    groups: list = []
+    expanded = False
+    for flag in TEXT_FLAGS:
+        if flag not in replaced:
+            continue
+        field = FIELD_MAP[flag](libtype)
+        variants = spellings(replaced[flag])
+        expanded = expanded or len(variants) > 1
+        value = variants if len(variants) > 1 else variants[0]
+        row = next(row for row in plan.described if row["field"] == field)
+        row["operator"] = TEXT_OPERATOR
+        if flag == "artist" and libtype == "track" and performer:
+            del filters[field]
+            groups.append({"or": [{field: value}, {PERFORMER_FIELD: value}]})
+            row["field"] = f"{field} or {PERFORMER_FIELD}"
+            plan.performer = True
+        else:
+            filters[field] = value
+    if "query" in plan.texts:
+        variants = spellings(plan.texts["query"])
+        expanded = expanded or len(variants) > 1
+        plan.title = variants if len(variants) > 1 else variants[0]
+    if expanded:
+        plan.matching.append(
+            "typographic spellings of the apostrophes, quotes, hyphens and ellipses typed "
+            "were searched as well, because the server does not treat them as the same character"
+        )
+    plan.filters = compose(filters, groups)
+    return plan
+
+
+def compose(filters: dict, groups: list) -> dict:
+    """One filter expression from the plain predicates and the parenthesised ones.
+
+    Composed rather than merged, because plexapi refuses a dictionary that mixes
+    a boolean key with any other -- so an OR has to be a sibling of the rest,
+    inside one ``and``, not a key beside them.
+    """
+    if not groups:
+        return filters
+    parts = ([filters] if filters else []) + groups
+    return parts[0] if len(parts) == 1 else {"and": parts}
+
+
+def offer_performer(section) -> None:
+    """Make :data:`PERFORMER_FIELD` a field the client library will build with.
+
+    The same move the client library makes for ``group`` and ``index``: a field
+    the server accepts and does not list is added to the cached field table by
+    hand, so the ordinary builder validates it, resolves its operator and puts
+    it inside the parentheses. Building that part of the URL here instead would
+    be a second filter language to keep in step with the first.
+    """
+    from plexapi.library import FilteringField
+
+    filter_type = section.getFilterType("track")
+    if any(field.key == PERFORMER_FIELD for field in filter_type.fields):
+        return
+    xml = f'<Field key="{PERFORMER_FIELD}" title="Track Artist" type="string"/>'
+    filter_type.fields.append(filter_type._manuallyLoadXML(xml, FilteringField))
+
+
+def performer_honoured(items, typed: str) -> bool:
+    """Whether the rows that came back are ones the name could have matched.
+
+    Checked on the answer, like :func:`_verify_grouping`. A server that ignores
+    a filter field it does not know returns the *unfiltered* set -- a plausible
+    page of the whole library -- and nothing in the request can show that. If
+    not one row on the page has the name in its album artist or its performer,
+    the field did not run.
+    """
+    if not items:
+        return True
+    for item in items:
+        for attribute in ("grandparentTitle", "originalTitle"):
+            if loosely_matches(typed, getattr(item, attribute, "") or ""):
+                return True
+    return False
+
+
+#: Which hub of the server's free-text search answers for each flag.
+_NEAREST_KINDS = {"artist": "artist", "album": "album", "track": "track", "query": "track"}
+
+NEAREST_SHOWN = 3
+
+
+def nearest_titles(section, texts: dict) -> list:
+    """The closest real titles to each name that matched nothing.
+
+    The per-field filter folds nothing: no accents, no typographic punctuation.
+    The server's own free-text search folds both, so it is asked what the caller
+    might have meant, and the titles it holds are handed back as the recovery
+    set -- exact strings to search on, rather than advice to try a different
+    spelling. This never *is* the search: free text is the weak path this tool
+    exists to replace, and its answer is offered, not substituted.
+
+    A failure here is swallowed. The search itself succeeded and found nothing;
+    a recovery aid that could turn that into an error would be worse than none.
+    """
+    rows = []
+    for flag, typed in texts.items():
+        kind = _NEAREST_KINDS[flag]
+        try:
+            data = section._server.query(
+                "/hubs/search",
+                params={"query": typed, "sectionId": section.key, "limit": NEAREST_SHOWN},
+            )
+        except Exception as exc:
+            output.debug(f"nearest-title lookup failed ({type(exc).__name__})")
+            continue
+        for hub in data.iter("Hub"):
+            if hub.attrib.get("type") != kind:
+                continue
+            for child in list(hub)[:NEAREST_SHOWN]:
+                rows.append(
+                    {
+                        "type": kind,
+                        "key": number(child.attrib.get("ratingKey")),
+                        "title": child.attrib.get("title", ""),
+                        "artist": child.attrib.get("grandparentTitle")
+                        or child.attrib.get("parentTitle")
+                        or "",
+                        "_flag": flag,
+                    }
+                )
+    return rows
 
 
 # ------------------------------------------------- what this server will accept
@@ -211,10 +476,29 @@ class SearchResult:
 GROUP_BY_TITLE = "title"
 
 
-def run_search(section, *, libtype, filters=None, title=None, sort=None, limit=20, group=False):
-    """Execute one section-scoped search and return items plus the exact total."""
+def run_search(
+    section,
+    *,
+    libtype,
+    filters=None,
+    title=None,
+    sort=None,
+    limit=20,
+    group=False,
+    performer=False,
+):
+    """Execute one section-scoped search and return items plus the exact total.
+
+    ``performer`` says the expression names :data:`PERFORMER_FIELD`, which the
+    section has to be told about before the client library will build with it.
+    """
     call_filters = dict(filters or {})
     grouped = GROUP_BY_TITLE if group else ""
+    if performer:
+        try:
+            offer_performer(section)
+        except Exception as exc:
+            raise _filter_error(exc, libtype) from None
 
     try:
         result = _execute(section, libtype, call_filters, title, sort, limit, grouped)
@@ -403,9 +687,11 @@ ROW_FIELDS = {
         "key,media_id,title,artist,track_artist,album,year,rating,"
         "duration,plays,skips,index,added,guid",
     ),
+    # No `tracks` here: an album *row* carries no track count -- only its
+    # detail view does -- so the column was null on every real server.
     "album": (
         "key,media_id,title,artist",
-        "key,media_id,title,artist,year,rating,tracks,added,guid",
+        "key,media_id,title,artist,year,rating,added,guid",
     ),
     "artist": (
         "key,media_id,title",
@@ -429,6 +715,19 @@ def _seconds(milliseconds):
     return int(milliseconds) // 1000
 
 
+def track_year(item):
+    """A track's year, which is its album's: the server sends no other.
+
+    A real track element carries ``parentYear`` and no ``year`` at all, and the
+    client library models only ``year`` -- so the value has to be read off the
+    element the object was built from. ``year`` is kept as a fallback for a
+    server that does send one.
+    """
+    data = getattr(item, "_data", None)
+    raw = data.attrib.get("parentYear") if data is not None else None
+    return raw or getattr(item, "parentYear", None) or getattr(item, "year", None)
+
+
 def track_row(item, machine_identifier: str) -> dict:
     """One track, with both artists and nothing that costs a second request."""
     album_artist = getattr(item, "grandparentTitle", "") or ""
@@ -443,7 +742,7 @@ def track_row(item, machine_identifier: str) -> dict:
         # only field that says who is actually playing.
         "track_artist": performer if performer and performer != album_artist else "",
         "album": getattr(item, "parentTitle", "") or "",
-        "year": number(getattr(item, "year", None)),
+        "year": number(track_year(item)),
         "rating": stars(getattr(item, "userRating", None)),
         "duration": _seconds(getattr(item, "duration", None)),
         "plays": int(getattr(item, "viewCount", 0) or 0),
@@ -462,7 +761,6 @@ def album_row(item, machine_identifier: str) -> dict:
         "artist": getattr(item, "parentTitle", "") or "",
         "year": number(getattr(item, "year", None)),
         "rating": stars(getattr(item, "userRating", None)),
-        "tracks": number(getattr(item, "leafCount", None)),
         "added": date_only(getattr(item, "addedAt", None)),
         "guid": getattr(item, "guid", "") or "",
     }

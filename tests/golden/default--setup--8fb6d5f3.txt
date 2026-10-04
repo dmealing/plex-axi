@@ -1,0 +1,9 @@
+$ plex-axi setup
+environment: default
+exit: 2
+
+error: `setup` needs a subcommand
+code: MISSING_SUBCOMMAND
+help[2]:
+  subcommands: hooks, status, remove
+  Run `plex-axi setup --help` for the full reference

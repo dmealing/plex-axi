@@ -134,7 +134,9 @@ sec_skill() {
   ensure_venv
   # THIS checkout's command table, which is why it is the venv's plex-axi and
   # not PATH's.
-  .venv/bin/plex-axi skill --check
+  # With both gates unset: the committed skill is the base installation's, and a
+  # shell that happens to export the playback gate renders a different one.
+  env -u PLEX_AXI_ALLOW_PLAYBACK -u PLEX_AXI_ALLOW_WRITES .venv/bin/plex-axi skill --check
 }
 
 # Each section runs in its own subshell under `set -e`, so its first failing

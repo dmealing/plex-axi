@@ -66,9 +66,13 @@ plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,r
 ```
 
 - each flag is searched on its own Plex field; that is the whole point of this tool
+- a name matches by word: each word typed must begin a word of the title, in the order typed, so `exa tra` finds `Example Track` and `xample` finds nothing
+- apostrophes, quotes, hyphens and ellipses are searched in their typographic spellings too; a comma in a value is dropped, because the server reads it as OR
+- accents are not folded by the server: when a name matches nothing, the nearest real titles are listed under `nearest` to search on exactly
 - ratings are stars (0-5) in and out, so a rating in a result can be passed to --rated-min
+- dates (`added`) are in this machine's local time zone, not the server's and not UTC
 - track fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, added, guid
-- album fields: key, media_id, title, artist, year, rating, tracks, added, guid
+- album fields: key, media_id, title, artist, year, rating, added, guid
 - artist fields: key, media_id, title, rating, added, guid
 - identical track titles are collapsed with Plex's own `group=title`; --no-group shows each
 
@@ -86,7 +90,7 @@ plex-axi pick --genre Jazz --not-played-since 30d --exclude-live
 
 - every filter is a Plex predicate evaluated server-side; anything this server does not offer is reported under `unapplied`, never applied client-side
 - the shuffle is the server's `sort=random` over the whole match set, not a shuffle of one page
-- identical titles are collapsed with Plex's own `group=title`, so one song does not fill the list from three pressings
+- identical titles are collapsed with Plex's own `group=title`, so one song does not fill the list from three pressings; with `--not-played-since` the row shown for a title may be a different pressing from the one that matched, and `pressings` says when that happened
 - ratings are stars (0-5) in and out, so a rating in a result can be passed back
 
 ### `plex-axi genres`
@@ -144,8 +148,9 @@ plex-axi search --artist 'Example Artist' --type track
 
 - analysis is Plex's musicAnalysisVersion; 0 means `similar` has no seed
 - rating is in stars (0-5), the same scale as `search --rated-min`
+- takes the `key` or the `media_id` a row prints; dates are in this machine's local time zone
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
+- run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports
 
 ### `plex-axi album`
 
@@ -159,8 +164,9 @@ plex-axi search --artist 'Example Artist' --type album
 ```
 
 - rating is in stars (0-5), the same scale as `search --rated-min`
+- takes the `key` or the `media_id` a row prints; dates are in this machine's local time zone
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
+- run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports
 
 ### `plex-axi artist`
 
@@ -174,8 +180,9 @@ plex-axi search --artist 'Example Artist' --type artist
 ```
 
 - rating is in stars (0-5), the same scale as `search --rated-min`
+- takes the `key` or the `media_id` a row prints; dates are in this machine's local time zone
 - rating_key is local to this server; guid is the identifier that survives a re-match
-- run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports
+- run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports
 
 ### `plex-axi similar`
 
@@ -203,6 +210,7 @@ plex-axi recent --type track --limit 50
 ```
 
 - scoped to the music library: the server-wide recently-added list spans video too
+- dates are in this machine's local time zone, not the server's and not UTC
 
 ### `plex-axi playlist`
 
@@ -222,7 +230,8 @@ plex-axi playlist create 'Example Playlist' --key 12345 --write
 - only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
 - repeating one of these writes is safe: when the playlist already holds everything a `create` or `add` names, or none of what a `remove` names, the command answers `already: … (no-op)` and exits 0 rather than failing
-- a playlist is named by its `key` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
+- a playlist is named by its `key` or `media_id` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
+- `--key` takes tracks: an album's or an artist's key is refused with the search that lists its tracks, rather than added as one item that is not a song
 - `items` in a listing (`--fields key,title,items`) is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
 - listing columns: key, media_id, title, smart, items, updated
 - nothing here plays a playlist: both `list` and `show` print the playlist's own media_id, and `show` prints one per track as well
@@ -273,7 +282,8 @@ plex-axi api /library/sections/1/all --query type=10 --query limit=5
 
 - the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render
 - write methods are refused here even when writes are enabled: a mutation goes through a typed command that can validate and preview it, and several Plex write endpoints are destructive
-- the token is sent as a header and never appears in the path this prints
+- a path that changes something merely by being requested is refused too: Plex's action and client-command paths, and anything ending in refresh, analyze, emptyTrash, optimize, match or unmatch
+- the token is sent as a header and never appears in the path this prints; an attribute the server names as a credential is printed as <redacted>
 - paths are absolute: `library/sections` is refused, `/library/sections` is the path
 - output is bounded by size as well as depth: past 20 children of one tag the rest are counted, and a long value is previewed with its full length; `--full` lifts both
 
@@ -289,6 +299,7 @@ plex-axi --section 'Example Music' doctor
 ```
 
 - exits non-zero when any check fails, so it works as a CI or hook gate
+- `sonic analysis` is reported and never fails the run: a library with it off is healthy, and `similar` simply has nothing to return
 - a rejected token is reported as invalid or expired separately, because Plex answers 401 to both and only the response text tells them apart
 
 ### `plex-axi setup`

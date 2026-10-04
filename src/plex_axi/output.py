@@ -81,6 +81,18 @@ def redact(text: str) -> str:
     return _JWT.sub(REDACTED, text)
 
 
+#: Anything that ends a line or drives a terminal. A help line is printed raw,
+#: one per line, so a line break inside one *is* a second line -- and the text
+#: after it reads as the tool's own suggestion, or as a top-level `code:` field.
+#: The values interpolated into these lines are titles from a library's tags.
+_CONTROL = re.compile("[\x00-\x1f\x7f\x85\u2028\u2029]+")
+
+
+def single_line(text: str) -> str:
+    """``text`` with every control character replaced by one space."""
+    return _CONTROL.sub(" ", str(text))
+
+
 class HelpBlock:
     """A ``help[N]:`` block of contextual next steps.
 
@@ -94,7 +106,7 @@ class HelpBlock:
     __slots__ = ("lines",)
 
     def __init__(self, lines) -> None:
-        self.lines = [line for line in lines if line]
+        self.lines = [single_line(line) for line in lines if line]
 
     def __bool__(self) -> bool:
         return bool(self.lines)

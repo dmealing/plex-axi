@@ -1,0 +1,23 @@
+$ plex-axi track --help
+environment: default
+exit: 0
+
+usage: plex-axi track <rating_key|media_id> [flags]
+description: Show one track in full: the fields a list row leaves out
+access:
+  read-only - this command cannot change anything on the server
+flags{track}:
+  --check-files (ask the server to stat the file; costs a second request, so without it availability reads 'not checked', never 'missing'), --full (print the whole summary instead of a preview)
+note:
+  analysis is Plex's musicAnalysisVersion; 0 means `similar` has no seed
+note:
+  rating is in stars (0-5), the same scale as `search --rated-min`
+note:
+  takes the `key` or the `media_id` a row prints; dates are in this machine's local time zone
+note:
+  rating_key is local to this server; guid is the identifier that survives a re-match
+note:
+  run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports
+examples:
+  plex-axi track 12345
+  plex-axi search --artist 'Example Artist' --type track

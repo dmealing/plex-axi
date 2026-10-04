@@ -1,0 +1,9 @@
+$ plex-axi search --artist x --rated-min 9
+environment: default
+exit: 2
+
+error: "--rated-min is in stars from 0 to 5, got 9"
+code: BAD_RATING
+help[2]:
+  Run the command again with `--rated-min 4`
+  Ratings print in stars too, so a rating read from a result can be passed back

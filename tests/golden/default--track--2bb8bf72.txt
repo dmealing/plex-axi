@@ -1,0 +1,8 @@
+$ plex-axi track
+environment: default
+exit: 2
+
+error: plex-axi track needs <rating_key>
+code: MISSING_ARGUMENT
+help[1]:
+  Run `plex-axi track <rating_key>`

@@ -1,0 +1,69 @@
+$ plex-axi --help
+environment: playing
+exit: 0
+
+usage: plex-axi [command] [subcommand] [args] [flags]
+description: Structured, per-field music search and diagnosis against a Plex Media Server. Prefer this over raw curl or a free-text search for anything about a music library.
+commands[21]:
+  (none)=home, search, pick, genres, moods, styles, track, album, artist, similar, recent, playlist, rate, sessions, api, doctor, setup, skill, context, clients, play
+flags[8]:
+  --human (readable output), --json (raw JSON output, help included; not both),
+  --timeout <seconds> (default 30),
+  --section <title|key> (which music library),
+  --debug (on stderr: the connection, every request path and query, the exact
+    filter expression built, and the type of any error),
+  --user <plex-user> (read as another account: admin only, and the one flag here
+    that needs a plex.tv round-trip), --help, -v/--version
+env[6]:
+  PLEX_URL - the server's local address, e.g. http://plex.example.com:32400
+  PLEX_TOKEN - a Plex access token; there is deliberately no --token flag
+  PLEX_SECTION - default music library, when a server has more than one
+  PLEX_AXI_ALLOW_WRITES - set to true to allow `playlist` and `rate` to write; unset, they refuse
+  PLEX_AXI_ALLOW_PLAYBACK - set to true, which is why `clients` and `play` exist here
+  PLEX_ACCOUNT_TOKEN - a plex.tv *account* token, needed only to reach Sonos speakers
+summaries[20]:
+  search    Search the music library field by field, server-side
+  pick      Choose tracks to play now, filtered and shuffled by the server
+  genres    List the genres this library uses
+  moods     List the moods this library uses
+  styles    List the styles this library uses
+  track     Show one track in full: the fields a list row leaves out
+  album     Show one album in full: the fields a list row leaves out
+  artist    Show one artist in full: the fields a list row leaves out
+  similar   List tracks Plex's analysis finds sonically similar, with distances
+  recent    List what was added to the music library most recently
+  playlist  List, inspect and edit the audio playlists on this server
+  rate      Set or clear your rating on one track, album or artist
+  sessions  List the streams the server currently believes are playing
+  api       Make an authenticated GET to any Plex API path
+  doctor    Check the environment, the server, the music library and its filters
+  setup     Install, check or remove the session hooks that give an agent ambient context
+  skill     Write or verify the generated Agent Skill for this CLI
+  context   Print the ambient context a session hook puts in front of an agent
+  clients   List the players this server can start music on
+  play      Start a track, album, artist or audio playlist on one Plex client
+note:
+  plex-axi reads and diagnoses a music library, and can change two things in it:
+  a rating and a playlist. Both are refused unless PLEX_AXI_ALLOW_WRITES=true
+  is exported, and each still needs --write on the invocation; without --write
+  they show the change and send nothing. Every other command only reads, and
+  `api` refuses every method but GET. Each command's --help says which it is.
+note:
+  Playback is enabled here (PLEX_AXI_ALLOW_PLAYBACK=true), so `clients` and `play`
+  exist. `play` still needs --now; without it, it names the target and sends
+  nothing. Starting playback is all it does: no pause, stop, volume, next or
+  queue. A `sonos` target is reached through Plex's cloud rather than through this
+  server, so anything else watching this server for a session will lag the
+  command. Video is out of scope by a separate decision.
+examples:
+  plex-axi
+  plex-axi search --artist 'Example Artist' --track 'Example Track'
+  plex-axi search --genre Jazz --rated-min 4 --limit 10
+  plex-axi pick --rated-min 4 --not-played-since 30d
+  plex-axi genres
+  plex-axi track 12345
+  plex-axi similar 12345
+  plex-axi playlist show 'Example Playlist'
+  plex-axi doctor
+  plex-axi clients
+  plex-axi play 12345 --client 'Example Client' --now

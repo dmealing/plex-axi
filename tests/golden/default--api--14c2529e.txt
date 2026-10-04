@@ -1,0 +1,9 @@
+$ plex-axi api
+environment: default
+exit: 2
+
+error: a path is required
+code: MISSING_PATH
+help[2]:
+  Run `plex-axi api /`
+  Run `plex-axi api /library/sections`

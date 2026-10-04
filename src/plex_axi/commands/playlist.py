@@ -29,7 +29,7 @@ exercise before they were a Plex question.
 
 from __future__ import annotations
 
-from axi_toolkit.plex.ids import media_id_for, validate_rating_key
+from axi_toolkit.plex.ids import media_id_for
 
 from .. import writes
 from ..argspec import Command, Flag, Sub
@@ -37,7 +37,18 @@ from ..errors import AxiError, UsageError
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import fields_flag, more_hint, parse_limit, project, select_fields
+from ._common import (
+    _MEDIA_ID,
+    KeyRef,
+    article,
+    fields_flag,
+    more_hint,
+    parse_key,
+    parse_limit,
+    project,
+    quoted,
+    select_fields,
+)
 
 #: The one playlist type this tool will look at. Passed on every listing, which
 #: is the guard the rest of the landscape leaves out.
@@ -62,7 +73,7 @@ _KEY_FLAG = Flag(
     "--key",
     "<rating_key>",
     repeat=True,
-    note="a track's rating key, from `search` or `pick`; repeat for several",
+    note="a track's rating key or media_id, from `search` or `pick`; repeat for several",
 )
 _WRITE_FLAG = Flag(
     "--write",
@@ -123,8 +134,10 @@ COMMAND = Command(
         "repeating one of these writes is safe: when the playlist already holds "
         "everything a `create` or `add` names, or none of what a `remove` names, the "
         "command answers `already: … (no-op)` and exits 0 rather than failing",
-        "a playlist is named by its `key` from `playlist list`, or by its exact "
-        "case-folded title; on a miss the real keys and titles are handed back",
+        "a playlist is named by its `key` or `media_id` from `playlist list`, or by its "
+        "exact case-folded title; on a miss the real keys and titles are handed back",
+        "`--key` takes tracks: an album's or an artist's key is refused with the search "
+        "that lists its tracks, rather than added as one item that is not a song",
         "`items` in a listing (`--fields key,title,items`) is the count the server "
         "declares, which for a smart playlist is cached; `playlist show` reports what it "
         "actually holds",
@@ -149,10 +162,20 @@ def COMMAND_FOR(name: str) -> Command:
 def run(ctx, name: str, sub: str, parsed):
     if sub in ("create", "add", "remove"):
         title = parsed.positionals[0]
-        keys = _keys(parsed, sub, title)
+        if sub == "create" and not title.strip():
+            raise UsageError(
+                "a playlist needs a title, and this one is empty",
+                help_lines=[
+                    "Run `plex-axi playlist create '<title>' --key <rating_key>` to preview one"
+                ],
+                code="EMPTY_TITLE",
+            )
+        refs = _keys(parsed, sub, title)
         # Before the connection: a refused write is not a request the server
         # ever hears about.
         writes.require(ctx.environ, action=f"{sub} {title!r}")
+        server = ctx.server()
+        keys = list(dict.fromkeys(ref.confirm(server) for ref in refs))
         return _MUTATORS[sub](ctx, title, keys, parsed)
     return {"list": _list, "show": _show}[sub](ctx, parsed)
 
@@ -209,10 +232,13 @@ def _show(ctx, parsed):
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_ITEM_LIMIT, maximum=MAX_ITEM_LIMIT)
     server = ctx.server()
     playlist = _resolve(server, title)
-    items = _items(playlist)
+    # One page, and the total from the container. Fetching the whole playlist to
+    # print fifty rows of it cost four seconds on a ten-thousand-item list; the
+    # server counts for the price of a header.
+    items, total = _page(server, playlist, limit)
 
     tracks = [item for item in items if getattr(item, "type", "") == "track"]
-    rows = rows_for("track", tracks[:limit], server.machineIdentifier)
+    rows = rows_for("track", tracks, server.machineIdentifier)
     chosen = parsed.get("fields")
     fields = select_fields(chosen, available_fields("track"), default_fields("track"))
     if not chosen:
@@ -225,16 +251,16 @@ def _show(ctx, parsed):
         # caller wants when they mean "play this whole playlist", and the track
         # rows below carry their own for the case where they mean one song.
         "media_id": media_id_for(server.machineIdentifier, playlist),
-        "count": f"{len(rows)} of {len(items)} items",
+        "count": f"{len(rows)} of {total} items",
         "smart": bool(playlist.smart),
     }
     declared = getattr(playlist, "leafCount", None)
-    if declared is not None and int(declared) != len(items):
+    if declared is not None and int(declared) != total:
         # The two commands must not contradict each other in silence. `playlist
         # list` prints the declared count because that is all a listing has;
         # here the real contents are in hand, so the disagreement is named.
         doc["declared"] = (
-            f"this server declares {int(declared)} items; the {len(items)} above are what "
+            f"this server declares {int(declared)} items; the {total} above are what "
             "it actually returned"
         )
     if not items:
@@ -249,13 +275,14 @@ def _show(ctx, parsed):
         # key because there is none in the list.
         doc["tracks"] = "0 tracks in this playlist"
         doc["other"] = f"{len(items)} item(s) that are not tracks"
-        doc["help"] = HelpBlock(
-            [
-                f"Run `plex-axi playlist add '{playlist.title}' --key <rating_key>` to preview "
-                "adding a track",
-                "Run `plex-axi search --track '<title>'` to find rating keys",
-            ]
-        )
+        lines = ["Run `plex-axi search --track '<title>'` to find rating keys"]
+        if not playlist.smart:
+            lines.insert(
+                0,
+                f"Run `plex-axi playlist add {int(playlist.ratingKey)} --key <rating_key>` to "
+                "preview adding a track",
+            )
+        doc["help"] = HelpBlock(lines)
         return doc
 
     doc["tracks"] = project(rows, fields)
@@ -266,17 +293,22 @@ def _show(ctx, parsed):
     help_lines = [
         f"Run `plex-axi track {rows[0]['key']}` for one track's tags, analysis version "
         "and file details",
-        f"Run `plex-axi playlist remove '{playlist.title}' --key {rows[0]['key']}` to preview "
-        "removing one",
     ]
-    if len(rows) < len(tracks):
+    if not playlist.smart:
+        # Not offered on a smart playlist: its contents are a saved search, and
+        # the command this line names would be refused.
+        help_lines.append(
+            f"Run `plex-axi playlist remove {int(playlist.ratingKey)} --key {rows[0]['key']}` "
+            "to preview removing one"
+        )
+    if len(items) < total:
         carried = fields_flag(chosen)
         help_lines.append(
             more_hint(
                 f"plex-axi playlist show {int(playlist.ratingKey)}{carried}",
-                len(tracks),
+                total,
                 MAX_ITEM_LIMIT,
-                "tracks",
+                "items",
             )
         )
     doc["help"] = HelpBlock(help_lines)
@@ -306,10 +338,10 @@ def _create(ctx, title, keys, parsed):
         if not existing.smart:
             key_flags = " ".join(f"--key {key}" for key in missing)
             lines.append(
-                f"Run `plex-axi playlist add '{existing.title}' {key_flags} --write` to add "
-                "the missing items to it"
+                f"Run `plex-axi playlist add {int(existing.ratingKey)} {key_flags} --write` to "
+                "add the missing items to it"
             )
-        lines.append(f"Run `plex-axi playlist show '{existing.title}'` to see what it holds")
+        lines.append(f"Run `plex-axi playlist show {int(existing.ratingKey)}` to see what it holds")
         raise AxiError(
             f"an audio playlist called {existing.title!r} already exists on this server",
             help_lines=lines,
@@ -335,9 +367,12 @@ def _create(ctx, title, keys, parsed):
 
     doc["playlist"] = created.title
     doc["type"] = created.playlistType
-    doc["holds"] = f"{len(_items(created))} items"
-    doc["applied"] = f"created with {len(items)} item(s)"
-    doc["help"] = HelpBlock([f"Run `plex-axi playlist show '{created.title}'` to confirm"])
+    held = len(_items(created))
+    doc["key"] = int(created.ratingKey)
+    doc["holds"] = f"{held} items"
+    # What the server holds, read back -- not the size of the request.
+    doc["applied"] = _applied("created with", held, len(items))
+    doc["help"] = HelpBlock([f"Run `plex-axi playlist show {int(created.ratingKey)}` to confirm"])
     return doc
 
 
@@ -368,9 +403,12 @@ def _add(ctx, title, keys, parsed):
     except Exception as exc:
         raise _write_error(exc, action="add items to", title=playlist.title, keys=keys) from None
 
-    doc["holds"] = f"{len(_items(_resolve(server, playlist.title)))} items"
-    doc["applied"] = f"added {len(items)} item(s)"
-    doc["help"] = HelpBlock([f"Run `plex-axi playlist show '{playlist.title}'` to confirm"])
+    after = len(_items(_by_key(server, playlist)))
+    doc["holds"] = f"{after} items"
+    # The difference the server reports, not the size of the request: an item
+    # the server declined to add used to be counted as added.
+    doc["applied"] = _applied("added", after - len(held), len(items))
+    doc["help"] = HelpBlock([f"Run `plex-axi playlist show {int(playlist.ratingKey)}` to confirm"])
     return doc
 
 
@@ -415,9 +453,10 @@ def _remove(ctx, title, keys, parsed):
             exc, action="remove items from", title=playlist.title, keys=keys
         ) from None
 
-    doc["holds"] = f"{len(_items(_resolve(server, playlist.title)))} items"
-    doc["applied"] = f"removed {len(going)} item(s)"
-    doc["help"] = HelpBlock([f"Run `plex-axi playlist show '{playlist.title}'` to confirm"])
+    after = len(_items(_by_key(server, playlist)))
+    doc["holds"] = f"{after} items"
+    doc["applied"] = _applied("removed", len(held) - after, len(going))
+    doc["help"] = HelpBlock([f"Run `plex-axi playlist show {int(playlist.ratingKey)}` to confirm"])
     return doc
 
 
@@ -425,6 +464,44 @@ _MUTATORS = {"create": _create, "add": _add, "remove": _remove}
 
 
 # -------------------------------------------------------------------- helpers
+
+
+def _applied(verb: str, happened: int, asked: int) -> str:
+    """What changed, measured, with the request beside it when the two differ."""
+    if happened == asked:
+        return f"{verb} {happened} item(s)"
+    return f"{verb} {happened} item(s); {asked} were asked for, so check what the playlist holds"
+
+
+def _by_key(server, playlist):
+    """The same playlist again, fresh, found by the key rather than by its title."""
+    wanted = str(playlist.ratingKey)
+    for candidate in _audio_playlists(server):
+        if str(candidate.ratingKey) == wanted:
+            return candidate
+    raise _missing(playlist.title, [])
+
+
+def _page(server, playlist, limit: int) -> tuple:
+    """The first ``limit`` items of a playlist, and how many it holds in all."""
+    path = f"/playlists/{int(playlist.ratingKey)}/items"
+    try:
+        counted = server.query(
+            path, headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
+        )
+        items = list(
+            server.fetchItems(path, container_start=0, container_size=limit, maxresults=limit)
+        )
+    except Exception as exc:
+        raise translate(exc, what=f"the contents of {playlist.title!r}") from None
+    total = counted.attrib.get("totalSize")
+    if total is None:
+        total = counted.attrib.get("size")
+    try:
+        total = int(total)
+    except (TypeError, ValueError):
+        total = len(items)
+    return items, max(total, len(items))
 
 
 def _not_held(held: list, keys: list) -> list:
@@ -490,21 +567,30 @@ def _resolve(server, title: str):
     """
     playlists = _audio_playlists(server)
     wanted = str(title).strip()
-    if wanted.isdigit():
+    media = _MEDIA_ID.match(wanted)
+    if media:
+        # The `media_id` a listing prints beside the key, accepted back.
+        KeyRef(media.group(2), media.group(1), wanted).confirm(server)
+        wanted = media.group(2)
+    if wanted.isascii() and wanted.isdigit():
         for playlist in playlists:
             if str(playlist.ratingKey) == wanted:
                 return playlist
     found = _find(playlists, title)
     if found is not None:
         return found
+    raise _missing(title, playlists)
+
+
+def _missing(title: str, playlists: list) -> AxiError:
     listing = ", ".join(f"{p.ratingKey} {p.title!r}" for p in playlists) or "none"
-    raise AxiError(
+    return AxiError(
         f"no audio playlist called {title!r} on this server",
         help_lines=[
             f"audio playlists (key and title): {listing}",
             "Titles match exactly; pass one of those, or the key beside it, rather than a "
             "description of it",
-            f"Run `plex-axi playlist create '{title}' --key <rating_key> --write` to make it",
+            f"Run `plex-axi playlist create {quoted(title)} --key <rating_key> --write` to make it",
         ],
         code="NO_SUCH_PLAYLIST",
     )
@@ -520,20 +606,24 @@ def _items(playlist) -> list:
 def _keys(parsed, sub: str, title: str) -> list:
     raw = parsed.get("key", []) or []
     # The caller's own words after the tool name, which is what a `run`
-    # recovery is: the name in front of them is the renderer's to supply.
-    keys = [validate_rating_key(value, command=("playlist", sub, f"'{title}'")) for value in raw]
-    if not keys:
+    # recovery is: the name in front of them is the renderer's to supply. The
+    # `--key` is one of those words -- a recovery that ended at the title put
+    # the corrected key where a positional argument goes, and was refused.
+    command = ("playlist", sub, quoted(title), "--key")
+    refs = [parse_key(value, command=command) for value in raw]
+    if not refs:
         raise UsageError(
             f"`playlist {sub}` needs at least one --key",
             help_lines=[
-                f"Run `plex-axi playlist {sub} '{title}' --key <rating_key>`",
+                f"Run `plex-axi playlist {sub} {quoted(title)} --key <rating_key>`",
                 "Run `plex-axi search --artist '<name>'` to find rating keys",
             ],
             code="MISSING_KEY",
         )
-    # Deduplicated in order: asking twice for the same key is a typo, not a
-    # request to hold the same track twice.
-    return list(dict.fromkeys(keys))
+    # Deduplicated by the caller, once each key's server has been confirmed:
+    # asking twice for the same key is a typo, not a request to hold the same
+    # track twice.
+    return refs
 
 
 def _fetch_items(server, keys: list) -> list:
@@ -549,6 +639,21 @@ def _fetch_items(server, keys: list) -> list:
                     "Run `plex-axi search --track '<title>'` to find this server's rating key",
                 ],
             ) from None
+    for key, item in zip(keys, items):
+        kind = getattr(item, "type", "") or "item"
+        if kind in ("album", "artist"):
+            # Plex accepts an album into an audio playlist as *one item that is
+            # not a song*, which is never what "add this album" meant, and the
+            # write used to be reported as an addition the server did not make.
+            flag = "--album" if kind == "album" else "--artist"
+            raise AxiError(
+                f"{key} is {article(kind)} {kind}, and `--key` takes tracks",
+                help_lines=[
+                    f"Run `plex-axi search {flag} {quoted(getattr(item, 'title', '') or '<title>')}"
+                    f" --no-group` for the keys of its tracks",
+                ],
+                code="NOT_A_TRACK",
+            )
     return items
 
 
@@ -616,7 +721,7 @@ def _smart_error(title: str, *, action: str) -> AxiError:
         help_lines=[
             "A smart playlist's contents are a saved search that Plex re-runs; its items are "
             "a result, not a list, and adding to it is not something the server offers",
-            f"Run `plex-axi playlist show '{title}'` to see what the search currently returns",
+            f"Run `plex-axi playlist show {quoted(title)}` to see what the search currently returns",
             "Run `plex-axi playlist create '<title>' --key <rating_key> --write` for an "
             "ordinary playlist you can edit",
         ],
@@ -647,10 +752,12 @@ def _write_error(exc: Exception, *, action: str, title: str, keys: list):
     return translate(
         exc,
         what=f"the playlist {title!r}",
-        help_lines=[f"Run `plex-axi playlist show '{title}'` to see what the server holds now"],
+        help_lines=[
+            f"Run `plex-axi playlist show {quoted(title)}` to see what the server holds now"
+        ],
     )
 
 
 def _invocation(sub: str, title: str, keys: list) -> str:
     flags = " ".join(f"--key {key}" for key in keys)
-    return f"plex-axi playlist {sub} '{title}' {flags}".strip()
+    return f"plex-axi playlist {sub} {quoted(title)} {flags}".strip()

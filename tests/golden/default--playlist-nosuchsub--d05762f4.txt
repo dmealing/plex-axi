@@ -1,0 +1,10 @@
+$ plex-axi playlist nosuchsub
+environment: default
+exit: 2
+
+error: unknown subcommand 'nosuchsub' for `playlist`
+code: UNKNOWN_SUBCOMMAND
+help[3]:
+  subcommands: list, show <title-or-key>, create <title>, add <title-or-key>, remove <title-or-key>
+  Run `plex-axi playlist list` for the default one
+  Run `plex-axi playlist --help` for what each takes

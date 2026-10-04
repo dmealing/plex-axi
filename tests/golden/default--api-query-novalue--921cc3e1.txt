@@ -1,0 +1,8 @@
+$ plex-axi api / --query novalue
+environment: default
+exit: 2
+
+error: "--query needs key=value, got 'novalue'"
+code: BAD_PAIR
+help[1]:
+  Run the command again with `--query type=10`

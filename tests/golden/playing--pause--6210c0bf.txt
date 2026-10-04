@@ -1,0 +1,9 @@
+$ plex-axi pause
+environment: playing
+exit: 2
+
+error: "plex-axi has no `pause` command: playback is deliberately out of scope"
+code: OUT_OF_SCOPE
+help[2]:
+  `play` starts something on a client and that is all it does; pausing, stopping and volume belong to whatever the client already answers to
+  commands: search, pick, genres, moods, styles, track, album, artist, similar, recent, playlist, rate, sessions, api, doctor, setup, skill, context, clients, play

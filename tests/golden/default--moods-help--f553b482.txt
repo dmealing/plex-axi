@@ -1,0 +1,17 @@
+$ plex-axi moods --help
+environment: default
+exit: 0
+
+usage: plex-axi moods [flags]
+description: List the moods this library uses
+access:
+  read-only - this command cannot change anything on the server
+flags{moods}:
+  --type <track|album|artist> (default track), --limit <n> (default 300)
+note:
+  the values this library will accept for `search --mood`, read from the server
+note:
+  moods are written at every level; --type chooses which set to list
+examples:
+  plex-axi moods
+  plex-axi search --mood '<value>'

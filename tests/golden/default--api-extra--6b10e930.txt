@@ -1,0 +1,9 @@
+$ plex-axi api / extra
+environment: default
+exit: 2
+
+error: unexpected argument 'extra'
+code: UNEXPECTED_ARGUMENT
+help[2]:
+  `api` takes one path, with the method GET before it or left out
+  Run `plex-axi api /`

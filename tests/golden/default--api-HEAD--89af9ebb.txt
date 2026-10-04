@@ -1,0 +1,8 @@
+$ plex-axi api HEAD /
+environment: default
+exit: 2
+
+error: "HEAD is not available: plex-axi renders response bodies, and a HEAD has none"
+code: UNSUPPORTED_METHOD
+help[1]:
+  Run `plex-axi api GET <path>` to read the resource

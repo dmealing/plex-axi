@@ -1,0 +1,10 @@
+$ plex-axi play 111
+environment: playback-misset
+exit: 1
+
+error: "refusing to run `play`: playback is disabled (PLEX_AXI_ALLOW_PLAYBACK is 'yes', not 'true')"
+code: PLAYBACK_DISABLED
+help[3]:
+  Playback is the operator's decision: ask them to set PLEX_AXI_ALLOW_PLAYBACK=true in the environment this tool is launched from, and do not set it yourself
+  Once they have, the same command with --now starts playback, and without it names the target and sends nothing
+  Nothing was sent to the server

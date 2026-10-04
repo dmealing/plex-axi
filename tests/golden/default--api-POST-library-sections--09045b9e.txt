@@ -1,0 +1,9 @@
+$ plex-axi api POST /library/sections
+environment: default
+exit: 2
+
+error: "POST is not available: `api` is read-only whatever else is enabled"
+code: READ_ONLY
+help[2]:
+  Run `plex-axi api GET <path>` to read the same resource
+  Run `plex-axi rate --help` or `plex-axi playlist --help` for the writes this tool does offer, each gated and previewable

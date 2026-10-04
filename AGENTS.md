@@ -243,7 +243,7 @@ sees. Adding a playback noun is one entry in each of those two, plus its module.
 `describe_filter(field, operator, value)` builds every echoed filter — five call sites in
 `commands/pick.py` now, the two that sat in `music.py` having moved with `build_filters` and
 `rating_predicate`, and the builder itself being `axi_toolkit.plex.filters`' — and
-`doctor._check(name, status, detail)` builds all nine rows
+`doctor._check(name, status, detail)` builds all twelve rows
 of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
 rather than reconciling a difference — which is what made it checkable as byte-identical output on
 every surface that prints either shape, rather than only as a green suite.
@@ -355,11 +355,15 @@ was added here to compensate, and nothing should be.
 - **`redact()` has a token-shaped backstop as well as the registered literal.** `X-Plex-Token=` as a
   URL parameter is redacted whether or not the value ever passed through this process's config,
   because the client library appends it to artwork, stream and web URLs.
-- **`api` refuses write methods, and that did not change when the tool learned to write.** A raw
+- **`api` refuses write methods and state-changing GETs, and both gates are enforced there.** A raw
   path that could POST would make the gate meaningless: anything a typed command refused could be
-  reissued by hand, with none of the validation, the preview or the explanation. Several Plex write
-  endpoints are destructive besides. It also refuses a caller-supplied `--query X-Plex-Token=…`,
-  which is how a credential reaches shell history.
+  reissued by hand, with none of the validation, the preview or the explanation. Plex also acts on
+  a plain GET at several paths (`/:/rate` sets a rating, `/library/sections/<n>/refresh` starts a
+  scan, a `/player/` path relays a command to a client), so `api` refuses those paths by name as
+  well, with either gate open or closed. It also refuses a caller-supplied `--query X-Plex-Token=…`,
+  which is how a credential reaches shell history. For any path carrying server credentials, it
+  prints `<redacted>` for attributes the server names as such (e.g. `/myplex/account` carries the
+  owner's plex.tv account token).
 - **A write is refused before the connection is opened.** `writes.require` runs at the top of
   `run()`, ahead of `ctx.server()`, so a mutating command with the gate closed reaches the server
   **zero times**. A refusal that read the item first and then declined would produce the same exit
@@ -601,8 +605,9 @@ block from the same declaration, so the help and the skill cannot say different 
 
 **Anything that claims the tool is read-only has to be qualified or deleted.** README, the generated
 skill, the home view (`writes:`), root `--help` and this file were all updated together;
-`tests/test_skill.py` fails if an unqualified claim comes back. The one place the old wording is
-still correct is `api`, which is GET-only whatever the gate says.
+`tests/test_skill.py` fails if an unqualified claim comes back. `api` is not read-only either: it
+refuses write methods and state-changing GETs by name, enforcing both gates, with either gate open
+or closed.
 
 ## Sharp edges
 
@@ -696,7 +701,7 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
 - **A boolean key in `filters` may not have a sibling.** `_validateAdvancedSearch` raises
   *"Multiple keys in the same dictionary with and/or is not allowed"* the moment `{'or': [...]}`
   shares a dictionary with anything else, so a parenthesised OR has to be composed as
-  `{'and': [{...simple...}, {'or': [...]}]}` — which is what `pick._compose` does. This is also why
+  `{'and': [{...simple...}, {'or': [...]}]}` — which is what `music.compose` does. This is also why
   `group=title` is no longer passed inside `filters`: it moved to `run_search`'s `**kwargs`, where
   `_buildSearchKey` validates it against the same field table and emits the same `group=title`
   parameter *outside* any group. A `group` inside the parentheses would be a SQL GROUP BY scoped to
@@ -1052,7 +1057,7 @@ somebody closes it.
 
 ```sh
 scripts/dev-setup.sh                     # builds .venv and installs into it
-.venv/bin/pytest                         # ~900 tests, a few seconds
+.venv/bin/pytest                         # ~1900 tests, under half a minute
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 .venv/bin/plex-axi skill --check         # SKILL.md is generated, never hand-edited
 scripts/leakcheck.py                     # stdlib only; run this AFTER formatting
@@ -1113,7 +1118,7 @@ one layer up: the count of things covered is asserted rather than assumed. The c
 and the test's docstring says how — a module that inlines its rows in a comprehension without naming
 a builder is not found, which is what `home._recent` does and why `home` is not swept.
 
-**Tests never need a live server or a live token, and must not start to.** They run the real client
+**The default suite never needs a live server or a live token, and must not start to** — `tests/live/` is the opt-in exception, deselected by default and run only by `scripts/live-test.sh`. The default tests run the real client
 library against a Plex double in `tests/conftest.py` that speaks HTTP-shaped XML over a fake
 `requests` session. That is the point: the claims worth testing — that a filter is applied
 server-side, that the URL carries the operator Plex actually defines, that a count is exact — are

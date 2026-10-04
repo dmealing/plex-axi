@@ -1,0 +1,8 @@
+$ plex-axi track １１１
+environment: default
+exit: 2
+
+error: "a rating key is written in ASCII digits, got '１１１'"
+code: BAD_RATING_KEY
+help[1]:
+  Run `plex-axi track 111`

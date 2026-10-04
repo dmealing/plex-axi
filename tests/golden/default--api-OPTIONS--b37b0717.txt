@@ -1,0 +1,8 @@
+$ plex-axi api OPTIONS /
+environment: default
+exit: 2
+
+error: "OPTIONS is not available: `api` issues GET and nothing else"
+code: UNSUPPORTED_METHOD
+help[1]:
+  Run `plex-axi api GET <path>` to read the resource

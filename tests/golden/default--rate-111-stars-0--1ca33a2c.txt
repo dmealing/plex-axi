@@ -1,0 +1,9 @@
+$ plex-axi rate 111 --stars 0
+environment: default
+exit: 2
+
+error: "--stars 0 is not a rating: zero is the absence of one"
+code: BAD_RATING
+help[2]:
+  Run `plex-axi rate 111 --clear` to remove the rating instead
+  Run `plex-axi rate 111 --stars 0.5` for the lowest rating there is

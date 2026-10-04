@@ -17,14 +17,12 @@ The empty state says which of the two happened, because `track <key>` reports
 
 from __future__ import annotations
 
-from axi_toolkit.plex.ids import validate_rating_key
-
 from ..argspec import Command, Flag, Sub
-from ..errors import UsageError
+from ..errors import AxiError, UsageError
 from ..music import available_fields, rows_for
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import article, parse_limit, project, select_fields
+from ._common import article, parse_key, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
 
@@ -70,11 +68,12 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], command=("similar",))
+    ref = parse_key(parsed.positionals[0], command=("similar",))
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT)
     max_distance = _parse_distance(parsed.get("max_distance"))
 
     server = ctx.server()
+    key = ref.confirm(server)
     try:
         seed = server.fetchItem(f"/library/metadata/{key}")
     except Exception as exc:
@@ -86,7 +85,8 @@ def run(ctx, name: str, sub: str, parsed):
 
     found = getattr(seed, "type", "") or "item"
     if found != "track":
-        raise UsageError(
+        # A lookup outcome, so exit 1: it took a request to learn what the key names.
+        raise AxiError(
             f"{key} is {article(found)} {found}, and sonic similarity is per track",
             help_lines=[
                 "Run `plex-axi search --artist '<name>' --type track` to find a track key",

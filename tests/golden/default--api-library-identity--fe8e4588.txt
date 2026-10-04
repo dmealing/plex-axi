@@ -1,0 +1,8 @@
+$ plex-axi api /library/../identity
+environment: default
+exit: 2
+
+error: "a Plex API path has no `.` or `..` segment, got '/library/../identity'"
+code: BAD_PATH
+help[1]:
+  Run `plex-axi api /library/sections` for the paths below a section

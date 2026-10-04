@@ -1,0 +1,9 @@
+$ plex-axi playlist add 501 --key abc
+environment: default
+exit: 2
+
+error: "a rating key is a number, got 'abc'"
+code: BAD_RATING_KEY
+help[2]:
+  Run `plex-axi playlist add 501 --key <rating_key>`
+  Run `plex-axi search --artist '<name>'` to find one

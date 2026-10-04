@@ -1,0 +1,9 @@
+$ plex-axi --section
+environment: default
+exit: 2
+
+error: "--section needs a value"
+code: BAD_SECTION
+help[2]:
+  Run `plex-axi --section 'Example Music' <command>`
+  Run `plex-axi doctor` to see the music libraries this server has

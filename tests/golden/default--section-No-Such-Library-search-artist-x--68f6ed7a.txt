@@ -1,0 +1,9 @@
+$ plex-axi --section 'No Such Library' search --artist x
+environment: default
+exit: 1
+
+error: no music library named 'No Such Library' on this server
+code: NO_SUCH_SECTION
+help[2]:
+  music libraries: Example Music (key 3)
+  Pass `--section <title|key>` with one of those, or unset PLEX_SECTION

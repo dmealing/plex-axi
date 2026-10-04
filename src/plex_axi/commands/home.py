@@ -16,7 +16,7 @@ from .. import playback, writes
 from ..argspec import Command, Sub
 from ..config import config_state, missing_env_vars, setup_help
 from ..errors import AnyAxiError, help_lines_for
-from ..music import date_only
+from ..music import date_only, sonic_analysis
 from ..output import HelpBlock
 from ._common import plural
 
@@ -136,21 +136,26 @@ def _counts(section) -> str:
 
 
 def _analysis(section) -> str:
-    """How much of Plex's own music analysis this library has.
+    """Whether Plex's sonic analysis is on for this library, and the mood count.
 
-    The honest cheap measure is how many mood tags exist at all: Plex writes
-    moods from the analysis, so an empty vocabulary means it has not run and
-    `similar` will have nothing to work from. This is deliberately not phrased
-    as a percentage, because the exact per-track coverage is not something the
-    server will report in one request and an estimate would read as one.
+    Two separate facts, reported as two. The mood vocabulary used to stand in
+    for the analysis -- "N track moods in use (written by Plex's sonic
+    analysis)" -- which was false on a library whose moods came from the
+    metadata agent and whose analysis had never run. The switch is read from the
+    library's own preference; the moods are counted and not explained.
     """
+    switch = sonic_analysis(section)
+    if switch is True:
+        state = "sonic analysis is on for this library"
+    elif switch is False:
+        state = "sonic analysis is off for this library, so `similar` has no seeds"
+    else:
+        state = "this server did not say whether sonic analysis is on"
     try:
         moods = section.listFilterChoices("mood", libtype="track")
     except Exception:
-        return "not reported by this server"
-    if not moods:
-        return "0 track moods: the sonic analysis has not run, so `similar` has no seeds"
-    return f"{len(moods)} track moods in use (written by Plex's sonic analysis)"
+        return state
+    return f"{state}; {plural(len(moods), 'track mood')} in use"
 
 
 def _recent(section) -> list:

@@ -1,0 +1,17 @@
+$ plex-axi styles --help
+environment: default
+exit: 0
+
+usage: plex-axi styles [flags]
+description: List the styles this library uses
+access:
+  read-only - this command cannot change anything on the server
+flags{styles}:
+  --limit <n> (default 300)
+note:
+  the values this library will accept for `search --style`, read from the server
+note:
+  styles are carried on the artist in a Plex music library, not on the track
+examples:
+  plex-axi styles
+  plex-axi search --style '<value>'

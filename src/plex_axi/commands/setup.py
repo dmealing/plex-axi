@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .. import hooks
 from ..argspec import Command, Flag, Sub
+from ..errors import UsageError
 from ..output import HelpBlock
 
 _HOME_FLAG = Flag("--home", "<path>", note="act under a different home directory")
@@ -86,6 +87,14 @@ def COMMAND_FOR(name: str) -> Command:
 def run(ctx, name: str, sub: str, parsed):
     home = parsed.get("home")
     home = Path(home) if home else None
+    if home is not None and not home.is_dir():
+        # A mistyped `--home` used to be created, directory tree and all, and
+        # reported as an installation -- into a home no agent will ever read.
+        raise UsageError(
+            "--home must be an existing directory",
+            help_lines=["Run `plex-axi setup status` to act on your own home directory"],
+            code="BAD_HOME",
+        )
     if sub == "status":
         return _status(home)
     if sub == "remove":

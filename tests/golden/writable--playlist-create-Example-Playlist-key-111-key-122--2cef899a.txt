@@ -1,0 +1,9 @@
+$ plex-axi playlist create 'Example Playlist' --key 111 --key 122
+environment: writable
+exit: 1
+
+error: an audio playlist called 'Example Playlist' already exists on this server
+code: PLAYLIST_EXISTS
+help[2]:
+  Run `plex-axi playlist add 501 --key 122 --write` to add the missing items to it
+  Run `plex-axi playlist show 501` to see what it holds

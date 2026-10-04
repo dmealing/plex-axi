@@ -177,7 +177,7 @@ def test_a_cut_short_playlist_listing_says_how_to_see_the_rest(server, cli_run):
 
 def test_a_cut_short_playlist_shows_how_to_see_the_rest(server, cli_run):
     result = cli_run("playlist", "show", "Example Playlist", "--limit", "1")
-    assert "Run `plex-axi playlist show 501 --limit 2` for all 2 tracks" in result
+    assert "Run `plex-axi playlist show 501 --limit 2` for all 2 items" in result
 
 
 def test_a_reveal_hint_never_exceeds_the_commands_own_limit():

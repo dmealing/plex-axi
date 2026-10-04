@@ -1,0 +1,8 @@
+$ plex-axi search --artist
+environment: default
+exit: 2
+
+error: "--artist needs a value"
+code: MISSING_VALUE
+help[1]:
+  Run `plex-axi search --artist <name>`

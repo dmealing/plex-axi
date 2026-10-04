@@ -1,0 +1,8 @@
+$ plex-axi search --artist x --fields nosuch
+environment: default
+exit: 2
+
+error: "unknown field: nosuch"
+code: UNKNOWN_FIELD
+help[1]:
+  available fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, added, guid

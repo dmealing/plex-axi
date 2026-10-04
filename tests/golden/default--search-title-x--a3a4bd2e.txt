@@ -1,0 +1,8 @@
+$ plex-axi search --title x
+environment: default
+exit: 2
+
+error: unknown flag --title for `search`; use --track instead
+code: UNKNOWN_FLAG
+help[1]:
+  Run `plex-axi search --track <value>`

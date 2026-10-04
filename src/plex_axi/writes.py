@@ -89,7 +89,7 @@ def state(environ) -> str:
         return f"enabled ({ALLOW_VAR}={raw}); mutating commands still need {WRITE_FLAG}"
     if raw:
         return f"disabled ({ALLOW_VAR} is {raw!r}, not {ALLOW_VALUE!r})"
-    return f"disabled (export {ALLOW_VAR}={ALLOW_VALUE} to enable)"
+    return f"disabled (the operator enables them with {ALLOW_VAR}={ALLOW_VALUE})"
 
 
 def require(environ, *, action: str) -> None:
@@ -104,10 +104,15 @@ def require(environ, *, action: str) -> None:
     detail = f"{ALLOW_VAR} is {raw!r}, not {ALLOW_VALUE!r}" if raw else f"{ALLOW_VAR} is not set"
     raise WriteRefused(
         f"refusing to {action}: writes are disabled ({detail})",
+        # Deliberately not a `Run` line. Those are the lines an agent executes,
+        # and an agent with a shell *can* export a variable -- so a refusal that
+        # printed the command to open the gate handed the caller the permission
+        # the gate exists to withhold.
         help_lines=[
-            f"Run `export {ALLOW_VAR}={ALLOW_VALUE}`, then run the command again with {WRITE_FLAG}",
-            "The gate is an environment variable rather than a flag on purpose: it is the "
-            "operator's decision, and a caller cannot grant itself one it was not given",
+            f"Writes are the operator's decision: ask them to set {ALLOW_VAR}={ALLOW_VALUE} "
+            "in the environment this tool is launched from, and do not set it yourself",
+            f"Once they have, the same command with {WRITE_FLAG} applies the change, and "
+            "without it previews the change",
             "Nothing was sent to the server; every other command in plex-axi reads",
         ],
         code="WRITES_DISABLED",

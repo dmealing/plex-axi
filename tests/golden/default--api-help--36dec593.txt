@@ -1,0 +1,27 @@
+$ plex-axi api --help
+environment: default
+exit: 0
+
+usage: plex-axi api [GET] <path> [flags]
+description: Make an authenticated GET to any Plex API path
+access:
+  read-only - this command cannot change anything on the server
+flags{api}:
+  --query <key=value> (repeatable, query string parameter), --depth <n> (default 3, how deep to render nested XML), --full (render every child and every value whole, instead of the first 20 of each and an 800-character preview)
+note:
+  the method is GET, spelled out or omitted; a HEAD is refused because it has no body to render
+note:
+  write methods are refused here even when writes are enabled: a mutation goes through a typed command that can validate and preview it, and several Plex write endpoints are destructive
+note:
+  a path that changes something merely by being requested is refused too: Plex's action and client-command paths, and anything ending in refresh, analyze, emptyTrash, optimize, match or unmatch
+note:
+  the token is sent as a header and never appears in the path this prints; an attribute the server names as a credential is printed as <redacted>
+note:
+  paths are absolute: `library/sections` is refused, `/library/sections` is the path
+note:
+  output is bounded by size as well as depth: past 20 children of one tag the rest are counted, and a long value is previewed with its full length; `--full` lifts both
+examples:
+  plex-axi api /
+  plex-axi api /library/sections
+  plex-axi api /status/sessions
+  plex-axi api /library/sections/1/all --query type=10 --query limit=5

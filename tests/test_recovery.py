@@ -120,9 +120,11 @@ def test_a_media_id_is_refused_with_the_field_that_carries_the_number(server, cl
 def test_a_playlist_key_refusal_carries_the_subcommand_and_the_title(server, cli_run, writable_env):
     """The longest command a recovery here names, and the one most easily lost.
 
-    Three words plus a quoted title, all of them the caller's, and none of them
+    Four words plus a quoted title, all of them the caller's, and none of them
     stored beside the recovery -- so a wrong tuple would offer a command nobody
-    typed while still reporting the right code.
+    typed while still reporting the right code. The `--key` is one of the words:
+    without it the corrected key landed where a positional argument goes, and
+    the line this printed was refused as `UNEXPECTED_ARGUMENT` (live defect D11).
     """
     result = cli_run(
         "playlist", "add", "Example Playlist", "--key", "local://311", env=writable_env
@@ -130,7 +132,7 @@ def test_a_playlist_key_refusal_carries_the_subcommand_and_the_title(server, cli
     assert result.code == 2
     _error, code, help_lines = _document(result)
     assert code == "GUID_NOT_RATING_KEY"
-    assert help_lines[-1] == "  Run `plex-axi playlist add 'Example Playlist' 311`"
+    assert help_lines[-1] == "  Run `plex-axi playlist add 'Example Playlist' --key 311`"
 
 
 # --------------------------------------------------------- the filter language

@@ -1,0 +1,17 @@
+$ plex-axi genres --help
+environment: default
+exit: 0
+
+usage: plex-axi genres [flags]
+description: List the genres this library uses
+access:
+  read-only - this command cannot change anything on the server
+flags{genres}:
+  --limit <n> (default 300)
+note:
+  the values this library will accept for `search --genre`, read from the server
+note:
+  genres are carried on the artist in a Plex music library, not on the track
+examples:
+  plex-axi genres
+  plex-axi search --genre '<value>'

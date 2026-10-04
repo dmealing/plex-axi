@@ -5,7 +5,14 @@ command is an inconvenience rather than a wall. One raw-path command covers the
 whole residue; a wrapper per endpoint would be the anti-pattern this tool exists
 to avoid, and would drift from the server the moment Plex shipped a change.
 
-**GET only, and it stays GET only now that the tool can write.** `rate` and
+**GET only, and a GET is not enough.** Plex changes state on a GET at several
+paths -- `/:/rate` sets a rating, `/library/sections/<n>/refresh` starts a scan,
+`/player/playback/playMedia` starts music -- so refusing the write *methods*
+left both gates open to anybody who could spell a path. :func:`_refuse_action`
+refuses those paths by name, before the connection, exactly as the method check
+does. What is left is the claim the help makes: this command reads.
+
+**It stays GET only now that the tool can write.** `rate` and
 `playlist` mutate, and both are gated, previewable and specific about what they
 touch; a raw path that could POST would be none of those, and it would make the
 gate meaningless because anything refused by a typed command could be reissued
@@ -22,12 +29,13 @@ other command prints, so an agent does not have to parse two formats.
 from __future__ import annotations
 
 import shlex
+from urllib.parse import parse_qsl, urlsplit
 
-from .. import output
+from .. import output, shapes
 from ..argspec import Command, Flag, Sub
-from ..errors import UsageError
-from ..output import HelpBlock, truncate
-from ..plex import translate
+from ..errors import ConnectionFailed, UsageError
+from ..output import REDACTED, HelpBlock, register_secret, truncate
+from ..plex import MalformedAnswer, translate
 from ._common import PREVIEW_CHARS, parse_pairs
 
 #: The only method this escape hatch may issue. Anything else is refused by name.
@@ -40,6 +48,11 @@ _WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 #: this command's entire value. Refused by name rather than executed as the GET
 #: a defaulted request method would send.
 _HEAD_METHODS = ("HEAD",)
+
+#: Methods HTTP defines that are neither. Named so that `api OPTIONS /x` is
+#: answered as a method this command does not issue rather than as a path with a
+#: stray argument after it.
+_OTHER_METHODS = ("OPTIONS", "TRACE", "CONNECT")
 
 #: How deep the XML is walked before the shape is summarised. Plex nests media
 #: parts and streams several levels down, and a detail view that dumped all of
@@ -83,7 +96,11 @@ COMMAND = Command(
         "write methods are refused here even when writes are enabled: a mutation goes "
         "through a typed command that can validate and preview it, and several Plex write "
         "endpoints are destructive",
-        "the token is sent as a header and never appears in the path this prints",
+        "a path that changes something merely by being requested is refused too: Plex's "
+        "action and client-command paths, and anything ending in refresh, analyze, "
+        "emptyTrash, optimize, match or unmatch",
+        "the token is sent as a header and never appears in the path this prints; an "
+        "attribute the server names as a credential is printed as <redacted>",
         "paths are absolute: `library/sections` is refused, `/library/sections` is the path",
         f"output is bounded by size as well as depth: past {MAX_CHILDREN} children of one tag "
         "the rest are counted, and a long value is previewed with its full length; `--full` "
@@ -104,14 +121,32 @@ def COMMAND_FOR(name: str) -> Command:
 
 def run(ctx, name: str, sub: str, parsed):
     method, path = _method_and_path(parsed.positionals)
-    query = parse_pairs(parsed.get("query", []), flag="--query")
+    path, inline = _split_inline_query(path)
+    query = {**inline, **parse_pairs(parsed.get("query", []), flag="--query")}
     depth = _parse_depth(parsed.get("depth"))
     _reject_token_in_query(query)
+    _refuse_action(path)
 
     server = ctx.server()
     output.debug(f"{method} {path} query={query or '(none)'}")
     try:
         data = server.query(path, params=query or None)
+    except MalformedAnswer as exc:
+        if exc.kind == MalformedAnswer.EMPTY:
+            doc = {"request": {"method": method, "path": path}}
+            doc["result"] = f"{method} succeeded with an empty response"
+            return doc
+        # Not a refusal and not a broken server: artwork, a media part and a
+        # transcode all answer with bytes, and this command renders XML.
+        raise ConnectionFailed(
+            f"the path {path} answered, but not with XML this command can render",
+            help_lines=[
+                "Artwork, media parts and a few status paths answer with an image, audio or "
+                "JSON rather than a container; `api` renders containers only",
+                "Run `plex-axi api /library/sections` for a path that answers with one",
+            ],
+            code="NOT_XML",
+        ) from None
     except Exception as exc:
         raise translate(
             exc,
@@ -162,6 +197,12 @@ def _render(element, depth: int, *, full: bool, seen: _Truncation):
     """
     node = {}
     for name, value in element.attrib.items():
+        if value and shapes.is_credential_name(name):
+            # Registered as well as replaced: the same value may sit inside a
+            # URL on another attribute of this very document.
+            register_secret(value, min_length=4)
+            node[name] = REDACTED
+            continue
         if not full and len(value) > PREVIEW_CHARS:
             value, _ = truncate(value, PREVIEW_CHARS, "")
             seen.size = True
@@ -216,16 +257,59 @@ def _reject_token_in_query(query: dict) -> None:
     Plex accepts `X-Plex-Token` as a query parameter, which is how it ends up in
     shell history, proxy logs and screenshots. The tool already authenticates
     from the environment, so a token here is never needed and always a leak.
+    Applied to a query written into the path as well as to ``--query``: the two
+    reach the same URL, and refusing only one of them refused nothing.
     """
     for key in query:
         if key.lower().replace("_", "-") in ("x-plex-token", "token"):
             raise UsageError(
-                f"--query {key}=... would put a credential in a URL",
+                f"the query parameter {key} would put a credential in a URL",
                 help_lines=[
                     "The token is already sent as a header, from PLEX_TOKEN; drop the parameter",
                 ],
                 code="TOKEN_IN_QUERY",
             )
+
+
+def _split_inline_query(path: str) -> tuple:
+    """Separate ``/path?key=value`` into the path and its parameters.
+
+    A query typed into the path is the same request as one passed with
+    ``--query``, so it is parsed here and held to the same checks rather than
+    travelling to the server unread. A fragment is dropped: it never reaches a
+    server anyway.
+    """
+    # Split by hand rather than with `urlsplit`, which reads a path beginning
+    # `//` as a network location and would hand back the wrong path entirely.
+    path = path.split("#", 1)[0]
+    plain, _, query = path.partition("?")
+    return plain, dict(parse_qsl(query, keep_blank_values=True))
+
+
+def _refuse_action(path: str) -> None:
+    """Refuse a path whose GET changes something, before any request is sent.
+
+    Which paths those are is :func:`plex_axi.shapes.acts_on_get`; this is where
+    that judgement becomes a refusal a caller can read.
+    """
+    if shapes.has_dot_segments(path):
+        raise UsageError(
+            f"a Plex API path has no `.` or `..` segment, got {path!r}",
+            help_lines=["Run `plex-axi api /library/sections` for the paths below a section"],
+            code="BAD_PATH",
+        )
+    if not shapes.acts_on_get(path):
+        return
+    raise UsageError(
+        f"{path} changes something on the server when it is requested, and `api` only reads",
+        help_lines=[
+            "Plex acts on a GET at this path: ratings, play counts, scans and commands "
+            "relayed to a client are all requests of that kind",
+            "Run `plex-axi rate --help` or `plex-axi playlist --help` for the writes this "
+            "tool does offer, each gated and previewable",
+        ],
+        code="STATE_CHANGING_PATH",
+    )
 
 
 def _absolute(path: str) -> str:
@@ -240,10 +324,25 @@ def _absolute(path: str) -> str:
     """
     if path.startswith("/"):
         return path
+    if "://" in path:
+        # A whole URL. The host is already PLEX_URL's; what the caller wants is
+        # the part after it, and prefixing a slash to the URL is not that.
+        inner = urlsplit(path)
+        target = inner.path or "/"
+        if inner.query:
+            target = f"{target}?{inner.query}"
+        raise UsageError(
+            "`api` takes a path on the configured server, not a URL",
+            help_lines=[
+                f"Run `plex-axi api {shlex.quote(target)}`",
+                "The server is the one PLEX_URL names; `api` cannot address another",
+            ],
+            code="RELATIVE_PATH",
+        )
     raise UsageError(
         f"a Plex API path begins with a slash, got {path!r}",
         help_lines=[
-            f"Run `plex-axi api /{path.lstrip('/')}`",
+            f"Run `plex-axi api {shlex.quote('/' + path.lstrip('/'))}`",
             "Run `plex-axi api /` to see what this server answers at the root",
         ],
         code="RELATIVE_PATH",
@@ -275,6 +374,12 @@ def _method_and_path(positionals: list):
             help_lines=["Run `plex-axi api GET <path>` to read the resource"],
             code="UNSUPPORTED_METHOD",
         )
+    if head in _OTHER_METHODS:
+        raise UsageError(
+            f"{head} is not available: `api` issues GET and nothing else",
+            help_lines=["Run `plex-axi api GET <path>` to read the resource"],
+            code="UNSUPPORTED_METHOD",
+        )
     if head in METHODS:
         if len(values) < 2:
             raise UsageError(
@@ -286,7 +391,12 @@ def _method_and_path(positionals: list):
     if len(values) > 1:
         raise UsageError(
             f"unexpected argument {values[1]!r}",
-            help_lines=[f"methods must come first: `plex-axi api GET {values[0]}`"],
+            help_lines=[
+                "`api` takes one path, with the method GET before it or left out",
+                f"Run `plex-axi api {shlex.quote(values[0])}`"
+                if values[0].startswith("/")
+                else "Run `plex-axi api GET <path>`",
+            ],
             code="UNEXPECTED_ARGUMENT",
         )
     return "GET", _absolute(values[0])

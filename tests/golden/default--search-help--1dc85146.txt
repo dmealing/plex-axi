@@ -1,0 +1,35 @@
+$ plex-axi search --help
+environment: default
+exit: 0
+
+usage: plex-axi search [--artist <name>] [--track <title>] [flags]
+description: Search the music library field by field, server-side
+access:
+  read-only - this command cannot change anything on the server
+flags{search}:
+  --artist <name> (album artist, searched on artist.title; on a track search the track's own performer matches as well, which is how a compilation track is found), --album <title> (searched on album.title), --track <title> (searched on track.title, which on this field also matches the performer), --genre <name> (searched on artist.genre; run `plex-axi genres` for the list), --mood <name> (run `plex-axi moods` for the list), --style <name> (run `plex-axi styles` for the list), --year <year> (the album's release year, four digits), --rated-min <stars> (0-5 stars, the scale ratings print in; 0 is the bottom of the scale and filters nothing, so `--rated-min 0.5` is what asks for the rated ones), --query <text> (THE WEAK PATH: one unstructured string matched against the title only. If you know the artist or the album, use --artist/--album instead -- a combined string is why every other Plex tool misses), --type <track|album|artist> (default track, what to return), --limit <n> (default 20), --fields <a,b,c> (replaces the default columns; run --help for the list per type), --sort <field:dir> (e.g. addedAt:desc, titleSort, userRating:desc; the direction is asc or desc), --no-group (show every pressing; by default identical titles are collapsed server-side)
+note:
+  each flag is searched on its own Plex field; that is the whole point of this tool
+note:
+  a name matches by word: each word typed must begin a word of the title, in the order typed, so `exa tra` finds `Example Track` and `xample` finds nothing
+note:
+  apostrophes, quotes, hyphens and ellipses are searched in their typographic spellings too; a comma in a value is dropped, because the server reads it as OR
+note:
+  accents are not folded by the server: when a name matches nothing, the nearest real titles are listed under `nearest` to search on exactly
+note:
+  ratings are stars (0-5) in and out, so a rating in a result can be passed to --rated-min
+note:
+  dates (`added`) are in this machine's local time zone, not the server's and not UTC
+note:
+  track fields: key, media_id, title, artist, track_artist, album, year, rating, duration, plays, skips, index, added, guid
+note:
+  album fields: key, media_id, title, artist, year, rating, added, guid
+note:
+  artist fields: key, media_id, title, rating, added, guid
+note:
+  identical track titles are collapsed with Plex's own `group=title`; --no-group shows each
+examples:
+  plex-axi search --artist 'Example Artist' --track 'Example Track'
+  plex-axi search --genre Jazz --rated-min 4 --limit 10
+  plex-axi search --artist 'Example Artist' --type album
+  plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,rating

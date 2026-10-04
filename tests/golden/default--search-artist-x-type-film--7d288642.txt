@@ -1,0 +1,8 @@
+$ plex-axi search --artist x --type film
+environment: default
+exit: 2
+
+error: "--type must be one of track, album, artist, got 'film'"
+code: BAD_TYPE
+help[1]:
+  Run the command again with `--type track`

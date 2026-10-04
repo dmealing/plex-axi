@@ -1,0 +1,8 @@
+$ plex-axi api / --depth 99
+environment: default
+exit: 2
+
+error: "--depth is between 0 and 8, got 99"
+code: BAD_DEPTH
+help[1]:
+  Run the command again with `--depth 3`

@@ -1,0 +1,9 @@
+$ plex-axi api http://plex.example.com:32400/library/sections
+environment: default
+exit: 2
+
+error: "`api` takes a path on the configured server, not a URL"
+code: RELATIVE_PATH
+help[2]:
+  Run `plex-axi api /library/sections`
+  The server is the one PLEX_URL names; `api` cannot address another

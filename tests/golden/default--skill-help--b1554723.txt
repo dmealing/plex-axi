@@ -1,0 +1,19 @@
+$ plex-axi skill --help
+environment: default
+exit: 0
+
+usage: plex-axi skill [--check] [--root <dir>]
+description: Write or verify the generated Agent Skill for this CLI
+access:
+  read-only - this command cannot change anything on the server
+flags{skill}:
+  --check (fail if the committed copy is stale), --root <dir> (default ., repository root)
+note:
+  writes skills/plex-axi/SKILL.md; never hand-edit that file, it is generated
+note:
+  the skill describes the commands *this installation* has, so a gated command that is enabled here is described and one that is not is absent entirely
+note:
+  needs no server and no token: it reads the command table, not the library
+examples:
+  plex-axi skill
+  plex-axi skill --check

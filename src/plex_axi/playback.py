@@ -160,11 +160,13 @@ def refusal(environ, *, action: str) -> PlaybackRefused:
     detail = f"{ALLOW_VAR} is {raw!r}, not {ALLOW_VALUE!r}" if raw else f"{ALLOW_VAR} is not set"
     return PlaybackRefused(
         f"refusing to {action}: playback is disabled ({detail})",
+        # Not a `Run` line, for the reason `writes.require` gives: a refusal
+        # that prints the command to open the gate has handed it over.
         help_lines=[
-            f"Run `export {ALLOW_VAR}={ALLOW_VALUE}`, then run the command again "
-            f"with {CONFIRM_FLAG}",
-            "The gate is an environment variable rather than a flag on purpose: it is the "
-            "operator's decision, and a caller cannot grant itself one it was not given",
+            f"Playback is the operator's decision: ask them to set {ALLOW_VAR}={ALLOW_VALUE} "
+            "in the environment this tool is launched from, and do not set it yourself",
+            f"Once they have, the same command with {CONFIRM_FLAG} starts playback, and "
+            "without it names the target and sends nothing",
             "Nothing was sent to the server",
         ],
         code="PLAYBACK_DISABLED",
@@ -582,7 +584,7 @@ def _local_play(server, config, target: Target, item, playqueue: int) -> str:
     from urllib.parse import urlsplit
     from xml.etree.ElementTree import ParseError
 
-    from .plex import translate
+    from .plex import MalformedAnswer, translate
 
     parts = urlsplit(config.base_url)
     params = {
@@ -606,7 +608,7 @@ def _local_play(server, config, target: Target, item, playqueue: int) -> str:
             params=params,
             headers={"X-Plex-Target-Client-Identifier": target.machine_identifier},
         )
-    except ParseError:
+    except (ParseError, MalformedAnswer):
         # Not a failure. Plexamp, Plex for Android and Plex for Samsung answer a
         # successful playback command with `OK` rather than with XML, and the
         # client library treats exactly that as success for exactly those

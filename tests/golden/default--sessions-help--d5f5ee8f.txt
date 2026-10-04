@@ -1,0 +1,19 @@
+$ plex-axi sessions --help
+environment: default
+exit: 0
+
+usage: plex-axi sessions [--fields <a,b,c>]
+description: List the streams the server currently believes are playing
+access:
+  read-only - this command cannot change anything on the server
+flags{sessions}:
+  --fields <a,b,c> (replaces the default columns)
+note:
+  music sessions are listed first; anything else is counted, not detailed
+note:
+  nothing here can start, stop or address a stream: listing one is a read
+note:
+  columns: key, media_id, title, artist, album, device, state, rating
+examples:
+  plex-axi sessions
+  plex-axi sessions --fields key,title,artist,device,state

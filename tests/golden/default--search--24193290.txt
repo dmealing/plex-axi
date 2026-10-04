@@ -1,0 +1,10 @@
+$ plex-axi search
+environment: default
+exit: 2
+
+error: search needs at least one field to search on
+code: NO_FILTERS
+help[3]:
+  Run `plex-axi search --artist '<name>'` to search by artist
+  Run `plex-axi search --artist '<name>' --track '<title>'` to combine fields
+  Run `plex-axi search --genre '<genre>' --type track` after `plex-axi genres`

@@ -1,0 +1,9 @@
+$ plex-axi search --year abc
+environment: default
+exit: 2
+
+error: "--year needs one four-digit year, got 'abc'"
+code: BAD_YEAR
+help[2]:
+  Run the command again with `--year 1977`
+  A range is not a filter this command builds; run one search per year

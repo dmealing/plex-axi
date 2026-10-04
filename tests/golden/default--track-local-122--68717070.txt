@@ -1,0 +1,9 @@
+$ plex-axi track local://122
+environment: default
+exit: 2
+
+error: "'local://122' is a guid, not a rating key"
+code: GUID_NOT_RATING_KEY
+help[2]:
+  Plex gives an item it never matched a `local://` guid, which is this server's rating key with a scheme in front of it
+  Run `plex-axi track 122`

@@ -23,14 +23,14 @@ the rest was never missing.
 
 from __future__ import annotations
 
-from axi_toolkit.plex.ids import handoff, validate_rating_key
+from axi_toolkit.plex.ids import handoff
 
 from .. import playback
 from ..argspec import Command, Flag, Sub
-from ..errors import UsageError
+from ..errors import AxiError
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import article
+from ._common import article, parse_key, quoted
 
 #: What Plex will build an audio play queue from. An artist is in because "play
 #: everything by this artist" is a real request the server answers the same way;
@@ -93,7 +93,8 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], command=("play",))
+    ref = parse_key(parsed.positionals[0], command=("play",))
+    key = ref.key
 
     # Before the connection, not after it: a refused dispatch must not be a
     # request the server ever hears about. With the gate closed the CLI will not
@@ -101,6 +102,7 @@ def run(ctx, name: str, sub: str, parsed):
     playback.require(ctx.environ, action=f"play {key}")
 
     server = ctx.server()
+    ref.confirm(server)
     item = _fetch(server, key)
     kind = _kind(item, key)
 
@@ -172,7 +174,7 @@ def _kind(item, key: str) -> str:
     if kind == "playlist":
         listed = getattr(item, "playlistType", "") or ""
         if listed != AUDIO:
-            raise UsageError(
+            raise AxiError(
                 f"{key} is {article(listed)} {listed} playlist, and plex-axi plays music only",
                 help_lines=[
                     "Run `plex-axi playlist list` for the audio playlists on this server",
@@ -181,7 +183,7 @@ def _kind(item, key: str) -> str:
             )
         return kind
     if kind not in PLAYABLE:
-        raise UsageError(
+        raise AxiError(
             f"{key} is {article(kind)} {kind} on this server, and plex-axi plays music only",
             help_lines=[
                 f"playable kinds: {', '.join(PLAYABLE)}",
@@ -193,4 +195,4 @@ def _kind(item, key: str) -> str:
 
 
 def _invocation(key: str, target) -> str:
-    return f"plex-axi play {key} --client '{target.title}'"
+    return f"plex-axi play {key} --client {quoted(target.title)}"

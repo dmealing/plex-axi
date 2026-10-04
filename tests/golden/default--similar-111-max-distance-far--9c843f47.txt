@@ -1,0 +1,8 @@
+$ plex-axi similar 111 --max-distance far
+environment: default
+exit: 2
+
+error: "--max-distance needs a number between 0 and 1, got 'far'"
+code: BAD_DISTANCE
+help[1]:
+  Run the command again with `--max-distance 0.25`

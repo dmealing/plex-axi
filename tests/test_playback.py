@@ -465,7 +465,7 @@ def test_something_that_is_not_music_is_refused_before_anything_is_sent(
     server, cli_run, playing_env, argv
 ):
     result = cli_run(*argv, "--client", "Example Client", "--now", env=playing_env)
-    assert result.code == 2
+    assert result.code == 1
     assert "WRONG_ITEM_TYPE" in result
     assert server.played == []
 

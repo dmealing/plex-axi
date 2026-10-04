@@ -1,0 +1,12 @@
+$ plex-axi play 111 --client Nobody
+environment: playing
+exit: 1
+
+error: no target called 'Nobody' is available to this server
+code: NO_SUCH_TARGET
+help[5]:
+  targets that can play: 'Example Client' (local), 'Example Portless' (local)
+  answered but cannot play: 'Example Screen' (local) -- these do not advertise playback
+  --client matches a title exactly, case-folded, or a machine_id; `plex-axi clients` prints both
+  local: 3 client(s) known to this server
+  sonos: not consulted -- PLEX_ACCOUNT_TOKEN is not set and Plex for Sonos needs a plex.tv account token, which PLEX_TOKEN is not
