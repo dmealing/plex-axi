@@ -220,6 +220,8 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 - `argspec.py` — per-subcommand flag declarations, and the `access:` block `--help` prints under the
   description. Unknown flags are rejected by name with the valid ones inlined; `RENAMED` maps
   plausible wrong guesses (mostly video vocabulary) to the real flag.
+- `toolkit/` — the supported import surface for other programs that talk to the same Plex server
+  through their own code. See "The local toolkit" below.
 - `commands/` — one module per noun, each exposing `COMMAND_FOR(noun)` and
   `run(ctx, noun, sub, parsed)`.
 
@@ -258,6 +260,35 @@ an absent value becomes, which of the three artist names a compilation needs. A 
 have to carry all of that as parameters, which is the hand-written version with indirection in front
 of it. **Leave them hand-written.** What they needed was not deduplication but a check that the
 tests reach all of them — see "Build, test, lint".
+
+### The local toolkit: what stayed, importable
+
+`plex_axi.toolkit` is the supported import surface of this distribution for programs that talk to
+the same Plex server through their own code. It holds the pure, reusable rules the live test
+discovered, measured against a real server: four modules, no client library, no output, no
+connection, and errors as data.
+
+- **`plex_axi.toolkit.matching`** — name matching, folding typographic variants and handling
+  ambiguity: `fold()` normalizes a name, `same_name()` tests equality, `resolve_name()` chooses one
+  held name for a typed one and returns candidates on a folded tie or a miss, `exact_matches()` filters
+  rows by exact name, `spellings()` generates variants, `loosely_matches()` tests substring and
+  pattern, `clean_text()` removes formatting.
+- **`plex_axi.toolkit.search`** — the pure half of the search planner: `filter_value()` cleans
+  filter input, `compose()` builds a parenthesised predicate, `nearest_request()` and
+  `nearest_rows()` read the free-text hubs, `performer_honoured()` and `track_artist()` handle
+  the artist-or-performer distinction, `sonic_analysis()` picks an analysis version, and
+  `track_year()` extracts a year from metadata.
+- **`plex_axi.toolkit.shapes`** — response validation and answer classification: `answer_kind()`
+  identifies the server's answer type, `is_server_fault()` and `parsed_fault()` test for server
+  errors, `acts_on_get()` refuses paths whose GET changes state, `normalise_path()` and
+  `has_dot_segments()` sanitize paths.
+- **`plex_axi.toolkit.ids`** — identifier parsing: `parse_reference()` extracts a rating key
+  from any of six `plex://` forms or local identifiers, handles non-ASCII digits and returns a
+  `Reference` with the kind and key, `same_server()` tests whether two identifiers name the same
+  machine.
+
+The CLI imports all of it and keeps what needs a command line or a connection: the refusals, the
+flag names, the recovery lines, the gate variables, the output formatting.
 
 ### The shared package: what left, and the one thing it changed
 
