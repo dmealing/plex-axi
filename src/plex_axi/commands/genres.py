@@ -23,7 +23,7 @@ from ..argspec import Command, Flag, Sub
 from ..errors import UsageError
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import article, parse_libtype, parse_limit
+from ._common import article, parse_libtype, parse_limit, quoted
 
 #: Which Plex filter field each noun reads, and the libtype it is carried on.
 #:
@@ -101,7 +101,7 @@ def run(ctx, name: str, sub: str, parsed):
         return doc
 
     doc[name] = shown
-    help_lines = [f"Run `plex-axi search --{field} '{shown[0]}'` to search on one of these"]
+    help_lines = [f"Run `plex-axi search --{field} {quoted(shown[0])}` to search on one of these"]
     if len(titles) > len(shown):
         help_lines.append(f"Run `plex-axi {name} --limit {len(titles)}` for all {len(titles)}")
     help_lines.append("Values are exact: pass one of these strings, not a synonym for it")

@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+from xml.etree.ElementTree import ParseError
 
 # plexapi reads `log.show_secrets` from the environment at import time and uses
 # it to decide whether to install its own secrets filter. Setting the variable
@@ -44,7 +45,7 @@ from plexapi.server import PlexServer
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from . import __version__, output
+from . import __version__, output, shapes
 from .errors import ApiError, AuthFailed, ConnectionFailed
 from .errors import NotFound as AxiNotFound
 
@@ -57,6 +58,67 @@ SECTION_VAR = "PLEX_SECTION"
 MUSIC_SECTION_TYPE = "artist"
 
 _hardened = False
+
+
+class MalformedAnswer(requests.exceptions.RequestException):
+    """A 200 whose body is not something a Plex Media Server sends.
+
+    The client library checks the status code and then parses whatever came
+    back, so three different non-answers used to reach the commands as three
+    different wrong things: an empty body became ``None`` and the first attribute
+    read raised ``AttributeError`` (reported as a bug in this tool), JSON or a
+    truncated document raised ``ParseError`` (the same), and an HTML page parsed
+    cleanly into an element with no children -- which every list command then
+    reported as a successful, empty answer. All three are a transport fault:
+    something answered, and it was not Plex's API.
+
+    A ``RequestException`` so that every existing ``except`` around a request
+    already treats it as the transport failing rather than as a refusal.
+    """
+
+    EMPTY = shapes.EMPTY
+    UNPARSEABLE = shapes.UNPARSEABLE
+    FOREIGN = shapes.FOREIGN
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+class Server(PlexServer):
+    """The client library's server, refusing an answer that is not Plex's.
+
+    ``query`` is the one method every read in the client library goes through,
+    which makes it the one place a non-answer can be caught before a command
+    mistakes it for an empty library.
+    """
+
+    def query(self, key, method=None, headers=None, params=None, timeout=None, **kwargs):
+        sender = method or self._session.get
+        seen: dict = {}
+
+        def recording(url, **sent):
+            seen["response"] = sender(url, **sent)
+            return seen["response"]
+
+        # The client library logs the method by name.
+        recording.__name__ = getattr(sender, "__name__", "get")
+        try:
+            data = super().query(
+                key, method=recording, headers=headers, params=params, timeout=timeout, **kwargs
+            )
+        except ParseError:
+            body = getattr(seen.get("response"), "text", "") or ""
+            raise MalformedAnswer(shapes.answer_kind(body)) from None
+        if sender != self._session.get:
+            # A write legitimately answers with nothing: `/:/rate` and a
+            # playlist deletion both return an empty 200.
+            return data
+        if data is None:
+            raise MalformedAnswer(MalformedAnswer.EMPTY)
+        if shapes.is_foreign_root(data.tag):
+            raise MalformedAnswer(MalformedAnswer.FOREIGN)
+        return data
 
 
 def harden() -> None:
@@ -121,12 +183,19 @@ def build_session(*, retries: int = 1) -> requests.Session:
     actually hits -- a server that is awake but was not ready for the first
     packet -- without turning a genuine outage into a long wait. Reads are
     deliberately not retried: a read that failed halfway may have been served.
+
+    ``read=False`` rather than ``read=0``, and the difference is the error the
+    caller sees. With ``0`` urllib3 counts a read timeout against a budget that
+    is already spent and raises ``MaxRetryError``, which ``requests`` reports as
+    a ``ConnectionError`` -- so a server that accepted the connection and was
+    merely slow was described as unreachable, with advice to check its address.
+    ``False`` re-raises the read timeout as itself.
     """
     session = requests.Session()
     retry = Retry(
         total=None,
         connect=retries,
-        read=0,
+        read=False,
         redirect=0,
         status=0,
         backoff_factor=0.3,
@@ -154,15 +223,22 @@ def connect(config, *, session=None, token: str | None = None) -> PlexServer:
     # a URL can carry userinfo.
     output.debug(f"connecting to {config.base_url} timeout={config.timeout:g}s")
     try:
-        server = PlexServer(
+        server = Server(
             config.base_url, token or config.token, session=session, timeout=config.timeout
         )
     except Unauthorized as exc:
         raise _auth_error(exc) from None
+    except MalformedAnswer as exc:
+        raise _malformed_error(config.base_url, exc) from None
     except (BadRequest, NotFound) as exc:
         raise _reachability_error(config, exc) from None
     except requests.exceptions.RequestException as exc:
         raise _transport_error(config, exc) from None
+    if not getattr(server, "machineIdentifier", None):
+        # Well-formed XML that is not a Plex root: every identifier this tool
+        # prints is built on the machine identifier, so its absence is the
+        # difference between a Plex Media Server and something else answering.
+        raise _not_plex(config.base_url)
     # Belt and braces: even with the configuration forced off, pin the instance
     # attribute that `url()` actually consults.
     server._showSecrets = False
@@ -221,7 +297,7 @@ def _transport_error(config, exc: Exception) -> ConnectionFailed:
         return ConnectionFailed(
             f"{config.base_url} did not answer within {config.timeout:g}s",
             help_lines=[
-                "Run the command again with `--timeout 60` if the server is slow to wake",
+                "Run the command again with `--timeout 60`; the server is reachable but slow",
                 "Check that PLEX_URL names the server on the local network, not plex.tv",
             ],
             code="TIMEOUT",
@@ -237,19 +313,63 @@ def _transport_error(config, exc: Exception) -> ConnectionFailed:
 
 
 def _reachability_error(config, exc: Exception) -> ConnectionFailed:
-    """A well-formed HTTP answer that was not a Plex Media Server.
+    """A well-formed HTTP answer that was not a working Plex Media Server.
 
     A 404 on ``/`` means something is listening on that address and it is not
     Plex -- a reverse proxy, a router admin page, the wrong port. Saying
     "unreachable" there would be the wrong failure reported as another.
+
+    A 5xx is the opposite case and must not be given the same name: a Plex Media
+    Server answers 503 while it starts and while it runs maintenance, so calling
+    that "not Plex" sends the caller to check a port that is correct.
     """
+    status, reason = describe_api_error(exc)
+    if status >= 500:
+        return _server_error(status, reason, what=config.base_url)
+    return _not_plex(config.base_url)
+
+
+def _not_plex(base_url: str) -> ConnectionFailed:
     return ConnectionFailed(
-        f"{config.base_url} answered, but not as a Plex Media Server",
+        f"{base_url} answered, but not as a Plex Media Server",
         help_lines=[
             "Check the port; a Plex Media Server serves its API on 32400 by default",
-            f"Run `plex-axi api / ` to see what {config.base_url} actually returns",
+            "Run `plex-axi doctor` to see which check fails",
         ],
         code="NOT_PLEX",
+    )
+
+
+def _server_error(status: int, reason: str, *, what: str) -> ConnectionFailed:
+    return ConnectionFailed(
+        f"{what} answered {status} ({reason}): the server is starting, busy or failing",
+        help_lines=[
+            "Wait a moment and run the command again; a Plex Media Server answers 503 while "
+            "it starts and while it runs maintenance",
+            "Run `plex-axi doctor` to see whether it has recovered",
+        ],
+        code="SERVER_ERROR",
+    )
+
+
+_MALFORMED = {
+    MalformedAnswer.EMPTY: "an empty answer",
+    MalformedAnswer.UNPARSEABLE: "an answer that is not XML, or is cut short",
+}
+
+
+def _malformed_error(what: str, exc: MalformedAnswer) -> ConnectionFailed:
+    """Something answered 200 and it was not Plex's API."""
+    if exc.kind == MalformedAnswer.FOREIGN:
+        return _not_plex(what)
+    return ConnectionFailed(
+        f"{what} sent {_MALFORMED[exc.kind]}",
+        help_lines=[
+            "Something between this machine and the server is answering in its place, or cut "
+            "the answer short; check PLEX_URL names the server itself",
+            "Run `plex-axi doctor` to see which check fails",
+        ],
+        code="BAD_RESPONSE",
     )
 
 
@@ -286,6 +406,19 @@ def translate(exc: Exception, *, what: str, help_lines=None):
             help_lines=help_lines or ["Run `plex-axi` to see what this server holds"],
             code="NOT_FOUND",
         )
+    if isinstance(exc, ParseError):
+        exc = MalformedAnswer(MalformedAnswer.UNPARSEABLE)
+    if isinstance(exc, MalformedAnswer):
+        return _malformed_error(f"the server, asked for {what},", exc)
+    if isinstance(exc, requests.exceptions.Timeout):
+        return ConnectionFailed(
+            f"the server did not answer in time while reading {what}",
+            help_lines=[
+                "Run the command again with `--timeout 60`; the server is reachable but slow",
+                "Run `plex-axi doctor` to re-check the connection",
+            ],
+            code="TIMEOUT",
+        )
     if isinstance(exc, requests.exceptions.RequestException):
         return ConnectionFailed(
             f"the server stopped answering while reading {what}",
@@ -293,9 +426,18 @@ def translate(exc: Exception, *, what: str, help_lines=None):
             code="UNREACHABLE",
         )
     status, reason = describe_api_error(exc)
+    if status >= 500:
+        return _server_error(status, reason, what=f"the server, asked for {what},")
     prefix = f"{status} " if status else ""
     return ApiError(
         f"the server refused to return {what} ({prefix}{reason})",
-        help_lines=help_lines,
+        # A refusal with nothing under it is a dead end: the caller has no way
+        # to tell a bad argument from a broken server, so there is always a
+        # next step, even when the caller of this function had none to offer.
+        help_lines=help_lines
+        or [
+            "Run the command again with `--debug` for what the server answered",
+            "Run `plex-axi doctor` to check the server and the library",
+        ],
         code="REFUSED",
     )

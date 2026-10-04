@@ -225,7 +225,7 @@ def test_rate_needs_a_rating(server, cli_run, writable_env):
 
 def test_rate_refuses_something_that_is_not_music(server, cli_run, writable_env):
     result = cli_run("rate", "900", "--stars", "4", "--write", env=writable_env)
-    assert result.code == 2
+    assert result.code == 1
     assert "rates music only" in result
     assert server.writes == []
 
@@ -353,20 +353,26 @@ def test_a_playlist_can_be_created_added_to_and_trimmed(server, cli_run, writabl
 def test_a_playlist_that_holds_only_albums_is_a_zero_not_a_crash(server, cli_run, writable_env):
     """Every music libtype reports listType 'audio', so Plex will hold an album
     or an artist in an audio playlist -- "items but no tracks" is a real state,
-    reachable with this tool's own `--key`. The zero is the answer, it names
-    what the playlist does hold, and the next steps quote no track key because
-    there is none in the list."""
-    created = cli_run(
-        "playlist", "create", "Example Albums", "--key", "110", "--write", env=writable_env
+    made by another client. (This tool's own `--key` no longer makes one: it
+    takes tracks.) The zero is the answer, it names what the playlist does hold,
+    and the next steps quote no track key because there is none in the list."""
+    server.playlists.append(
+        {
+            "id": 650,
+            "title": "Example Albums",
+            "type": "audio",
+            "smart": 0,
+            "items": [{"key": 110, "item_id": 1900}],
+            "updatedAt": 1700000400,
+        }
     )
-    assert created.code == 0
 
     shown = cli_run("playlist", "show", "Example Albums", env=writable_env)
     assert shown.code == 0
     assert shown.line("count:") == "count: 0 of 1 items"
     assert "0 tracks in this playlist" in shown
     assert shown.line("other:") == "other: 1 item(s) that are not tracks"
-    assert "playlist add 'Example Albums' --key <rating_key>" in shown
+    assert "playlist add 650 --key <rating_key>" in shown
     assert "INTERNAL_ERROR" not in shown
 
 
@@ -400,7 +406,7 @@ def test_a_create_whose_title_holds_other_items_is_refused_with_the_command_that
     )
     assert result.code == 1
     assert "PLAYLIST_EXISTS" in result
-    assert "playlist add 'Example Playlist' --key 122 --write" in result
+    assert "playlist add 501 --key 122 --write" in result
     assert server.writes == []
 
 

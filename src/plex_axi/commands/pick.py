@@ -29,6 +29,8 @@ the caller can tell "no track matched" from "that constraint never ran".
 
 from __future__ import annotations
 
+import datetime
+
 from axi_toolkit.plex.filters import (
     RATED_MIN_ZERO_NOTE,
     RELATIVE_DATE,
@@ -42,8 +44,10 @@ from axi_toolkit.plex.ids import handoff
 from ..argspec import Command, Flag, Sub
 from ..errors import AnyAxiError
 from ..music import (
+    GROUP_BY_TITLE,
     advertised_sorts,
     available_fields,
+    compose,
     default_fields,
     label_filters,
     offers,
@@ -116,7 +120,9 @@ COMMAND = Command(
         "the shuffle is the server's `sort=random` over the whole match set, not a "
         "shuffle of one page",
         "identical titles are collapsed with Plex's own `group=title`, so one song "
-        "does not fill the list from three pressings",
+        "does not fill the list from three pressings; with `--not-played-since` the row "
+        "shown for a title may be a different pressing from the one that matched, and "
+        "`pressings` says when that happened",
         "ratings are stars (0-5) in and out, so a rating in a result can be passed back",
     ),
     examples=(
@@ -167,6 +173,17 @@ def run(ctx, name: str, sub: str, parsed):
     doc: dict = {"count": count_line(len(rows), result.total), "shuffled": shuffled}
     if result.grouped:
         doc["grouped"] = result.grouped
+        recent = _played_inside(result.items, asked["period"])
+        if recent:
+            # Said where the rows are, because it changes what they mean. The
+            # filter matched *a* pressing of each title; `group=title` then lets
+            # the server choose which pressing stands for it, and that one may
+            # have been played yesterday.
+            doc["pressings"] = (
+                f"{recent} of these rows show a pressing played inside the period: titles "
+                f"are collapsed ({GROUP_BY_TITLE}), the filter matched another pressing of the "
+                "same title, and the server chose which one to show"
+            )
     if described:
         doc["filters"] = described
     if asked["stars"] == 0:
@@ -257,15 +274,47 @@ def _build(section, asked) -> tuple:
         else:
             unavailable("--exclude-live", "album.subformat")
 
-    return _compose(filters, groups), described, unapplied
+    return compose(filters, groups), described, unapplied
 
 
-def _compose(filters: dict, groups: list) -> dict:
-    """One filter expression from the plain predicates and the grouped ones."""
-    if not groups:
-        return filters
-    parts = ([filters] if filters else []) + groups
-    return parts[0] if len(parts) == 1 else {"and": parts}
+#: Seconds in each unit of a relative period, as Plex reads them.
+_UNIT_SECONDS = {
+    "s": 1,
+    "m": 60,
+    "h": 3600,
+    "d": 86400,
+    "w": 604800,
+    "mon": 2592000,
+    "y": 31536000,
+}
+
+
+def _cutoff(period: str):
+    """The moment ``--not-played-since`` names, as a local naive datetime."""
+    if RELATIVE_DATE.match(period):
+        digits = "".join(char for char in period if char.isdigit())
+        unit = period[len(digits) :]
+        return datetime.datetime.now() - datetime.timedelta(
+            seconds=int(digits) * _UNIT_SECONDS[unit]
+        )
+    return datetime.datetime.strptime(period, "%Y-%m-%d")
+
+
+def _played_inside(items, period) -> int:
+    """How many of the rows shown were themselves played after the cutoff.
+
+    A check on the answer, and only a count: the rows are not filtered here,
+    because a client-side filter is the thing this command does not do.
+    """
+    if not period:
+        return 0
+    cutoff = _cutoff(period)
+    inside = 0
+    for item in items:
+        played = getattr(item, "lastViewedAt", None)
+        if isinstance(played, datetime.datetime) and played.replace(tzinfo=None) > cutoff:
+            inside += 1
+    return inside
 
 
 def _echo_period(period: str) -> str:

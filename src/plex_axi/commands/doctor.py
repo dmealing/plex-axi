@@ -14,7 +14,7 @@ from __future__ import annotations
 from ..argspec import Command, Sub
 from ..config import describe_environment, missing_env_vars, setup_help
 from ..errors import AnyAxiError, help_lines_for
-from ..music import MUSIC_SECTION_TYPE
+from ..music import MUSIC_SECTION_TYPE, sonic_analysis
 from ..output import HelpBlock
 from ._common import plural
 
@@ -26,6 +26,8 @@ COMMAND = Command(
     subs=(Sub(name="doctor", summary="Run every connection check"),),
     notes=(
         "exits non-zero when any check fails, so it works as a CI or hook gate",
+        "`sonic analysis` is reported and never fails the run: a library with it off is "
+        "healthy, and `similar` simply has nothing to return",
         "a rejected token is reported as invalid or expired separately, because "
         "Plex answers 401 to both and only the response text tells them apart",
     ),
@@ -101,13 +103,33 @@ def run(ctx, name: str, sub: str, parsed):
         healthy = False
         checks.append(_check("filter fields", "fail", _brief(exc)))
 
+    checks.append(_analysis_check(section))
     return _document(checks, healthy=healthy, version=server.version)
+
+
+def _analysis_check(section) -> dict:
+    """Whether `similar` can return anything, said where a caller looks for why.
+
+    Not a failure: a library is perfectly usable with the analysis off. But
+    `similar` answering zero rows for every seed reads as a broken tool unless
+    something says the feature it depends on is switched off.
+    """
+    switch = sonic_analysis(section)
+    if switch is True:
+        return _check("sonic analysis", "ok", "on for this library; `similar` has seeds to use")
+    if switch is False:
+        return _check(
+            "sonic analysis",
+            "off",
+            "off for this library, so `similar` returns nothing for every seed",
+        )
+    return _check("sonic analysis", "unknown", "this server did not report the preference")
 
 
 def _check(name: str, status: str, detail: str) -> dict:
     """One row of the report.
 
-    Nine of these are built across the branches above and the shape has never
+    Twelve of these are built across the branches above and the shape has never
     varied between them. Building it in one place is what keeps it that way.
     """
     return {"check": name, "status": status, "detail": detail}

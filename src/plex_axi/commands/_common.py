@@ -2,15 +2,106 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 from axi_toolkit.plex.filters import LIBTYPES
+from axi_toolkit.plex.ids import validate_rating_key
 
-from ..errors import UsageError
+from ..errors import AxiError, UsageError
 
 #: Preview length for long free-text values (a summary, a review) before
 #: `--full` is needed.
 PREVIEW_CHARS = 800
+
+
+def quoted(value) -> str:
+    """One value as a shell word, for a command line this tool prints.
+
+    Every suggestion is something an agent pastes into a shell, and the values
+    interpolated into one come from tags -- which come from files, which come
+    from anywhere. A title in double quotes runs its `$(...)`; a title in single
+    quotes breaks on its own apostrophe. `shlex.quote` is the one spelling that
+    survives both, and the output boundary strips control characters besides.
+
+    One character survives neither: a backtick. A suggestion is delimited by
+    backticks, so a value containing one ends the command early for anybody
+    reading it out of the line, whatever the shell would have made of it. Such a
+    value is replaced by a placeholder -- a suggestion that says "fill this in"
+    is honest where one that reads as complete and is not would be run.
+    """
+    text = str(value)
+    if "`" in text:
+        return "'<exact title>'"
+    return shlex.quote(text)
+
+
+#: Form 1, the media id this tool prints in every row. The server half is a
+#: machine identifier -- hexadecimal -- which is what keeps `plex://track/12345`
+#: (a tool's internal id, form 4) out of this pattern: `track` is not hex.
+_MEDIA_ID = re.compile(r"^plex://([0-9A-Fa-f]{8,})/([0-9]+)$")
+
+#: Form 2: the rating key alone, which older integrations emit.
+_LEGACY_MEDIA_ID = re.compile(r"^plex://([0-9]+)$")
+
+
+class KeyRef:
+    """A rating key, and the server the caller said it belongs to, if they said."""
+
+    __slots__ = ("key", "machine", "raw")
+
+    def __init__(self, key: str, machine: str | None, raw: str) -> None:
+        self.key = key
+        self.machine = machine
+        self.raw = raw
+
+    def confirm(self, server) -> str:
+        """The key, once the server it names is known to be this one.
+
+        A media id is `plex://<machineIdentifier>/<ratingKey>`, and a rating key
+        is a row number in *one* server's database -- so the same number on
+        another server is a different item. The identifier cannot be checked
+        until a connection exists, which is why this is a second step.
+        """
+        if self.machine and self.machine.lower() != str(server.machineIdentifier).lower():
+            raise AxiError(
+                f"{self.raw!r} is a media id for a different server",
+                help_lines=[
+                    "A rating key is a row number on one server, so that number names "
+                    "something else here",
+                    "Run `plex-axi search --track '<title>'` to find the item on this server",
+                ],
+                code="MEDIA_ID_OTHER_SERVER",
+            )
+        return self.key
+
+
+def parse_key(raw, *, command) -> KeyRef:
+    """Accept what this tool prints as an identifier, and refuse what only looks like one.
+
+    Every row carries a ``key`` and a ``media_id``, and both come back here: a
+    command that printed an identifier and then refused it cost the caller a
+    call to learn which of the two it wanted. ``command`` is the caller's own
+    words after the tool name, flags included, so a recovery line repeats the
+    whole invocation rather than the half before the key.
+    """
+    value = str(raw).strip()
+    if value.isdigit() and not value.isascii():
+        # `str.isdigit` and `\d` both accept full-width and other non-ASCII
+        # digits. They are not a rating key the server will resolve, so they are
+        # refused here rather than sent and reported as not found.
+        raise UsageError(
+            f"a rating key is written in ASCII digits, got {value!r}",
+            help_lines=[f"Run `plex-axi {' '.join(command)} {int(value)}`"],
+            code="BAD_RATING_KEY",
+        )
+    match = _MEDIA_ID.match(value)
+    if match:
+        return KeyRef(match.group(2), match.group(1), value)
+    match = _LEGACY_MEDIA_ID.match(value)
+    if match:
+        return KeyRef(match.group(1), None, value)
+    return KeyRef(validate_rating_key(value, command=tuple(command)), None, value)
 
 
 def parse_limit(raw, *, default: int, maximum: int = 500) -> int:

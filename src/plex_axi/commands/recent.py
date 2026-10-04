@@ -45,7 +45,10 @@ COMMAND = Command(
             summary="List recent additions",
         ),
     ),
-    notes=("scoped to the music library: the server-wide recently-added list spans video too",),
+    notes=(
+        "scoped to the music library: the server-wide recently-added list spans video too",
+        "dates are in this machine's local time zone, not the server's and not UTC",
+    ),
     examples=(
         "plex-axi recent",
         "plex-axi recent --type track --limit 50",

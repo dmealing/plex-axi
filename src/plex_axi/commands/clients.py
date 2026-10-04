@@ -25,6 +25,7 @@ from __future__ import annotations
 from .. import playback
 from ..argspec import Command, Sub
 from ..output import HelpBlock
+from ._common import quoted
 
 COMMAND = Command(
     name="clients",
@@ -87,10 +88,9 @@ def _help(targets: list) -> list:
             "Open a Plex client on the network and run `plex-axi clients` again",
             "Run `plex-axi sessions` to see whether the server thinks anything is playing",
         ]
-    first = targets[0]
+    first = quoted(targets[0].title)
     return [
-        f"Run `plex-axi play <rating_key> --client '{first.title}'` to see what would happen",
-        f"Run `plex-axi play <rating_key> --client '{first.title}' {playback.CONFIRM_FLAG}` "
-        "to start it",
+        f"Run `plex-axi play <rating_key> --client {first}` to see what would happen",
+        f"Run `plex-axi play <rating_key> --client {first} {playback.CONFIRM_FLAG}` to start it",
         "Run `plex-axi search --artist '<name>'` for a rating key to play",
     ]

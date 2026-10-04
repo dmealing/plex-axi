@@ -122,7 +122,8 @@ def test_album_and_artist_detail_views_link_onward(server, cli_run):
 
 def test_asking_for_the_wrong_noun_says_what_the_key_actually_is(server, cli_run):
     result = cli_run("track", "110")
-    assert result.code == 2
+    # Exit 1: it took a lookup to learn what the key names (the exit-code rule).
+    assert result.code == 1
     # B14: "a album" reads as carelessness in the message most likely to be
     # read word by word, and two of the three nouns here begin with a vowel.
     assert "is an album on this server, not a track" in result
@@ -156,7 +157,7 @@ def test_similar_honours_a_maximum_distance_server_side(server, cli_run):
 
 def test_similar_on_an_album_says_similarity_is_per_track(server, cli_run):
     result = cli_run("similar", "110")
-    assert result.code == 2
+    assert result.code == 1
     assert "per track" in result
 
 

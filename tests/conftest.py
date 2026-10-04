@@ -535,6 +535,63 @@ class Tables:
     def rows(self, libtype):
         return {"artist": self.artists, "album": self.albums, "track": self.tracks}[libtype]
 
+    def add(self, kind, key, title, **fields):
+        """One more row, for a test that needs a title the shared fixture lacks.
+
+        The shared rows are deliberately few and plain, because dozens of tests
+        count them. A title with a typographic apostrophe, a comma or a shell
+        metacharacter is added by the test that needs it, to its own server.
+        """
+        base = {
+            "artist": {
+                "genres": [],
+                "styles": [],
+                "moods": [],
+                "userRating": None,
+                "addedAt": 1640000000,
+                "childCount": 1,
+                "leafCount": 1,
+                "summary": "",
+            },
+            "album": {
+                "year": 1999,
+                "subformat": [],
+                "leafCount": 1,
+                "userRating": None,
+                "addedAt": 1640000100,
+                "studio": "",
+                "summary": "",
+            },
+            "track": {
+                "index": 1,
+                "userRating": None,
+                "duration": 200000,
+                "moods": [],
+                "analysis": 6,
+                "originalTitle": "",
+                "viewCount": 0,
+                "skipCount": 0,
+                "addedAt": 1640000110,
+                "lastViewedAt": 0,
+                "file": f"/example/library/extra/{key}.flac",  # leakcheck: allow=media-path
+                "container": "flac",
+                "bitrate": 900,
+                "size": 20000000,
+                "accessible": 1,
+                "exists": 1,
+            },
+        }[kind]
+        row = {**base, "key": key, "title": title, **fields}
+        if kind == "artist":
+            row.setdefault("guid", f"plex://artist/a1b2c3d4e5f60718293a{key:04d}")
+        self.rows(kind).append(row)
+        self.by_key[key] = (kind, row)
+        if kind == "artist":
+            self.artist_by_key[key] = row
+        if kind == "album":
+            self.album_by_key[key] = row
+        return row
+
 
 # ------------------------------------------------------------- accepted parameters
 
@@ -593,7 +650,18 @@ KNOWN_FIELDS = {
     "track.skipCount",
     "track.trash",
     "album.subformat",
+    # Accepted on the wire and *not* advertised in the section's metadata, which
+    # is exactly how a real server treats it: `SECTION_FIELDS` below does not
+    # list it, and a search on it still narrows the result.
+    "track.originalTitle",
+    # The rating key as a filter: "everything under this artist". Also accepted
+    # and not advertised -- the client library adds `id` by hand for the same
+    # reason. It is how an artist's albums and tracks are counted.
+    "artist.id",
 }
+
+#: What `/hubs/search` defines. The same rule as everywhere else.
+HUB_SEARCH_PARAMS = {"query", "sectionId", "limit"}
 
 #: Query parameters the playlist endpoints define. Same rule as everywhere else:
 #: anything not here is a 400, so a write that reached the URL misspelled fails
@@ -673,7 +741,7 @@ def _tags(kind, ids, table):
     return "".join(f'<{kind} id="{i}" tag={quoteattr(table[i])}/>' for i in ids if i in table)
 
 
-def artist_xml(row):
+def artist_xml(row, *, detail=False):
     head = _attrs(
         [
             ("ratingKey", row["key"]),
@@ -685,8 +753,12 @@ def artist_xml(row):
             ("summary", row["summary"]),
             ("userRating", row["userRating"]),
             ("addedAt", row["addedAt"]),
-            ("childCount", row["childCount"]),
-            ("leafCount", row["leafCount"]),
+            # TRANSCRIBED: a real artist element carries neither `childCount`
+            # nor `leafCount`, in a list or in its own detail view. Both were
+            # here once, the tool read them, and an artist's album and track
+            # counts were empty on every real server. The counts come from a
+            # section search on `artist.id`.
+            ("librarySectionID", MUSIC_SECTION_KEY if detail else None),
         ]
     )
     body = (
@@ -697,7 +769,7 @@ def artist_xml(row):
     return f"<Directory {head}>{body}</Directory>"
 
 
-def album_xml(row, tables):
+def album_xml(row, tables, *, detail=False):
     artist = tables.artist_by_key[row["artist"]]
     head = _attrs(
         [
@@ -711,7 +783,10 @@ def album_xml(row, tables):
             ("parentTitle", artist["title"]),
             ("parentGuid", artist["guid"]),
             ("year", row["year"]),
-            ("leafCount", row["leafCount"]),
+            # TRANSCRIBED: `leafCount` is on an album's own detail view and not
+            # on an album *row*. It was on both here, so `--fields tracks` on an
+            # album search printed a number in every test and null on a real one.
+            ("leafCount", row["leafCount"] if detail else None),
             ("userRating", row["userRating"]),
             ("addedAt", row["addedAt"]),
             ("studio", row["studio"]),
@@ -795,7 +870,11 @@ def track_xml(row, tables, *, check_files=False, distance=None, session=None, it
             ("grandparentRatingKey", artist["key"]),
             ("grandparentTitle", artist["title"]),
             ("index", row["index"]),
-            ("year", album["year"]),
+            # TRANSCRIBED: a real track carries `parentYear` and no `year` at
+            # all (0 of 10,851 on the library this was read from). This element
+            # once carried an invented `year=`, the tool read it, and a track's
+            # year was empty on every real server while every test here passed.
+            ("parentYear", album["year"]),
             ("duration", row["duration"]),
             ("userRating", row["userRating"]),
             ("viewCount", row["viewCount"]),
@@ -1110,8 +1189,15 @@ def _value_for(field, kind, row, tables):
         source = row if kind == "track" else None
     if source is None:
         return None
+    if name == "id":
+        return source["key"]
     if name == "title":
+        if scope == "track":
+            # Measured: `track.title` also matches the track's performer.
+            return [source["title"], source.get("originalTitle") or ""]
         return source["title"]
+    if name == "originalTitle":
+        return source.get("originalTitle") or ""
     if name == "year":
         return source.get("year")
     if name == "userRating":
@@ -1181,6 +1267,75 @@ def _matches_date(operator, wanted, value) -> bool:
     raise PlexRefusal(400, f"operator {operator} is not defined for a date")
 
 
+def text_matches(wanted, text) -> bool:
+    """A title filter, the way a real server evaluates one.
+
+    TRANSCRIBED from a live server, because every part of it is something the
+    tidy substring match this replaced got wrong -- and the tool was built
+    against that match:
+
+    * a comma separates alternatives, and an **empty alternative matches
+      everything** (a value ending in a comma returned the whole library);
+    * within an alternative each word must *begin* a word of the title, in the
+      order typed -- so a substring from the middle of a word matches nothing;
+    * a doubled or leading space is an empty word, and an empty word matches
+      nothing;
+    * case is ignored, and nothing else is: an ASCII apostrophe does not match a
+      typographic one, and an unaccented letter does not match an accented one.
+    """
+    words = text.lower().split(" ")
+    for alternative in wanted.split(","):
+        if alternative == "":
+            return True
+        position = 0
+        for part in alternative.lower().split(" "):
+            if part == "":
+                break
+            found = next(
+                (i for i in range(position, len(words)) if words[i].startswith(part)), None
+            )
+            if found is None:
+                break
+            position = found + 1
+        else:
+            return True
+    return False
+
+
+def _matches_text(operator, wanted, texts) -> bool:
+    if operator == "":
+        return any(text_matches(wanted, text) for text in texts)
+    text, needle = texts[0].lower(), wanted.lower()
+    if operator == "=":
+        return text == needle
+    if operator == "!":
+        return not text_matches(wanted, texts[0])
+    if operator == "<":
+        return text.startswith(needle)
+    if operator == ">":
+        return text.endswith(needle)
+    raise PlexRefusal(400, f"operator {operator} is not defined for a string")
+
+
+def folded(text) -> str:
+    """What the server's free-text search compares: accents and typographic
+    punctuation folded away, which the per-field filter above never does."""
+    import unicodedata
+
+    swaps = {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2010": "-"}
+    swaps.update({"\u2013": "-", "\u2014": "-", "\u2026": "..."})
+    plain = "".join(swaps.get(char, char) for char in str(text))
+    plain = unicodedata.normalize("NFKD", plain)
+    return "".join(char for char in plain if not unicodedata.combining(char)).lower()
+
+
+def hub_matches(wanted, text) -> bool:
+    """`/hubs/search`: every word typed begins a word of the title, in any order."""
+    words = folded(text).split()
+    parts = folded(wanted).split()
+    return bool(parts) and all(any(word.startswith(part) for word in words) for part in parts)
+
+
 def _matches(field, operator, wanted, kind, row, tables):
     value = _value_for(field, kind, row, tables)
     if value is _NEVER_PLAYED:
@@ -1195,6 +1350,8 @@ def _matches(field, operator, wanted, kind, row, tables):
         return operator in ("<<", "<")
     if value is None:
         return False
+    if isinstance(value, list) and field == "track.title":
+        return _matches_text(operator, wanted, value)
     if isinstance(value, list):
         # Tag fields carry ids; a comma-separated value is an OR, and `!` negates
         # the whole set -- which is what `album.subformat!=51,52` asks for.
@@ -1207,18 +1364,7 @@ def _matches(field, operator, wanted, kind, row, tables):
     if _is_relative(wanted):
         return _matches_date(operator, wanted, value)
     if isinstance(value, str):
-        text, needle = value.lower(), wanted.lower()
-        if operator == "":
-            return needle in text
-        if operator == "=":
-            return text == needle
-        if operator == "!":
-            return needle not in text
-        if operator == "<":
-            return text.startswith(needle)
-        if operator == ">":
-            return text.endswith(needle)
-        raise PlexRefusal(400, f"operator {operator} is not defined for a string")
+        return _matches_text(operator, wanted, [value])
     number = float(wanted)
     if operator == "":
         return float(value) == number
@@ -1258,6 +1404,10 @@ class FakePlex:
         sonos=None,
         sonos_status=200,
         mints_tokens=False,
+        performer_field="honoured",
+        analysis=True,
+        drops_additions=False,
+        loose_grouping=False,
     ):
         self.groupable = groupable
         self.token = token
@@ -1313,6 +1463,30 @@ class FakePlex:
         #: and a double that always minted one would have hidden the fact that
         #: the client library's own play path fails outright on such a server.
         self.mints_tokens = mints_tokens
+        #: What this server does with `track.originalTitle`, a field it accepts
+        #: and does not advertise. "honoured" is what was measured. "ignored" is
+        #: the failure the tool has to survive: a server that does not know a
+        #: filter field drops it and answers with the unfiltered set.
+        self.performer_field = performer_field
+        #: The library's own `musicAnalysis` preference. Moods exist either way
+        #: -- the metadata agent writes them too -- so the vocabulary is not
+        #: evidence that the analysis ran.
+        self.analysis = analysis
+        #: One injected fault, for the answers a real server can give and a tidy
+        #: double never does: ``{"status": 503}``, ``{"body": ""}``,
+        #: ``{"body": "<html>..."}``, ``{"raise": exception}``, each optionally
+        #: limited to paths containing ``match``.
+        self.fault = None
+        #: A server that answers a playlist addition with 200 and adds nothing,
+        #: which a real one was seen to do. The tool has to report what the
+        #: playlist holds afterwards, not what it asked for.
+        self.drops_additions = drops_additions
+        #: `group=title` on a real server returns one row per title, and which
+        #: pressing that row *is* was seen not to be the one the filter matched:
+        #: a title with one pressing inside a date window and one outside came
+        #: back as the pressing inside it. True models that, by letting the
+        #: first pressing in the library stand for the title.
+        self.loose_grouping = loose_grouping
         self.playqueues = {}
         self._next_playqueue = 700
         #: Every playback command this server was asked to forward, so a test
@@ -1365,6 +1539,10 @@ class FakePlex:
             return self._sections()
         if path.startswith("/library/sections/"):
             return self._section(path, query, pairs, start, size)
+        if path == "/hubs/search":
+            return self._hub_search(query)
+        if path == "/myplex/account":
+            return self._myplex_account()
         if path.startswith("/library/metadata/"):
             return self._metadata(path, query)
         if path == "/status/sessions":
@@ -1465,7 +1643,110 @@ class FakePlex:
 
         if tail == "all":
             return self._all(query, pairs, start, size)
+        if tail == "prefs":
+            return self._prefs()
         raise PlexRefusal(404, f"no such section endpoint: {tail}")
+
+    def _myplex_account(self):
+        """The server's link to its owner's plex.tv account.
+
+        TRANSCRIBED (names only): the root element is `MyPlex`, not a
+        `MediaContainer`, and it carries the owner's *account* token under
+        `authToken` -- a broader credential than the server token, handed to
+        anybody who can ask this server anything.
+        """
+        head = _attrs(
+            [
+                ("authToken", ACCOUNT_TOKEN),
+                ("username", "example-owner"),
+                ("mappingState", "mapped"),
+                ("signInState", "ok"),
+                ("subscriptionActive", 1),
+                ("subscriptionState", "Active"),
+            ]
+        )
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<MyPlex {head}/>'
+
+    def _prefs(self):
+        """The library's preferences. TRANSCRIBED: the element is `Setting` and
+        the attribute names are the ones a real server sends."""
+        settings = [("musicAnalysis", "bool", "true" if self.analysis else "false")]
+        settings.append(("respectTags", "bool", "true"))
+        body = "".join(
+            "<Setting {}/>".format(
+                _attrs(
+                    [
+                        ("id", name),
+                        ("label", name),
+                        ("summary", "An invented preference description."),
+                        ("type", kind),
+                        ("default", "true"),
+                        ("value", value),
+                        ("hidden", 0),
+                        ("advanced", 0),
+                        ("group", "example"),
+                    ]
+                )
+            )
+            for name, kind, value in settings
+        )
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<MediaContainer size="{len(settings)}">{body}</MediaContainer>'
+
+    def _hub_search(self, query):
+        """`/hubs/search`: the server's own free-text search, one hub per type.
+
+        TRANSCRIBED: the hub and child element names and their attributes are a
+        real answer's. It folds accents and typographic punctuation, which the
+        per-field filters do not -- the whole reason the tool asks it for the
+        nearest titles when a filter finds nothing.
+        """
+        unknown = sorted(set(query) - HUB_SEARCH_PARAMS)
+        if unknown or "query" not in query:
+            raise PlexRefusal(400, f"bad hub search parameters: {', '.join(unknown)}")
+        limit = int(query.get("limit", 3))
+        hubs = []
+        for kind, tag in (("album", "Directory"), ("track", "Track"), ("artist", "Directory")):
+            rows = [
+                row for row in self.tables.rows(kind) if hub_matches(query["query"], row["title"])
+            ][:limit]
+            body = "".join(self._hub_child(kind, tag, row) for row in rows)
+            head = _attrs(
+                [
+                    ("title", kind.capitalize() + "s"),
+                    ("type", kind),
+                    ("hubIdentifier", kind),
+                    ("context", ""),
+                    ("size", len(rows)),
+                    ("more", 0),
+                    ("style", "shelf"),
+                ]
+            )
+            hubs.append(f"<Hub {head}>{body}</Hub>")
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<MediaContainer size="{len(hubs)}">{"".join(hubs)}</MediaContainer>'
+
+    def _hub_child(self, kind, tag, row):
+        pairs = [
+            ("ratingKey", row["key"]),
+            ("key", "/library/metadata/{}".format(row["key"])),
+            ("type", kind),
+            ("title", row["title"]),
+            ("score", "0.5"),
+            ("librarySectionID", MUSIC_SECTION_KEY),
+            ("librarySectionTitle", MUSIC_SECTION_TITLE),
+            ("addedAt", row.get("addedAt")),
+        ]
+        if kind == "album":
+            artist = self.tables.artist_by_key[row["artist"]]
+            pairs += [("parentRatingKey", artist["key"]), ("parentTitle", artist["title"])]
+            pairs += [("year", row["year"])]
+        if kind == "track":
+            album = self.tables.album_by_key[row["album"]]
+            artist = self.tables.artist_by_key[album["artist"]]
+            pairs += [("parentRatingKey", album["key"]), ("parentTitle", album["title"])]
+            pairs += [("parentYear", album["year"])]
+            pairs += [("grandparentRatingKey", artist["key"])]
+            pairs += [("grandparentTitle", artist["title"])]
+        return f"<{tag} {_attrs(pairs)}/>"
 
     def _choices(self, name, libtype):
         table = {
@@ -1500,6 +1781,8 @@ class FakePlex:
                 if row["title"].lower() in seen:
                     continue
                 seen.add(row["title"].lower())
+                if self.loose_grouping:
+                    row = next(r for r in rows if r["title"].lower() == row["title"].lower())
                 collapsed.append(row)
             matched = collapsed
 
@@ -1562,10 +1845,15 @@ class FakePlex:
                 )
             if operator not in KNOWN_OPERATORS:
                 raise PlexRefusal(400, f"unknown operator {operator!r}")
+            if field == "track.originalTitle" and self.performer_field == "ignored":
+                # The predicate is dropped, so it constrains nothing: the row
+                # passes it whatever it holds.
+                stack[-1]["results"].append(True)
+                continue
             stack[-1]["results"].append(_matches(field, operator, value, libtype, row, self.tables))
         if len(stack) != 1:
             raise PlexRefusal(400, "push without a matching pop")
-        if "title" in query and query["title"].lower() not in row["title"].lower():
+        if "title" in query and not text_matches(query["title"], row["title"]):
             return False
         return _combine(stack[0])
 
@@ -1621,10 +1909,10 @@ class FakePlex:
         if kind == "track":
             return track_xml(row, self.tables, check_files=check_files, item_id=item_id)
         if kind == "album":
-            return album_xml(row, self.tables)
+            return album_xml(row, self.tables, detail=True)
         if kind == "movie":
             return movie_xml(row, item_id=item_id)
-        return artist_xml(row)
+        return artist_xml(row, detail=True)
 
     def _sessions(self):
         body = "".join(
@@ -1929,7 +2217,8 @@ class FakePlex:
         if "uri" not in query:
             raise PlexRefusal(400, "missing parameter(s): uri")
         for key in self._uri_keys(query["uri"], playlist["type"]):
-            playlist["items"].append({"key": key, "item_id": self._item_id()})
+            if not self.drops_additions:
+                playlist["items"].append({"key": key, "item_id": self._item_id()})
         return _container("", size=0)
 
     def _remove_item(self, playlist, item_id):
@@ -1970,7 +2259,22 @@ class FakePlex:
             self._item_xml(*self.tables.by_key[entry["key"]], item_id=entry["item_id"])
             for entry in window
         )
-        return _container(body, size=len(window), total=len(entries))
+        # TRANSCRIBED: a playlist's items come in a container of their own
+        # shape, not the library's -- no `identifier`, and the total beside the
+        # playlist's own declared count.
+        head = _attrs(
+            [
+                ("size", len(window)),
+                ("totalSize", len(entries)),
+                ("offset", start),
+                ("leafCount", playlist.get("leafCount", len(entries))),
+                ("playlistType", playlist["type"]),
+                ("ratingKey", playlist["id"]),
+                ("smart", playlist["smart"]),
+                ("title", playlist["title"]),
+            ]
+        )
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<MediaContainer {head}>{body}</MediaContainer>'
 
     # -- plex.tv ---------------------------------------------------------
 
@@ -2108,6 +2412,14 @@ class FakeSession:
         pairs = list(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
         pairs.extend((key, str(value)) for key, value in (params or {}).items())
         query = dict(pairs)
+        fault = getattr(self.server, "fault", None)
+        if fault and not host.endswith("plex.tv") and fault.get("match", "") in parts.path:
+            self.server.requests.append(
+                {"path": parts.path, "query": query, "pairs": pairs, "method": method}
+            )
+            if "raise" in fault:
+                raise fault["raise"]
+            return FakeResponse(url, fault.get("status", 200), fault.get("body", ""))
         try:
             body = self.server.handle(
                 parts.path, query, headers or {}, method=method, pairs=pairs, host=host
@@ -2175,6 +2487,19 @@ def server(monkeypatch):
 
     monkeypatch.setattr(plex, "build_session", _build_session)
     return fake
+
+
+@pytest.fixture
+def make_server(monkeypatch):
+    """A fake Plex built with options, for the behaviours that are not the default."""
+    from plex_axi import plex
+
+    def _make(**kwargs):
+        fake = FakePlex(**kwargs)
+        monkeypatch.setattr(plex, "build_session", lambda **_: FakeSession(fake))
+        return fake
+
+    return _make
 
 
 @pytest.fixture

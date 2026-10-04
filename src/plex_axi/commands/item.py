@@ -22,14 +22,23 @@ reason the command earns its place beside the raw `api` escape hatch:
 from __future__ import annotations
 
 from axi_toolkit.plex.filters import stars
-from axi_toolkit.plex.ids import handoff, validate_rating_key
+from axi_toolkit.plex.ids import handoff
 
 from ..argspec import Command, Flag, Sub
-from ..errors import UsageError
-from ..music import date_only, tag_titles
+from ..errors import AxiError
+from ..music import date_only, number, tag_titles, track_year
 from ..output import HelpBlock, truncate
 from ..plex import translate
-from ._common import PREVIEW_CHARS, article
+from ._common import PREVIEW_CHARS, article, parse_key, quoted
+
+#: The search that finds each noun by name, for a key that turned out to be
+#: something else. `search --type track` alone is not a command -- it has no
+#: field to search on -- so each names the flag that goes with its type.
+_FIND = {
+    "track": "plex-axi search --track '<title>'",
+    "album": "plex-axi search --album '<title>' --type album",
+    "artist": "plex-axi search --artist '<name>' --type artist",
+}
 
 #: What each noun accepts, and the sibling command that lists them.
 NOUNS = ("track", "album", "artist")
@@ -39,8 +48,10 @@ def _command(name: str) -> Command:
     flags = [Flag("--full", boolean=True, note="print the whole summary instead of a preview")]
     notes = [
         "rating is in stars (0-5), the same scale as `search --rated-min`",
+        "takes the `key` or the `media_id` a row prints; dates are in this machine's "
+        "local time zone",
         "rating_key is local to this server; guid is the identifier that survives a re-match",
-        "run `plex-axi rate <rating_key> --stars <0-5>` to change the rating this reports",
+        "run `plex-axi rate <rating_key> --stars <0.5-5>` to change the rating this reports",
     ]
     if name == "track":
         flags.insert(
@@ -58,7 +69,7 @@ def _command(name: str) -> Command:
     return Command(
         name=name,
         summary=f"Show one {name} in full: the fields a list row leaves out",
-        usage=f"usage: plex-axi {name} <rating_key> [flags]",
+        usage=f"usage: plex-axi {name} <rating_key|media_id> [flags]",
         default_sub=name,
         subs=(
             Sub(
@@ -86,8 +97,9 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], command=(name,))
+    ref = parse_key(parsed.positionals[0], command=(name,))
     server = ctx.server()
+    key = ref.confirm(server)
     try:
         item = server.fetchItem(f"/library/metadata/{key}")
     except Exception as exc:
@@ -103,12 +115,15 @@ def run(ctx, name: str, sub: str, parsed):
 
     found = getattr(item, "type", "") or "item"
     if found != name:
-        raise UsageError(
+        # Exit 1, not 2: the key was well formed and it took a lookup to learn
+        # what it names. A static invocation problem exits 2; an outcome of a
+        # lookup against live state exits 1.
+        raise AxiError(
             f"{key} is {article(found)} {found} on this server, not {article(name)} {name}",
             help_lines=[
                 f"Run `plex-axi {found} {key}` instead"
                 if found in NOUNS
-                else f"Run `plex-axi search --type {name}` to find {article(name)} {name}",
+                else f"Run `{_FIND[name]}` to find {article(name)} {name}",
             ],
             code="WRONG_ITEM_TYPE",
         )
@@ -160,7 +175,7 @@ def _track(item, parsed) -> dict:
     doc.update(
         {
             "album": getattr(item, "parentTitle", "") or "",
-            "year": getattr(item, "year", "") or "",
+            "year": number(track_year(item)) or "",
             "index": getattr(item, "index", "") or "",
             "duration": _duration(getattr(item, "duration", None)),
             "rating": stars(getattr(item, "userRating", None)) or "unrated",
@@ -202,11 +217,45 @@ def _album(item, parsed) -> dict:
     return doc
 
 
+#: The search type codes of the two things an artist holds.
+_HELD_TYPES = {"albums": 9, "tracks": 10}
+
+
+def _held(item, what: str):
+    """How many albums or tracks an artist holds, counted by the server.
+
+    An artist element carries no count of either -- not in a list and not in its
+    own detail view -- so the two numbers this view prints are asked for: the
+    section is searched for that artist's albums, or tracks, with a container
+    size of zero, and the total comes back on the container with no row fetched.
+
+    Not the artist's ``children`` container, which looks like the same question
+    and is not: it lists the releases Plex files under "albums" and leaves out
+    the singles and EPs, so it counted two where the library held five.
+    """
+    section = getattr(item, "librarySectionID", None)
+    if section in (None, ""):
+        return "not reported by this server"
+    try:
+        data = item._server.query(
+            f"/library/sections/{section}/all",
+            params={"type": _HELD_TYPES[what], "artist.id": int(item.ratingKey)},
+            headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"},
+        )
+    except Exception:
+        return "not reported by this server"
+    total = data.attrib.get("totalSize", data.attrib.get("size"))
+    try:
+        return int(total)
+    except (TypeError, ValueError):
+        return "not reported by this server"
+
+
 def _artist(item, parsed) -> dict:
     doc = {
         "artist": getattr(item, "title", "") or "",
-        "albums": getattr(item, "childCount", "") or "",
-        "tracks": getattr(item, "leafCount", "") or "",
+        "albums": _held(item, "albums"),
+        "tracks": _held(item, "tracks"),
         "rating": stars(getattr(item, "userRating", None)) or "unrated",
         "plays": getattr(item, "viewCount", 0) or 0,
         "last_played": date_only(getattr(item, "lastViewedAt", None)) or "never",
@@ -321,10 +370,11 @@ def _next_steps(name: str, item) -> list:
             lines.append(f"Run `plex-axi artist {parent}` for the artist")
         title = getattr(item, "title", "")
         if title:
-            lines.append(f'Run `plex-axi search --album "{title}"` for its tracks')
+            lines.append(f"Run `plex-axi search --album {quoted(title)}` for its tracks")
     else:
         title = getattr(item, "title", "")
         if title:
-            lines.append(f'Run `plex-axi search --artist "{title}" --type album` for its albums')
-            lines.append(f'Run `plex-axi search --artist "{title}" --rated-min 4` for the best')
+            name = quoted(title)
+            lines.append(f"Run `plex-axi search --artist {name} --type album` for its albums")
+            lines.append(f"Run `plex-axi search --artist {name} --rated-min 4` for the best")
     return lines

@@ -165,6 +165,11 @@ _PLAYBACK_ALIASES = {
 }
 
 
+#: The areas that are one thing rather than several, so the refusal can say
+#: "playback is out of scope" and "movies are out of scope" and be right twice.
+_SINGULAR_AREAS = ("playback", "the watchlist", "server administration", "metadata editing")
+
+
 def _out_of_scope(environ) -> dict:
     table = dict(_OUT_OF_SCOPE)
     order = command_order(environ)
@@ -306,7 +311,8 @@ def render_root_help(environ=None) -> str:
         )
 
     flag_lines = [
-        "  --human (readable output), --json (raw JSON output), --timeout <seconds> (default 30),",
+        "  --human (readable output), --json (raw JSON output, help included; not both),",
+        "  --timeout <seconds> (default 30),",
         "  --section <title|key> (which music library),",
         "  --debug (on stderr: the connection, every request path and query, the exact",
         "    filter expression built, and the type of any error),",
@@ -536,6 +542,26 @@ def _mode(globals_: dict) -> str:
     return MODE_TOON
 
 
+def _both_modes(argv: list) -> bool:
+    names = {token.partition("=")[0] for token in argv}
+    return "--json" in names and "--human" in names
+
+
+def _write_help(text: str, mode: str) -> None:
+    """Help in the mode that was asked for.
+
+    `--json` promises a document a parser can read, and help was the one answer
+    that broke the promise: it printed the same text whatever the mode, so a
+    caller piping `--help --json` into a JSON parser failed on its first line.
+    The reference is the same lines either way; under `--json` they are the
+    members of one array.
+    """
+    if mode == MODE_JSON:
+        output.write({"help": text.split("\n")}, mode)
+    else:
+        output.write_text(text)
+
+
 def _wants_version(globals_: dict) -> bool:
     return bool(globals_.get("version") or globals_.get("v") or globals_.get("V"))
 
@@ -551,7 +577,8 @@ def _unknown_command(name: str, environ=None):
     area = _out_of_scope(environ).get(lowered)
     if area:
         return UsageError(
-            f"plex-axi has no `{name}` command: {area} are deliberately out of scope",
+            f"plex-axi has no `{name}` command: {area} "
+            f"{'is' if area in _SINGULAR_AREAS else 'are'} deliberately out of scope",
             help_lines=[
                 _out_of_scope_reason(environ),
                 f"commands: {', '.join(order)}",
@@ -599,6 +626,18 @@ def _pick_sub(command: Command, argv: list) -> tuple:
         raise_unknown = _unknown_sub(command, argv[0])
         if raise_unknown is not None:
             raise raise_unknown
+        if not command.default_sub:
+            # A word was given and it is not one of this command's subcommands.
+            # "needs a subcommand" would be answering a different mistake.
+            lines = [f"subcommands: {', '.join(s.signature() for s in command.subs)}"]
+            if argv[0] in COMMAND_ORDER:
+                lines.append(f"`{argv[0]}` is a command of its own: run `plex-axi {argv[0]}`")
+            lines.append(f"Run `plex-axi {command.name} --help` for what each takes")
+            raise UsageError(
+                f"unknown subcommand {argv[0]!r} for `{command.name}`",
+                help_lines=lines,
+                code="UNKNOWN_SUBCOMMAND",
+            )
     if command.default_sub:
         sub = command.find(command.default_sub)
         if sub is not None:
@@ -665,6 +704,15 @@ def main(argv: list | None = None, *, environ=None) -> int:
         output.set_debug(True)
 
     try:
+        if _both_modes(argv):
+            raise UsageError(
+                "--json and --human ask for different output; pass one",
+                help_lines=[
+                    "Run the command again with `--json` for a parser, or `--human` for a person",
+                    "With neither, output is TOON: the structured default an agent reads",
+                ],
+                code="CONFLICTING_FLAGS",
+            )
         if _wants_version(globals_):
             # The bare version, in every output mode: AXI asks for exactly that
             # from -v, -V and --version, because harnesses probe it to decide
@@ -680,7 +728,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
 
         if not rest:
             if globals_.get("help") or globals_.get("h"):
-                output.write_text(render_root_help(environ))
+                _write_help(render_root_help(environ), mode)
                 return EXIT_OK
             command, name, sub_name, sub_argv = home_command.COMMAND, "home", "home", []
         else:
@@ -690,7 +738,7 @@ def main(argv: list | None = None, *, environ=None) -> int:
                 raise _unknown_command(name, environ)
             command = module.COMMAND_FOR(name)
             if globals_.get("help") or globals_.get("h") or _help_requested(command, rest[1:]):
-                output.write_text(render_command_help(command))
+                _write_help(render_command_help(command), mode)
                 return EXIT_OK
             sub, sub_argv = _pick_sub(command, rest[1:])
             sub_name = sub.name

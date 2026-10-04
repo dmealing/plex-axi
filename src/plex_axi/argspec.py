@@ -122,6 +122,9 @@ class Sub:
     flags: tuple = ()
     summary: str = ""
     access: str = ""
+    #: Set when the bare subcommand is not something a caller can run -- `search`
+    #: with no field is refused -- so a usage error must not suggest it.
+    needs_flags: bool = False
 
     def signature(self) -> str:
         return " ".join([self.name, *self.args]) if self.args else self.name
@@ -310,9 +313,16 @@ def _check_positionals(sub: Sub, command: Command, values: list) -> None:
         )
     if len(values) > len(sub.args):
         extra = values[len(sub.args)]
+        lines = [f"Run `{_usage(command, sub)}`"]
+        if sub.needs_flags:
+            lines = [
+                f"`{_label(command, sub)}` takes its values as flags, not as bare words; a "
+                "value with a space in it needs quoting",
+                f"Run `plex-axi {command.name} --help` for the flags it takes",
+            ]
         raise UsageError(
             f"unexpected argument {extra!r} for `{_label(command, sub)}`",
-            help_lines=[f"Run `{_usage(command, sub)}`"],
+            help_lines=lines,
             code="UNEXPECTED_ARGUMENT",
         )
 

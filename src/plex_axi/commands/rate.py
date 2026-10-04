@@ -19,14 +19,14 @@ different blast radius.
 from __future__ import annotations
 
 from axi_toolkit.plex.filters import LIBTYPES, POINTS_PER_STAR, parse_stars, stars
-from axi_toolkit.plex.ids import handoff, validate_rating_key
+from axi_toolkit.plex.ids import handoff
 
 from .. import writes
 from ..argspec import Command, Flag, Sub
-from ..errors import UsageError
+from ..errors import AxiError, UsageError
 from ..output import HelpBlock
 from ..plex import translate
-from ._common import article
+from ._common import article, parse_key
 
 #: Plex's own "no rating", and the value the client library puts in the URL when
 #: it is asked to clear one. It is named here rather than passed: the library
@@ -38,7 +38,7 @@ UNRATED = -1
 COMMAND = Command(
     name="rate",
     summary="Set or clear your rating on one track, album or artist",
-    usage="usage: plex-axi rate <rating_key> --stars <0-5> [--write]",
+    usage="usage: plex-axi rate <rating_key|media_id> --stars <0.5-5> [--write]",
     default_sub="rate",
     access=writes.MUTATING,
     subs=(
@@ -46,7 +46,12 @@ COMMAND = Command(
             name="rate",
             args=("<rating_key>",),
             flags=(
-                Flag("--stars", "<0-5>", note="the same scale every rating here prints in"),
+                Flag(
+                    "--stars",
+                    "<0.5-5>",
+                    note="in half stars, the same scale every rating here prints in; "
+                    "`--clear` is how a rating is removed",
+                ),
                 Flag("--clear", boolean=True, note="remove the rating instead of setting one"),
                 Flag(
                     "--write",
@@ -75,7 +80,11 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
-    key = validate_rating_key(parsed.positionals[0], command=("rate",))
+    # The caller's own flags ride along in front of the key, so a recovery line
+    # that names the corrected key is the whole command rather than a `rate
+    # <key>` that then fails for want of a rating.
+    ref = parse_key(parsed.positionals[0], command=("rate", *_flag_words(parsed)))
+    key = ref.key
     wanted = _wanted(parsed, key)
 
     # Before the connection, not after it: a refused write must not be a request
@@ -83,10 +92,12 @@ def run(ctx, name: str, sub: str, parsed):
     writes.require(ctx.environ, action=f"rate {key}")
 
     server = ctx.server()
+    ref.confirm(server)
     item = _fetch(server, key)
     libtype = getattr(item, "type", "") or "item"
     if libtype not in LIBTYPES:
-        raise UsageError(
+        # A lookup outcome, so exit 1: it took a request to learn what the key names.
+        raise AxiError(
             f"{key} is {article(libtype)} {libtype} on this server, and plex-axi rates music only",
             help_lines=[
                 f"Run `plex-axi search --artist '<name>' --type {LIBTYPES[0]}` to find a music key",
@@ -181,7 +192,40 @@ def _wanted(parsed, key: str):
             ],
             code="MISSING_RATING",
         )
-    return parse_stars(raw, flag="--stars")
+    value = parse_stars(raw, flag="--stars")
+    if value == 0:
+        # Plex stores a zero as a rating of 0.0, which is neither rated nor
+        # unrated: the item stops matching "unrated" and matches no star
+        # threshold either. Removing a rating has its own spelling.
+        raise UsageError(
+            "--stars 0 is not a rating: zero is the absence of one",
+            help_lines=[
+                f"Run `plex-axi rate {key} --clear` to remove the rating instead",
+                f"Run `plex-axi rate {key} --stars 0.5` for the lowest rating there is",
+            ],
+            code="BAD_RATING",
+        )
+    points = value * POINTS_PER_STAR
+    if points != int(points):
+        # A rating is a whole number of points and a star is two of them, so
+        # half a star is the smallest step. The server stores a quarter star as
+        # the fraction it was sent, which then prints as a rating no filter
+        # threshold lines up with.
+        nearest = round(points) / POINTS_PER_STAR
+        raise UsageError(
+            f"--stars is in half stars, got {value:g}",
+            help_lines=[f"Run `plex-axi rate {key} --stars {nearest:g}` for the nearest half star"],
+            code="BAD_RATING",
+        )
+    return value
+
+
+def _flag_words(parsed) -> tuple:
+    """The caller's rating flags as words, for a recovery that repeats them."""
+    if parsed.get("clear"):
+        return ("--clear",)
+    raw = parsed.get("stars")
+    return () if raw in (None, "") else ("--stars", str(raw))
 
 
 def _fetch(server, key: str):
