@@ -45,9 +45,10 @@ from plexapi.server import PlexServer
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from . import __version__, output, shapes
+from . import __version__, output
 from .errors import ApiError, AuthFailed, ConnectionFailed
 from .errors import NotFound as AxiNotFound
+from .toolkit import shapes
 
 #: Environment variable naming which music section to use when a server has
 #: more than one. The ``--section`` flag overrides it.
@@ -114,10 +115,9 @@ class Server(PlexServer):
             # A write legitimately answers with nothing: `/:/rate` and a
             # playlist deletion both return an empty 200.
             return data
-        if data is None:
-            raise MalformedAnswer(MalformedAnswer.EMPTY)
-        if shapes.is_foreign_root(data.tag):
-            raise MalformedAnswer(MalformedAnswer.FOREIGN)
+        fault = shapes.parsed_fault(None if data is None else data.tag)
+        if fault:
+            raise MalformedAnswer(fault)
         return data
 
 
@@ -324,7 +324,7 @@ def _reachability_error(config, exc: Exception) -> ConnectionFailed:
     that "not Plex" sends the caller to check a port that is correct.
     """
     status, reason = describe_api_error(exc)
-    if status >= 500:
+    if shapes.is_server_fault(status):
         return _server_error(status, reason, what=config.base_url)
     return _not_plex(config.base_url)
 
@@ -426,7 +426,7 @@ def translate(exc: Exception, *, what: str, help_lines=None):
             code="UNREACHABLE",
         )
     status, reason = describe_api_error(exc)
-    if status >= 500:
+    if shapes.is_server_fault(status):
         return _server_error(status, reason, what=f"the server, asked for {what},")
     prefix = f"{status} " if status else ""
     return ApiError(

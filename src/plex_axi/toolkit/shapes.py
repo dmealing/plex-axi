@@ -15,12 +15,10 @@ of the text in front of it:
 * **Is this attribute a credential?** The server hands out tokens under names
   that say so. :func:`is_credential_name` reads the name.
 
-**Nothing here imports anything of this tool's.** No error class, no output
-boundary, no transport, no XML library: strings in, a string or a boolean out.
-The refusals and the redaction built on these judgements are written where a
-command line or a document is in hand -- :mod:`plex_axi.plex` and
-:mod:`plex_axi.commands.api` -- which is what lets the rules themselves be
-lifted into a shared package unchanged.
+**Nothing here imports anything but the standard library.** No error class, no
+output boundary, no transport, no XML library: strings in, a string or a boolean
+out. A refusal or a redaction built on one of these judgements is the caller's
+to write, where a command line or a document is in hand.
 """
 
 from __future__ import annotations
@@ -58,6 +56,33 @@ def answer_kind(body: str) -> str:
 def is_foreign_root(tag: str) -> bool:
     """Whether a document that *did* parse is a web page rather than Plex's."""
     return str(tag).lower() == "html"
+
+
+def parsed_fault(root_tag):
+    """What is wrong with an answer to a *read* that did parse, or ``None``.
+
+    ``root_tag`` is the tag of the document's root element, or ``None`` when the
+    body was empty and there is no document. A write is not judged here: a
+    rating and a playlist deletion both legitimately answer with nothing.
+    """
+    if root_tag is None:
+        return EMPTY
+    if is_foreign_root(root_tag):
+        return FOREIGN
+    return None
+
+
+def is_server_fault(status) -> bool:
+    """Whether a status says the server is there and not working.
+
+    A Plex Media Server answers 503 while it starts and while it runs
+    maintenance, so a 5xx is "wait", where a 404 on the root is "this is not
+    Plex" -- two different next steps that one message used to cover.
+    """
+    try:
+        return int(status) >= 500
+    except (TypeError, ValueError):
+        return False
 
 
 # ------------------------------------------------------- credential attributes

@@ -1,6 +1,6 @@
 """The pure judgements about an answer and a path, stated on their own.
 
-`plex_axi.shapes` takes strings and returns a string or a boolean: no server, no
+`plex_axi.toolkit.shapes` takes strings and returns a string or a boolean: no server, no
 error class, no XML. These tests take the same view of it, so that the module
 and its tests can be lifted into a shared package together.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from plex_axi import shapes
+from plex_axi.toolkit import shapes
 
 
 @pytest.mark.parametrize(

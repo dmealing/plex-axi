@@ -29,6 +29,7 @@ from ..errors import AxiError
 from ..music import date_only, number, tag_titles, track_year
 from ..output import HelpBlock, truncate
 from ..plex import translate
+from ..toolkit.search import track_artist
 from ._common import PREVIEW_CHARS, article, parse_key, quoted
 
 #: The search that finds each noun by name, for a key that turned out to be
@@ -167,7 +168,7 @@ def _track(item, parsed) -> dict:
         "track": getattr(item, "title", "") or "",
         "artist": album_artist,
     }
-    if performer and performer != album_artist:
+    if track_artist(album_artist, performer):
         # Never merged with `artist`: on a compilation the album artist is
         # "Various Artists" for every track, and this is the only field that
         # says who is actually playing.

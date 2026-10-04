@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import re
 import shlex
 
 from axi_toolkit.plex.filters import LIBTYPES
 from axi_toolkit.plex.ids import validate_rating_key
 
 from ..errors import AxiError, UsageError
+from ..toolkit import ids
 
 #: Preview length for long free-text values (a summary, a review) before
 #: `--full` is needed.
@@ -36,15 +36,6 @@ def quoted(value) -> str:
     return shlex.quote(text)
 
 
-#: Form 1, the media id this tool prints in every row. The server half is a
-#: machine identifier -- hexadecimal -- which is what keeps `plex://track/12345`
-#: (a tool's internal id, form 4) out of this pattern: `track` is not hex.
-_MEDIA_ID = re.compile(r"^plex://([0-9A-Fa-f]{8,})/([0-9]+)$")
-
-#: Form 2: the rating key alone, which older integrations emit.
-_LEGACY_MEDIA_ID = re.compile(r"^plex://([0-9]+)$")
-
-
 class KeyRef:
     """A rating key, and the server the caller said it belongs to, if they said."""
 
@@ -63,7 +54,7 @@ class KeyRef:
         another server is a different item. The identifier cannot be checked
         until a connection exists, which is why this is a second step.
         """
-        if self.machine and self.machine.lower() != str(server.machineIdentifier).lower():
+        if not ids.same_server(self.machine, server.machineIdentifier):
             raise AxiError(
                 f"{self.raw!r} is a media id for a different server",
                 help_lines=[
@@ -84,24 +75,22 @@ def parse_key(raw, *, command) -> KeyRef:
     call to learn which of the two it wanted. ``command`` is the caller's own
     words after the tool name, flags included, so a recovery line repeats the
     whole invocation rather than the half before the key.
+
+    Which spelling a string is, is :func:`plex_axi.toolkit.ids.parse_reference`;
+    this is where that judgement becomes a refusal naming the command.
     """
-    value = str(raw).strip()
-    if value.isdigit() and not value.isascii():
-        # `str.isdigit` and `\d` both accept full-width and other non-ASCII
-        # digits. They are not a rating key the server will resolve, so they are
-        # refused here rather than sent and reported as not found.
+    ref = ids.parse_reference(raw)
+    if ref.kind == ids.NON_ASCII_DIGITS:
+        # Not a rating key the server will resolve, so it is refused here rather
+        # than sent and reported as not found.
         raise UsageError(
-            f"a rating key is written in ASCII digits, got {value!r}",
-            help_lines=[f"Run `plex-axi {' '.join(command)} {int(value)}`"],
+            f"a rating key is written in ASCII digits, got {ref.raw!r}",
+            help_lines=[f"Run `plex-axi {' '.join(command)} {ref.key}`"],
             code="BAD_RATING_KEY",
         )
-    match = _MEDIA_ID.match(value)
-    if match:
-        return KeyRef(match.group(2), match.group(1), value)
-    match = _LEGACY_MEDIA_ID.match(value)
-    if match:
-        return KeyRef(match.group(1), None, value)
-    return KeyRef(validate_rating_key(value, command=tuple(command)), None, value)
+    if ref.kind in (ids.MEDIA_ID, ids.LEGACY_MEDIA_ID):
+        return KeyRef(ref.key, ref.machine, ref.raw)
+    return KeyRef(validate_rating_key(ref.raw, command=tuple(command)), None, ref.raw)
 
 
 def parse_limit(raw, *, default: int, maximum: int = 500) -> int:
