@@ -18,6 +18,7 @@ from ..argspec import Command, Flag, Sub
 from ..music import number
 from ..output import HelpBlock
 from ..plex import translate
+from ..toolkit.search import playing_artist
 from ._common import project, select_fields
 
 #: Every column a session row can carry, and the four it carries by default.
@@ -111,7 +112,7 @@ def _row(session, machine_identifier: str) -> dict:
         "key": number(getattr(session, "ratingKey", None)),
         "media_id": media_id_for(machine_identifier, session),
         "title": getattr(session, "title", "") or "",
-        "artist": performer or album_artist,
+        "artist": playing_artist(album_artist, performer),
         "album": getattr(session, "parentTitle", "") or "",
         "device": _device(player),
         "state": getattr(player, "state", "") or "",

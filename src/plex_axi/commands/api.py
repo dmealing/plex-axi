@@ -31,11 +31,12 @@ from __future__ import annotations
 import shlex
 from urllib.parse import parse_qsl, urlsplit
 
-from .. import output, shapes
+from .. import output
 from ..argspec import Command, Flag, Sub
 from ..errors import ConnectionFailed, UsageError
 from ..output import REDACTED, HelpBlock, register_secret, truncate
 from ..plex import MalformedAnswer, translate
+from ..toolkit import shapes
 from ._common import PREVIEW_CHARS, parse_pairs
 
 #: The only method this escape hatch may issue. Anything else is refused by name.
@@ -289,7 +290,7 @@ def _split_inline_query(path: str) -> tuple:
 def _refuse_action(path: str) -> None:
     """Refuse a path whose GET changes something, before any request is sent.
 
-    Which paths those are is :func:`plex_axi.shapes.acts_on_get`; this is where
+    Which paths those are is :func:`plex_axi.toolkit.shapes.acts_on_get`; this is where
     that judgement becomes a refusal a caller can read.
     """
     if shapes.has_dot_segments(path):

@@ -1,6 +1,6 @@
 """The pure text rules, stated on their own.
 
-`plex_axi.matching` takes strings and returns strings: no server, no command
+`plex_axi.toolkit.matching` takes strings and returns strings: no server, no command
 line, no error class. These tests take the same view of it, so that the module
 and its tests can be lifted into a shared package together.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from plex_axi import matching
+from plex_axi.toolkit import matching
 
 APOS, OPEN, CLOSE, ELL, HYPH, DASH = "\u2019", "\u201c", "\u201d", "\u2026", "\u2010", "\u2013"
 
@@ -125,4 +125,4 @@ def test_the_module_imports_nothing_of_this_tools():
         if isinstance(node, ast.ImportFrom):
             assert node.level == 0, "a relative import ties this module to the tool"
             imported.add((node.module or "").split(".")[0])
-    assert imported <= {"__future__", "re", "unicodedata"}, imported
+    assert imported <= {"__future__", "dataclasses", "re", "unicodedata"}, imported

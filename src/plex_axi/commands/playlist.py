@@ -37,8 +37,8 @@ from ..errors import AxiError, UsageError
 from ..music import available_fields, default_fields, rows_for, with_track_artist
 from ..output import HelpBlock
 from ..plex import translate
+from ..toolkit import ids
 from ._common import (
-    _MEDIA_ID,
     KeyRef,
     article,
     fields_flag,
@@ -567,11 +567,11 @@ def _resolve(server, title: str):
     """
     playlists = _audio_playlists(server)
     wanted = str(title).strip()
-    media = _MEDIA_ID.match(wanted)
-    if media:
+    media = ids.parse_reference(wanted)
+    if media.kind == ids.MEDIA_ID:
         # The `media_id` a listing prints beside the key, accepted back.
-        KeyRef(media.group(2), media.group(1), wanted).confirm(server)
-        wanted = media.group(2)
+        KeyRef(media.key, media.machine, wanted).confirm(server)
+        wanted = media.key
     if wanted.isascii() and wanted.isdigit():
         for playlist in playlists:
             if str(playlist.ratingKey) == wanted:

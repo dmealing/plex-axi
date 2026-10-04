@@ -22,18 +22,28 @@ purpose this time -- and, when that still finds nothing, the server's own
 free-text search is asked for the nearest titles, because that one *does* fold
 both.
 
-**Everything here is pure, and the module imports nothing of this tool's.** A
-string in, a string or a list out: no error class, no output boundary, no
-transport, no flag names. The refusals a command raises when one of these says
-"there is nothing left to search for" are written where the flag is known, in
-:mod:`plex_axi.music`. That is what lets these rules be lifted into a shared
-package unchanged, should a second consumer want them.
+**Everything here is pure, and the module imports nothing but the standard
+library.** A string in, a string or a list out: no error class, no output
+boundary, no transport, no flag names. A function that finds "there is nothing
+left to search for" says so in its return value, and the caller decides how to
+refuse.
+
+Two more judgements are made on names the server has *already* handed back,
+because the word-prefix match above returns more than was meant:
+
+* :func:`resolve_name` picks one of several held names for a typed one, and
+  never by position: a tie after folding, or no match at all, comes back as the
+  candidates rather than as the first of them.
+* :func:`exact_matches` keeps the rows whose name *is* the typed one, for a name
+  that is also a word inside somebody else's -- which the server's filter
+  cannot tell apart.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 #: What the server's ``=`` on a title actually does, printed where its own label
 #: would have said "contains". The echo is a promise about the predicate that
@@ -148,3 +158,89 @@ def year(raw):
     """
     value = str(raw).strip()
     return value if _YEAR.match(value) else None
+
+
+# ------------------------------------------------- choosing among held names
+
+#: One held name is the typed one.
+RESOLVED = "resolved"
+#: More than one held name folds to the typed one, and nothing tells them apart.
+AMBIGUOUS = "ambiguous"
+#: No held name is the typed one; the candidates are the near misses.
+MISSING = "missing"
+#: Nothing was typed, once cleaned.
+EMPTY_NAME = "empty"
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What one typed name resolved to among the names a server holds.
+
+    ``match`` is set only when ``status`` is :data:`RESOLVED`. Otherwise
+    ``candidates`` carries what the caller should offer back -- the tied
+    entries, or the near misses -- in the order they were given.
+    """
+
+    status: str
+    match: object = None
+    candidates: tuple = ()
+
+    @property
+    def resolved(self) -> bool:
+        return self.status == RESOLVED
+
+
+def same_name(typed, held) -> bool:
+    """Whether two spellings are one name, after folding both.
+
+    Equality, not the word-prefix match: ``Example`` is not ``Example Band``.
+    Two empty names are not the same name.
+    """
+    folded = fold(typed)
+    return bool(folded) and folded == fold(held)
+
+
+def exact_matches(rows, typed, *, names=None) -> list:
+    """The rows whose name is ``typed``, out of rows a looser match returned.
+
+    The server's filter matches word prefixes, so a name that is a word inside
+    another artist's name returns both artists' rows. ``names`` reads the names
+    a row answers to -- one string or several, e.g. a track's album artist and
+    its performer -- and defaults to the row itself.
+    """
+    kept = []
+    for row in rows:
+        held = names(row) if names else row
+        if isinstance(held, str):
+            held = (held,)
+        if any(same_name(typed, name) for name in held or ()):
+            kept.append(row)
+    return kept
+
+
+def resolve_name(typed, candidates, *, name=None) -> Resolution:
+    """Choose the candidate ``typed`` names, or say why none was chosen.
+
+    Tried in order: the string exactly as typed, then equality after folding.
+    Either settles it only when exactly one candidate qualifies. A tie is
+    :data:`AMBIGUOUS` and a miss is :data:`MISSING`, and both hand back
+    candidates -- the tied entries, or the ones ``typed`` loosely matches --
+    because the first entry of a list is an accident of the server's sort, not
+    an answer. ``name`` reads a candidate's name and defaults to the candidate.
+    """
+    read = name or (lambda candidate: candidate)
+    entries = [(candidate, str(read(candidate) or "")) for candidate in candidates]
+    wanted = clean_text(typed)
+    if not fold(wanted):
+        return Resolution(EMPTY_NAME)
+    for same in (
+        lambda held: held == wanted or held == str(typed),
+        lambda held: same_name(wanted, held),
+    ):
+        hits = [candidate for candidate, held in entries if same(held)]
+        if len(hits) == 1:
+            return Resolution(RESOLVED, hits[0], (hits[0],))
+        if hits:
+            return Resolution(AMBIGUOUS, None, tuple(hits))
+    near = tuple(candidate for candidate, held in entries if loosely_matches(wanted, held))
+    return Resolution(MISSING, None, near)

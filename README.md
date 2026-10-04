@@ -460,6 +460,42 @@ npx skills add dmealing/plex-axi --skill plex-axi
 `scripts/ci-local.sh` runs `plex-axi skill --check`, so it cannot describe a flag that does not exist or drift from
 the commands it documents.
 
+## Using it as a library
+
+The rules above about how a Plex Media Server reads a name and answers a request are not the
+command line's alone. `plex_axi.toolkit` is the supported import surface of this package for a
+program that talks to the same server through its own code — plain values in, plain values out,
+no connection opened and nothing printed. It is new and may grow; the names in its `__all__` are
+the contract.
+
+```python
+from plex_axi import toolkit
+
+# What the server should be sent: commas and doubled spaces taken out, and each
+# punctuation spelling a title might hold. None means there is nothing to search for.
+toolkit.filter_value("Don't Stop,  Example")
+# ["Don't Stop Example", 'Don’t Stop Example']
+
+# The server matches word prefixes, so a search for one artist returns others too.
+# Choose among what came back, and never by position:
+held = ["Example Band", "Example", "The Example Trio"]
+result = toolkit.resolve_name("example", held)
+result.status, result.match  # ('resolved', 'Example')
+
+result = toolkit.resolve_name("exam", held)
+result.status, result.candidates  # ('missing', ('Example Band', 'Example', 'The Example Trio'))
+```
+
+A refusal is data rather than an exception: a name that folds to more than one held name comes
+back `ambiguous` with the tied candidates, a miss comes back `missing` with the near ones, and
+neither picks the first. The same package holds the exact-name filter for a name that is a word
+inside somebody else's (`exact_matches`), the compilation rules for who is actually performing
+(`PERFORMER_FIELD`, `performer_honoured`, `track_artist`), the checks on whether an answer is
+Plex's at all (`answer_kind`, `acts_on_get`), and the reading of the identifiers this tool
+prints (`parse_reference`). It is synchronous on purpose and imports only the standard library,
+so an asynchronous program can run it in a thread; a function that needs the server's answer
+takes it already fetched, or takes a callable you supply.
+
 ## Design notes
 
 - The client library is `python-plexapi`, chosen for its *model* rather than its transport: it is
@@ -505,7 +541,7 @@ the commands it documents.
 
   What this deliberately does not do is filter or re-rank rows in Python. Every predicate is still
   evaluated by Plex over the whole library, so totals stay exact and `--limit` still means what it
-  says. The rules are pure functions in `plex_axi.matching`, with no server in them. Because this
+  says. The rules are pure functions in `plex_axi.toolkit`, with no server in them. Because this
   changes what a search returns, it is re-checked against a real server with the live suite's
   sweeps (`scripts/live-test.sh -k search`) before a release.
 - Development notes, including every sharp edge behind the code, are in [AGENTS.md](AGENTS.md).
