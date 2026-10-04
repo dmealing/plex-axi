@@ -355,11 +355,15 @@ was added here to compensate, and nothing should be.
 - **`redact()` has a token-shaped backstop as well as the registered literal.** `X-Plex-Token=` as a
   URL parameter is redacted whether or not the value ever passed through this process's config,
   because the client library appends it to artwork, stream and web URLs.
-- **`api` refuses write methods, and that did not change when the tool learned to write.** A raw
+- **`api` refuses write methods and state-changing GETs, and both gates are enforced there.** A raw
   path that could POST would make the gate meaningless: anything a typed command refused could be
-  reissued by hand, with none of the validation, the preview or the explanation. Several Plex write
-  endpoints are destructive besides. It also refuses a caller-supplied `--query X-Plex-Token=…`,
-  which is how a credential reaches shell history.
+  reissued by hand, with none of the validation, the preview or the explanation. Plex also acts on
+  a plain GET at several paths (`/:/rate` sets a rating, `/library/sections/<n>/refresh` starts a
+  scan, a `/player/` path relays a command to a client), so `api` refuses those paths by name as
+  well, with either gate open or closed. It also refuses a caller-supplied `--query X-Plex-Token=…`,
+  which is how a credential reaches shell history. For any path carrying server credentials, it
+  prints `<redacted>` for attributes the server names as such (e.g. `/myplex/account` carries the
+  owner's plex.tv account token).
 - **A write is refused before the connection is opened.** `writes.require` runs at the top of
   `run()`, ahead of `ctx.server()`, so a mutating command with the gate closed reaches the server
   **zero times**. A refusal that read the item first and then declined would produce the same exit
@@ -601,8 +605,9 @@ block from the same declaration, so the help and the skill cannot say different 
 
 **Anything that claims the tool is read-only has to be qualified or deleted.** README, the generated
 skill, the home view (`writes:`), root `--help` and this file were all updated together;
-`tests/test_skill.py` fails if an unqualified claim comes back. The one place the old wording is
-still correct is `api`, which is GET-only whatever the gate says.
+`tests/test_skill.py` fails if an unqualified claim comes back. `api` is not read-only either: it
+refuses write methods and state-changing GETs by name, enforcing both gates, with either gate open
+or closed.
 
 ## Sharp edges
 
