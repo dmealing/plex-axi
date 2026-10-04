@@ -319,9 +319,6 @@ def performer_honoured(items, typed: str) -> bool:
     )
 
 
-NEAREST_SHOWN = rules.NEAREST_SHOWN
-
-
 def nearest_titles(section, texts: dict) -> list:
     """The closest real titles to each name that matched nothing.
 

@@ -228,6 +228,7 @@ MACHINE = "0123456789abcdef0123456789abcdef01234567"
         (" plex://111 ", ids.LEGACY_MEDIA_ID, "111", None),
         ("111", ids.RATING_KEY, "111", None),
         ("\uff11\uff11\uff11", ids.NON_ASCII_DIGITS, "111", None),
+        ("\u00b2", ids.NON_ASCII_DIGITS, None, None),
         ("plex://track/111", ids.UNRECOGNISED, None, None),
         ("plex://track/0123456789abcdef01234567", ids.UNRECOGNISED, None, None),
         ("local://111", ids.UNRECOGNISED, None, None),

@@ -81,11 +81,12 @@ def parse_key(raw, *, command) -> KeyRef:
     """
     ref = ids.parse_reference(raw)
     if ref.kind == ids.NON_ASCII_DIGITS:
-        # Not a rating key the server will resolve, so it is refused here rather
-        # than sent and reported as not found.
+        help_lines = (
+            [f"Run `plex-axi {' '.join(command)} {ref.key}`"] if ref.key is not None else []
+        )
         raise UsageError(
             f"a rating key is written in ASCII digits, got {ref.raw!r}",
-            help_lines=[f"Run `plex-axi {' '.join(command)} {ref.key}`"],
+            help_lines=help_lines,
             code="BAD_RATING_KEY",
         )
     if ref.kind in (ids.MEDIA_ID, ids.LEGACY_MEDIA_ID):

@@ -66,7 +66,11 @@ def parse_reference(raw) -> Reference:
     """Take apart whatever a caller offered as an item's identifier."""
     value = str(raw).strip()
     if value.isdigit() and not value.isascii():
-        return Reference(NON_ASCII_DIGITS, str(int(value)), None, value)
+        try:
+            key = str(int(value))
+        except ValueError:
+            key = None
+        return Reference(NON_ASCII_DIGITS, key, None, value)
     match = _MEDIA_ID.match(value)
     if match:
         return Reference(MEDIA_ID, match.group(2), match.group(1), value)
