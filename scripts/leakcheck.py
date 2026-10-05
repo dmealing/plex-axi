@@ -887,7 +887,7 @@ def clean_pull_request():
         (
             "body",
             "## Intent\n\n"
-            "`src/plex_axi/toon.py` formats through `Decimal(repr(value))` inside the range.\n\n"
+            "`axi_toolkit.toon` formats through `Decimal(repr(value))` inside the range.\n\n"
             "```\n"
             "rootdir: /github/workspace\n"
             "collected 900 items\n"
