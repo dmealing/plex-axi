@@ -78,8 +78,8 @@ pipx run plex-axi genres
 
 Two runtime dependencies come with it. [`PlexAPI`](https://github.com/pkkid/python-plexapi) carries
 the Plex model layer; [`axi-toolkit`](https://github.com/dmealing/axi-toolkit) carries the `plex://`
-identifier forms and the music filter language, which the AXI CLIs share rather than each keeping a
-copy of. `axi-toolkit` declares no runtime dependency of its own, so it adds exactly one name to the
+identifier forms, the music filter language and the TOON encoder, which the AXI CLIs share rather
+than each keeping a copy of. `axi-toolkit` declares no runtime dependency of its own, so it adds exactly one name to the
 environment and nothing transitive behind it.
 
 ## Configure
@@ -182,8 +182,8 @@ caps each repeated element at twenty children for the same reason.
 One documented deviation: `help[N]:` blocks render one suggestion per line rather than as a
 delimiter-joined TOON array. Suggestions are command lines that routinely contain commas, and this
 is the shape the AXI standard and the sibling AXI CLIs use. Every **data** structure is strict TOON,
-and "strict" is a test result rather than a claim: the specification's own conformance fixtures are
-vendored into the suite and every one of them has to pass.
+and "strict" is a test result rather than a claim: the specification's own conformance fixtures run
+in the suite and every one of them has to pass.
 
 ## Rules of thumb
 
@@ -588,11 +588,12 @@ scripts/leakcheck.py --rules               # list the rules, the surfaces, and t
 scripts/leakcheck.py --demo                # self-test: prove every rule still fires
 ```
 
-The TOON encoder is held to the specification's own opinion as well as to this project's:
-**every** official encode fixture is vendored byte-for-byte from
-[`toon-format/spec`](https://github.com/toon-format/spec) and runs on every `pytest`. The case count
-is asserted too, so a fixture that stops being collected fails the suite instead of quietly lowering
-the score, and so are the per-file checksums, so a fixture edited to suit the encoder fails as well.
+The TOON encoder is `axi-toolkit`'s, and it is held to the specification's own opinion here as well
+as there: **every** official encode fixture, which that package vendors byte-for-byte from
+[`toon-format/spec`](https://github.com/toon-format/spec) beside the encoder, runs against the
+installed encoder on every `pytest`. The case count is asserted too, so a fixture that stops being
+collected fails the suite instead of quietly lowering the score, and so are the per-file checksums,
+so a fixture edited to suit the encoder fails as well.
 
 Commit messages are checked as well as scanned. release-please builds the changelog and the version
 bump from them, and when its parser cannot read one it says so at debug level, drops the commit and
@@ -641,7 +642,3 @@ messages by release-please.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
-`tests/fixtures/toon-spec/` vendors the TOON specification's conformance fixtures, which are MIT
-licensed and copyright their authors; the upstream licence, the commit they came from and the
-refresh recipe are recorded beside them in `PROVENANCE.md`.

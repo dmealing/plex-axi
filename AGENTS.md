@@ -35,11 +35,9 @@ anything fails the check rather than passing silently. If the scanner flags a li
 `leakcheck: allow=<rule>` on that line — scoped to that one rule, never blanket. Do not weaken a
 rule to make a commit pass, and do not bypass the hooks.
 
-**A file that cannot carry a marker** — JSON has no comment syntax, and vendored third-party data
-must stay byte-for-byte — is exempted in `PATH_ALLOWANCES` in `scripts/leakcheck.py` instead, per
+**A file that cannot carry a marker** — one that must stay byte-for-byte — is exempted in `PATH_ALLOWANCES` in `scripts/leakcheck.py` instead, per
 path *and* per rule, and `--rules` prints the table so the exemption is visible where the rules
-are. There are three entries today: the vendored TOON fixture whose backslash-escaping case is a
-synthetic Windows drive path, and the two commit-message fixtures transcribed from this
+are. There are two entries today: the two commit-message fixtures transcribed from this
 repository's own history, which must stay byte-for-byte the commits they pin and whose co-author
 trailers carry no-reply addresses. `tests/test_leakcheck.py` re-scans each exempted file with the
 table switched off and asserts that the rules which fire, and the shapes they match, are exactly
@@ -166,13 +164,13 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
 
 ## Architecture
 
-- `toon.py` — a strict TOON encoder (spec v4.1), shared with the sibling AXI project. Encoding
+- `axi_toolkit.toon` — a strict TOON encoder (spec v4.1), and no longer in this repository: the
+  shared package's copy is the only one. Encoding
   happens **only** at the output boundary; command modules return plain JSON-shaped dicts. Do not
-  loosen it to make output prettier. Two suites cover it and they are not interchangeable:
-  `tests/test_toon.py` states the behaviour in this project's words, and
-  `tests/test_toon_conformance.py` runs the specification's own encode fixtures — every one of
-  them, vendored byte-for-byte from `toon-format/spec` under `tests/fixtures/toon-spec/` (MIT;
-  provenance, checksums and the refresh recipe live in `PROVENANCE.md` beside them). `CASE_COUNT`
+  loosen it to make output prettier. The encoder's behaviour is stated in the shared package's own
+  suite; `tests/test_toon_conformance.py` runs the specification's own encode fixtures — every one
+  of them, which that package vendors from `toon-format/spec` as `axi_toolkit.toon_spec` — against
+  the installed encoder through `toon_spec.run(encode)`. `CASE_COUNT`
   there is the only place the case count is written, and it is asserted, so a fixture that stops
   being collected fails instead of shrinking the score. A rule nobody thought to write a test for
   reads as passing, which is how 0.2.2 shipped two failing cases while the README claimed
@@ -1115,9 +1113,10 @@ generated-file check pass against the wrong command table. `scripts/leakcheck.py
 `scripts/commitcheck.py` are the exceptions: both are standard-library-only by design, because the
 git hooks run them before any virtualenv is guaranteed to exist.
 
-**Do not edit a vendored conformance fixture.** If one fails, the encoder is wrong until proven
-otherwise; the checksum test will catch the edit anyway. Refreshing them from upstream is its own
-commit, separate from any encoder change made to satisfy it, and `PROVENANCE.md` carries the recipe.
+**The conformance fixtures are `axi-toolkit`'s, not this repository's.** If one fails, the encoder
+is wrong until proven otherwise; the checksum test will catch an edited fixture anyway. Both the
+encoder fix and a refresh from upstream belong in that package, whose `PROVENANCE.md` carries the
+recipe.
 
 **Six cases that used to be in `tests/test_ids.py` are gone on purpose, and are not lost.** They
 called `media_content_id` and `validate_rating_key` directly, and both live in
@@ -1317,7 +1316,7 @@ the token saving the way the sibling does — *roughly 40% cheaper in tokens tha
 JSON*. "Roughly 40% of the tokens" is a different and much stronger claim; it is easy to write by
 accident.
 
-**The sample TOON block was generated, not typed.** Feed the document to `toon.encode` and paste
+**The sample TOON block was generated, not typed.** Feed the document to `axi_toolkit.toon.encode` and paste
 what comes back, so a reader who copies the shape is copying the real one.
 
 **What an installation costs belongs under `Install`, not under `Design notes`.** The two runtime

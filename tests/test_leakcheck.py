@@ -192,17 +192,19 @@ def test_the_allow_marker_also_applies_to_the_condensed_pass():
 
 # -------------------------------------------------------- path allowances
 #
-# The marker is a comment, so a JSON file cannot carry one. PATH_ALLOWANCES is
-# how vendored data that must stay byte-for-byte is exempted instead, and these
+# The marker is a comment, so a file that must stay byte-for-byte cannot carry
+# one. PATH_ALLOWANCES is how such a file is exempted instead, and these
 # tests hold it to the same scope the marker has -- including the part that only
 # shows up at the entry points, where a mode that named the same file differently
 # would apply an exemption the others do not.
 
 
-ALLOWED_PATH = "tests/fixtures/toon-spec/encode/primitives.json"
 LOST_MESSAGE_PATH = "tests/fixtures/commit-messages/41bcb73.txt"
+#: The entry the scope tests below are run against, and the one rule it names.
+ALLOWED_PATH = LOST_MESSAGE_PATH
+ALLOWED_RULE = "personal-email"
 HIJACKED_MESSAGE_PATH = "tests/fixtures/commit-messages/b1f9bb18.txt"
-TWO_SHAPES = "path " + "/ho" + "me/" + "someone" + "/notes and " + "192." + "168.1.10"
+TWO_SHAPES = "mail " + "someone" + "@" + "mailhost" + ".net and " + "192." + "168.1.10"
 
 
 def test_a_path_allowance_exempts_only_the_rule_it_names():
@@ -210,15 +212,15 @@ def test_a_path_allowance_exempts_only_the_rule_it_names():
 
 
 def test_a_path_allowance_exempts_no_other_file():
-    findings = leakcheck.scan_text("src/plex_axi/toon.py", TWO_SHAPES + "\n")
-    assert rule_names(findings) == ["home-path", "private-ip"]
+    findings = leakcheck.scan_text("src/plex_axi/output.py", TWO_SHAPES + "\n")
+    assert rule_names(findings) == ["personal-email", "private-ip"]
 
 
 def test_an_allowance_matches_only_the_exact_path_it_names():
     """A path that merely ends with an allowed one -- a shadowing directory, a
     suffixed twin, a scan rooted elsewhere -- is a different file, and exempting
     it would grant the entry every directory it is ever copied into."""
-    assert leakcheck.path_allowances(ALLOWED_PATH) == frozenset({"home-path"})
+    assert leakcheck.path_allowances(ALLOWED_PATH) == frozenset({ALLOWED_RULE})
     assert leakcheck.path_allowances(f"attic/{ALLOWED_PATH}") == frozenset()
     assert leakcheck.path_allowances(f"/scan/root/{ALLOWED_PATH}") == frozenset()
     assert leakcheck.path_allowances(f"{ALLOWED_PATH}.bak") == frozenset()
@@ -229,7 +231,6 @@ def test_an_allowance_matches_only_the_exact_path_it_names():
 #: suite instead of quietly widening what the entry covers. Assembled from
 #: fragments like DIRTY, so this file stays clean under its own scanner.
 EXPECTED_SHAPES = {
-    ALLOWED_PATH: frozenset({"C:" + "\\\\" + "Users" + "\\\\" + "path"}),
     LOST_MESSAGE_PATH: frozenset({"noreply" + "@" + "anthropic" + ".com"}),
     HIJACKED_MESSAGE_PATH: frozenset({"noreply" + "@" + "anthropic" + ".com"}),
 }
@@ -281,7 +282,7 @@ def _allowance_repo(tmp_path, *hooks):
     for name in (ALLOWED_PATH, DECOY_PATH):
         target = repo / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(f'{{"input": "{EXEMPT_SHAPE}"}}\n', encoding="utf-8")
+        target.write_text(f"Co-authored-by: Example <{EXEMPT_SHAPE}>\n", encoding="utf-8")
     return repo
 
 
@@ -289,7 +290,7 @@ def _reported(capsys):
     return {
         line.strip().split(",")[0]
         for line in capsys.readouterr().out.splitlines()
-        if line.startswith("  ") and ",home-path," in line
+        if line.startswith("  ") and f",{ALLOWED_RULE}," in line
     }
 
 
@@ -309,11 +310,11 @@ def test_the_allowance_holds_for_the_pre_commit_hook(tmp_path):
     """The hook's own spelling: --staged, with an absolute --root."""
     repo = _allowance_repo(tmp_path, "pre-commit")
     _git(repo, "add", "-A")
-    blocked = _git(repo, "commit", "-m", "vendor fixtures", check=False)
+    blocked = _git(repo, "commit", "-m", "keep a commit message", check=False)
     output = (blocked.stdout + blocked.stderr).decode("utf-8", "replace")
     assert blocked.returncode != 0
-    assert f"  {DECOY_PATH},1,home-path," in output
-    assert f"  {ALLOWED_PATH},1,home-path," not in output
+    assert f"  {DECOY_PATH},1,{ALLOWED_RULE}," in output
+    assert f"  {ALLOWED_PATH},1,{ALLOWED_RULE}," not in output
 
 
 def test_the_allowance_holds_for_explicit_paths_under_a_root(tmp_path, capsys):

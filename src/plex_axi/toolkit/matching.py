@@ -146,7 +146,7 @@ def loosely_matches(typed: str, held: str) -> bool:
     return all(any(word.startswith(part) for word in words) for part in fold(typed).split())
 
 
-_YEAR = re.compile(r"^[0-9]{4}$")
+_YEAR = re.compile(r"^[0-9]{4}\Z")
 
 
 def year(raw):
