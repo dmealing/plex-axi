@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/dmealing/plex-axi/compare/v0.8.0...v0.8.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **toolkit:** replace local TOON encoder with shared library and fix newline anchors ([#35](https://github.com/dmealing/plex-axi/issues/35)) ([7bc49a7](https://github.com/dmealing/plex-axi/commit/7bc49a70d09059ff9cced28e6e6473e4ccec5e3d))
+* **toon:** quote a key that ends in a newline ([#34](https://github.com/dmealing/plex-axi/issues/34)) ([27feded](https://github.com/dmealing/plex-axi/commit/27feded5cccfd644115d90ed9d592f4862b1acd5))
+
 ## [0.8.0](https://github.com/dmealing/plex-axi/compare/v0.7.0...v0.8.0) (2026-10-05)
 
 
