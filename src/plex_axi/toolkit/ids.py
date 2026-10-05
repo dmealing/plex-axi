@@ -27,12 +27,12 @@ from dataclasses import dataclass
 #: The media id. The server half is a machine identifier -- hexadecimal -- which
 #: is what keeps ``plex://track/12345`` (a tool's internal id) out of this
 #: pattern: ``track`` is not hex.
-_MEDIA_ID = re.compile(r"^plex://([0-9A-Fa-f]{8,})/([0-9]+)$")
+_MEDIA_ID = re.compile(r"^plex://([0-9A-Fa-f]{8,})/([0-9]+)\Z")
 
 #: The rating key alone, behind the scheme.
-_LEGACY_MEDIA_ID = re.compile(r"^plex://([0-9]+)$")
+_LEGACY_MEDIA_ID = re.compile(r"^plex://([0-9]+)\Z")
 
-_RATING_KEY = re.compile(r"^[0-9]+$")
+_RATING_KEY = re.compile(r"^[0-9]+\Z")
 
 MEDIA_ID = "media-id"
 LEGACY_MEDIA_ID = "legacy-media-id"

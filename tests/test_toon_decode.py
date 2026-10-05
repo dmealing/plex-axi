@@ -1,10 +1,10 @@
 """The default output, read back by a decoder this project did not write.
 
-`tests/test_toon.py` and the vendored conformance fixtures check the encoder
-against expectations stated here. This checks it against the other end: the
-official TOON decoder is handed every surface's default output and must produce
-exactly the document `--json` prints. An encoder and its own tests can agree on
-a document no other implementation can read; this is the test that cannot.
+The encoder in `axi_toolkit.toon` is held to the specification's own conformance
+fixtures in its own package. This checks it from the other end: the official TOON
+decoder is handed every surface's default output and must produce exactly the
+document `--json` prints. An encoder and its own tests can agree on a document no
+other implementation can read; this is the test that cannot.
 
 The `help[N]:` block is lifted out first -- it is the documented departure from
 strict TOON -- and then compared as a list, so the block is held to the count

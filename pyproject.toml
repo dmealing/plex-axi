@@ -46,11 +46,13 @@ dependencies = [
   "PlexAPI>=4.18",
   # The `plex://` forms and the music filter language live here now, with the
   # error contract they raise against and the renderer that puts this tool's
-  # name back in front of a recovery. 0.4.0 is the first release carrying
-  # `axi_toolkit.plex`, so it is the floor. The package declares no runtime
+  # name back in front of a recovery. So does the TOON encoder: `axi_toolkit.toon`
+  # is the only copy, and this package no longer carries its own. 0.4.2 is the
+  # release whose encoder quotes a key ending in a newline, so it is the floor.
+  # The package declares no runtime
   # dependency of its own and publishes `requires-python >= 3.9`, so it neither
   # brings anything transitive with it nor has any say in the floor above.
-  "axi-toolkit>=0.4.0",
+  "axi-toolkit>=0.4.2",
 ]
 
 [project.optional-dependencies]
@@ -61,8 +63,8 @@ dev = [
   # into what GitHub will run rather than matching it as text.
   "pyyaml>=6",
   "ruff>=0.5",
-  # The official TOON decoder (MIT, no dependencies). The encoder is this
-  # project's own, so default output is decoded with somebody else's and
+  # The official TOON decoder (MIT, no dependencies). The encoder is
+  # `axi-toolkit`'s, so default output is decoded with somebody else's and
   # compared with `--json`: an encoder checked only against itself agrees
   # with itself.
   "toon-format>=1.0",

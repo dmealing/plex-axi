@@ -247,16 +247,11 @@ RULES = [
 RULES_BY_NAME = {rule.name: rule for rule in RULES}
 
 #: Files exempt from one named rule each, for content that cannot carry a
-#: `leakcheck: allow=` marker. JSON has no comment syntax, and these files are
-#: third-party data vendored byte-for-byte -- editing one to satisfy this
-#: scanner would replace the specification's opinion with ours, which is the
-#: opposite of what a conformance fixture is for. Scoped exactly like the
-#: per-line marker: one path, one rule, every other rule still runs.
+#: `leakcheck: allow=` marker. These files are kept byte-for-byte -- a commit
+#: message transcribed from history stops being that message the moment a
+#: marker is added to it. Scoped exactly like the per-line marker: one path,
+#: one rule, every other rule still runs.
 PATH_ALLOWANCES = {
-    # One upstream case escapes backslashes in a synthetic Windows drive path
-    # under the users directory. It names nobody and reaches nothing -- and the
-    # shape is deliberately not repeated here, or this file would trip too.
-    "tests/fixtures/toon-spec/encode/primitives.json": frozenset({"home-path"}),
     # The commit message release-please could not read, kept byte-for-byte so
     # the regression is the real thing rather than a likeness of it. Its
     # co-author trailer carries a no-reply address, which --commit-msg mode
@@ -892,7 +887,7 @@ def clean_pull_request():
         (
             "body",
             "## Intent\n\n"
-            "`src/plex_axi/toon.py` formats through `Decimal(repr(value))` inside the range.\n\n"
+            "`axi_toolkit.toon` formats through `Decimal(repr(value))` inside the range.\n\n"
             "```\n"
             "rootdir: /github/workspace\n"
             "collected 900 items\n"
