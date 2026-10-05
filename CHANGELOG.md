@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/dmealing/plex-axi/compare/v0.7.0...v0.8.0) (2026-10-05)
+
+
+### Features
+
+* **toolkit:** add importable library of reusable Plex server rules ([#32](https://github.com/dmealing/plex-axi/issues/32)) ([b322b1c](https://github.com/dmealing/plex-axi/commit/b322b1c4890d8d456e373408c3269baacbe3c172))
+
+
+### Bug Fixes
+
+* correct 27 defects found by live test against a real Plex server ([#31](https://github.com/dmealing/plex-axi/issues/31)) ([8b24d4d](https://github.com/dmealing/plex-axi/commit/8b24d4d0d84c030f1232d4dc7513230c97f0f42a))
+
 ## [0.7.0](https://github.com/dmealing/plex-axi/compare/v0.6.1...v0.7.0) (2026-10-03)
 
 
