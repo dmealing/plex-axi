@@ -46,7 +46,7 @@
 # agreement only where `node` is on PATH.
 #
 # THE MODEL TOOLCHAIN. `model` proves the committed generated files are what
-# metaobjects/ and metagen/ emit. The toolchain needs a newer Python than this
+# metaobjects/ and the shared generators in axi-toolkit emit. The toolchain needs a newer Python than this
 # package's floor, so it runs under `uvx --python 3.12` and never touches .venv;
 # like `--matrix`, it fails without `uv` on PATH rather than passing unrun.
 #
@@ -68,6 +68,7 @@ cd "$root" || exit 1
 
 SECTIONS=(leakcheck commits lint test skill model)
 METAOBJECTS=${METAOBJECTS:-"metaobjects==1.0.13"}
+AXI_TOOLKIT=${AXI_TOOLKIT:-"axi-toolkit[metagen]==0.5.0"}
 MATRIX_PYTHONS=${MATRIX_PYTHONS:-"3.10 3.11 3.12"}
 
 usage() { sed -n '2,/^set -uo/p' "$self" | sed '$d; s/^# \{0,1\}//'; }
@@ -148,7 +149,7 @@ sec_skill() {
 
 sec_model() {
   command -v uvx >/dev/null 2>&1 || { echo "ci-local: model needs uv on PATH" >&2; return 1; }
-  uvx --quiet --python 3.12 --from "$METAOBJECTS" metaobjects verify --codegen
+  uvx --quiet --python 3.12 --from "$METAOBJECTS" --with "$AXI_TOOLKIT" metaobjects verify --codegen
   # Both directions of the capture check, in words; pytest runs the failing one.
   python3 tests/plexmodel/capture_contract.py
 }

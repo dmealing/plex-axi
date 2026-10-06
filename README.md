@@ -566,14 +566,15 @@ virtualenv — it is standard library only, so the git hooks can run it.
 **What a Plex server answers for music is declared once, in `metaobjects/`, and some files are
 generated from it.** The model is [MetaObjects](https://metaobjects.dev) metadata: which attributes
 a track, an album, an artist and a playlist element carry, and which of them each printed row
-reads. Three things are generated from it by this repository's own generators in `metagen/`, and
+reads. Three things are generated from it by the shared generators in
+[`axi-toolkit`](https://pypi.org/project/axi-toolkit/) (`axi_toolkit.metagen`), and
 committed: the `--fields` vocabulary and default set of each row (`src/plex_axi/model/`), the
 builders the test double makes those elements through, and a check that every declared attribute
 is one a real server was captured sending (both in `tests/plexmodel/`). Change the metadata, never
 a generated file:
 
 ```sh
-uvx --python 3.12 --from metaobjects==1.0.13 metaobjects gen   # regenerate, then commit the result
+uvx --python 3.12 --from metaobjects==1.0.13 --with 'axi-toolkit[metagen]==0.5.0' metaobjects gen   # regenerate, then commit
 scripts/ci-local.sh --only model                               # fails on a hand edit or a stale file
 ```
 
