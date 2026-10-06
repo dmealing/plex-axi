@@ -41,6 +41,7 @@ from axi_toolkit.plex.ids import media_id_for
 
 from . import output
 from .errors import AnyAxiError, AxiError, UsageError
+from .model import rows as vocabulary
 from .plex import MUSIC_SECTION_TYPE, translate
 from .toolkit import matching
 from .toolkit import search as rules
@@ -613,51 +614,37 @@ def _bracketed(text: str) -> str:
 # ---------------------------------------------------------------------- rows
 
 
-#: Fields each libtype can produce, and the minimal default schema. A track row
-#: without an artist is not a music result -- it is a title and a number, which
-#: is what every prior tool in the landscape returns.
-#:
-#: **Four columns at most, which is AXI's bar for a default list schema.** Every
-#: column is paid once per row, and two of the four are spent on identifiers --
-#: ``key`` for this tool's own follow-ups, ``media_id`` for whatever plays it --
-#: so the defaults carry exactly one descriptive column beyond the title. The
-#: album and the year are one ``--fields`` away; the detail views print both.
-#: The one data-driven exception is :func:`with_track_artist`, which adds a
-#: column only on the compilation rows where the fourth would be misleading.
-#:
-#: **``media_id`` is in every default row, and that is the point of the tool.**
-#: plex-axi ends at a labelled identifier, so a list view that printed only
-#: ``key`` under-delivered on its own premise and cost the caller one detail
-#: request per row to finish the job. The ``guid`` stays out of the defaults and
-#: in the detail views: it is the durable identifier a human writes down, not
-#: the actionable one -- and for a locally-matched item it is not even durable
-#: (see :func:`axi_toolkit.plex.ids.stability_note`), so doubling every row's
-#: width for it would be a poor trade.
-ROW_FIELDS = {
-    "track": (
-        "key,media_id,title,artist",
-        "key,media_id,title,artist,track_artist,album,year,rating,"
-        "duration,plays,skips,index,added,guid",
-    ),
-    # No `tracks` here: an album *row* carries no track count -- only its
-    # detail view does -- so the column was null on every real server.
-    "album": (
-        "key,media_id,title,artist",
-        "key,media_id,title,artist,year,rating,added,guid",
-    ),
-    "artist": (
-        "key,media_id,title",
-        "key,media_id,title,rating,added,guid",
-    ),
-}
+# The fields each row can produce and its minimal default schema are declared
+# in ``metaobjects/meta.rows.yaml`` and generated into :mod:`plex_axi.model.rows`;
+# the two functions below read them. A track row
+# without an artist is not a music result -- it is a title and a number, which
+# is what every prior tool in the landscape returns.
+#
+# **Four columns at most, which is AXI's bar for a default list schema.** Every
+# column is paid once per row, and two of the four are spent on identifiers --
+# ``key`` for this tool's own follow-ups, ``media_id`` for whatever plays it --
+# so the defaults carry exactly one descriptive column beyond the title. The
+# album and the year are one ``--fields`` away; the detail views print both.
+# The one data-driven exception is :func:`with_track_artist`, which adds a
+# column only on the compilation rows where the fourth would be misleading.
+#
+# **``media_id`` is in every default row, and that is the point of the tool.**
+# plex-axi ends at a labelled identifier, so a list view that printed only
+# ``key`` under-delivered on its own premise and cost the caller one detail
+# request per row to finish the job. The ``guid`` stays out of the defaults and
+# in the detail views: it is the durable identifier a human writes down, not
+# the actionable one -- and for a locally-matched item it is not even durable
+# (see :func:`axi_toolkit.plex.ids.stability_note`), so doubling every row's
+# width for it would be a poor trade.
+#
+# An album row offers no `tracks`: an album *row* carries no track count --
+# only its detail view does -- so the column was null on every real server.
+def default_fields(row: str) -> list:
+    return list(vocabulary.DEFAULT[row])
 
 
-def default_fields(libtype: str) -> list:
-    return ROW_FIELDS[libtype][0].split(",")
-
-
-def available_fields(libtype: str) -> list:
-    return ROW_FIELDS[libtype][1].split(",")
+def available_fields(row: str) -> list:
+    return list(vocabulary.FIELDS[row])
 
 
 def _seconds(milliseconds):

@@ -563,6 +563,24 @@ installs into that, which cannot reach outside the checkout; call the tools out 
 the same reason, so nothing resolves to a copy installed elsewhere. `scripts/leakcheck.py` needs no
 virtualenv — it is standard library only, so the git hooks can run it.
 
+**What a Plex server answers for music is declared once, in `metaobjects/`, and some files are
+generated from it.** The model is [MetaObjects](https://metaobjects.dev) metadata: which attributes
+a track, an album, an artist and a playlist element carry, and which of them each printed row
+reads. Three things are generated from it by this repository's own generators in `metagen/`, and
+committed: the `--fields` vocabulary and default set of each row (`src/plex_axi/model/`), the
+builders the test double makes those elements through, and a check that every declared attribute
+is one a real server was captured sending (both in `tests/plexmodel/`). Change the metadata, never
+a generated file:
+
+```sh
+uvx --python 3.12 --from metaobjects==1.0.13 metaobjects gen   # regenerate, then commit the result
+scripts/ci-local.sh --only model                               # fails on a hand edit or a stale file
+```
+
+The toolchain runs under [`uv`](https://docs.astral.sh/uv/) and needs a newer Python than the
+package does, so it is in no dependency list: the generated code imports the standard library
+alone, and an installation gains nothing from it.
+
 This repository is public and a music library is full of identifying content, so a leak guard runs
 in a pre-commit hook, a commit-msg hook, `scripts/ci-local.sh`, and — on every open, push *and edit* — over the pull
 request's own title and body. That last one is not a file: a title and a body are published the

@@ -19,14 +19,25 @@ question, asked by ``scripts/shape-capture.py --check`` and by the live suite.
 **What a failure means.** The double emits a name the capture does not have.
 Either the double invented it -- remove it, and fix whatever in the tool was
 reading it -- or the server sends it only in a state the capture did not
-observe, in which case it goes in :data:`UNOBSERVED` *with the reason it could
-not be observed*. A reason is required; "it is probably fine" is how the
-invented attributes got there.
+observe, in which case the attribute's declaration in ``metaobjects/`` carries an
+``unobserved`` bag *with the reason it could not be observed*. A reason is
+required; "it is probably fine" is how the invented attributes got there.
+
+**What is declared once, and generated.** Which attributes a track, an album, an
+artist and a playlist carry, which of them each printed row reads, and the
+reasons above are the model in ``metaobjects/``. ``tests/plexmodel/`` is
+generated from it: the builders the double makes those four elements through,
+and the check that every declared attribute is one the capture has. The tests
+at the end of this file break that check on purpose, so that it cannot stop
+detecting anything and still pass.
 """
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
+import textwrap
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
@@ -41,6 +52,11 @@ from conftest import (
     TOKEN,
     FakePlex,
 )
+from plex_axi import music
+from plex_axi.commands import playlist
+from plex_axi.model import rows as vocabulary
+from plexmodel import capture_contract as contract
+from plexmodel import elements
 
 CAPTURE = json.loads(
     (Path(__file__).resolve().parent / "fixtures" / "plex-shape" / "capture.json").read_text(
@@ -49,22 +65,11 @@ CAPTURE = json.loads(
 )
 ELEMENTS = CAPTURE["elements"]
 
-#: Names the double emits that the capture could not have seen, each with why.
+#: Names the double emits that the capture could not have seen, each with why:
+#: generated from the ``unobserved`` reasons in ``metaobjects/meta.plex.yaml``.
 #: The capture server had sonic analysis off, nothing playing, no client
-#: advertising and no rated album, so the states below were not there to read.
-UNOBSERVED = {
-    "track": {
-        "musicAnalysisVersion": "sonic analysis was off for the captured library",
-        "distance": "only on `/nearest`, which answers nothing with analysis off",
-    },
-    "album": {
-        "userRating": "sent only on a rated item, and no album in the sample was rated",
-    },
-    "playlist.item": {
-        "musicAnalysisVersion": "sonic analysis was off for the captured library",
-        "playlistItemID": "sent on a playlist's items; the sampled playlist was a smart one",
-    },
-}
+#: advertising and no rated album, so those states were not there to read.
+UNOBSERVED = contract.UNOBSERVED
 
 #: Fields the server accepts on the wire and does not advertise. Each was
 #: measured against a real server, and each is a deliberate exception to "the
@@ -186,7 +191,7 @@ def test_playlists_and_their_items_carry_only_real_attributes():
     assert _extra(list(_get(server, "/playlists", {"playlistType": "audio"})), "playlist") == set()
     items = _get(server, "/playlists/501/items")
     assert set(items.attrib) - set(ELEMENTS["playlist.items.container"]) == set()
-    allow = UNOBSERVED["playlist.item"]
+    allow = UNOBSERVED["track"]  # a playlist's item is a Track element
     assert _extra(list(items), "playlist.item", "track.row", allow=allow) == set()
 
 
@@ -217,39 +222,6 @@ def test_the_account_element_is_the_servers_own():
     assert "authToken" in ELEMENTS["myplex"]  # the attribute `api` must redact
 
 
-# ----------------------------------------------------- what the tool reads, it gets
-
-
-def test_every_attribute_a_row_reads_is_one_a_real_row_sends():
-    """The other direction: a column that reads a name no real row carries is null.
-
-    The row builders read attributes by name; each name read here has to be one
-    a real row has, or the column it fills is empty everywhere but in the tests.
-    """
-    reads = {
-        "track": {
-            "ratingKey",
-            "title",
-            "grandparentTitle",
-            "originalTitle",
-            "parentTitle",
-            "parentYear",
-            "userRating",
-            "duration",
-            "viewCount",
-            "skipCount",
-            "index",
-            "addedAt",
-            "guid",
-        },
-        "album": {"ratingKey", "title", "parentTitle", "year", "addedAt", "guid"},
-        "artist": {"ratingKey", "title", "userRating", "addedAt", "guid"},
-    }
-    for libtype, names in reads.items():
-        missing = names - set(ELEMENTS[f"{libtype}.row"]) - set(UNOBSERVED.get(libtype, {}))
-        assert missing == set(), f"a {libtype} row never carries {sorted(missing)}"
-
-
 def test_every_exception_states_why_it_could_not_be_observed():
     for names in UNOBSERVED.values():
         for name, reason in names.items():
@@ -262,3 +234,108 @@ def test_the_capture_holds_names_and_nothing_else():
     for name, values in ELEMENTS.items():
         assert all(isinstance(value, str) and value.isascii() for value in values), name
         assert all(" " not in value and "/" not in value for value in values), name
+
+
+# ------------------------------------------------- the generated check, broken on purpose
+
+
+def _declared(fqn, **changes):
+    return {fqn: {**contract.DECLARED[fqn], **changes}}
+
+
+def test_the_capture_check_refuses_an_attribute_no_server_sent():
+    """The defect this file exists for, put back: a track `year`."""
+    track = "plex::library::Track"
+    fields = (*contract.DECLARED[track]["fields"], "year")
+    assert contract.never_sent(ELEMENTS, _declared(track, fields=fields)) == {track: ["year"]}
+    # A reason excuses it, and only a reason does.
+    excused = {**contract.DECLARED[track]["unobserved"], "year": "a reason"}
+    declared = _declared(track, fields=fields, unobserved=excused)
+    assert contract.never_sent(ELEMENTS, declared) == {}
+    # An answer the capture does not hold at all is not read as "nothing missing".
+    declared = _declared(track, capture=("track.nowhere",), unobserved={})
+    assert contract.never_sent(ELEMENTS, declared) == {track: sorted(fields[:-1])}
+
+
+def test_the_capture_check_fails_in_one_direction_only():
+    """A server sends far more than the tool reads; that is reported, not refused."""
+    extra = contract.undeclared(ELEMENTS)
+    assert all(extra[fqn] for fqn in contract.DECLARED)
+    assert contract.never_sent(ELEMENTS) == {}
+    assert "capture check: passed" in contract.report(ELEMENTS)
+
+
+def test_a_row_may_not_read_what_only_another_answer_carries():
+    """An album's track count is on its detail view and never on a row."""
+    rows = {
+        "album": {
+            **contract.ROWS["album"],
+            "reads": (*contract.ROWS["album"]["reads"], "leafCount"),
+        }
+    }
+    assert "leafCount" in ELEMENTS["album.detail"]
+    assert contract.never_read(ELEMENTS, rows) == {"album row, from album.row": ["leafCount"]}
+
+
+def test_the_double_cannot_build_an_element_with_an_invented_attribute():
+    with pytest.raises(KeyError, match="year"):
+        elements.track(ratingKey=1, type="track", title="Example Track", year=1999)
+    with pytest.raises(KeyError, match="ratingKey"):
+        elements.track(type="track", title="Example Track")
+    assert list(elements.track(title="Example Track", type="track", ratingKey=1)) == [
+        "title",
+        "type",
+        "ratingKey",
+    ]
+
+
+# ------------------------------------------------- the model, held to the row builders
+
+#: What a row builder reads off an item that is not an attribute of its element.
+BEYOND_THE_MODEL = {
+    "track": {
+        "_data": "the element the client library built the object from, not an attribute",
+        "year": "a fallback for a server that sends one; no captured track does",
+    },
+}
+
+
+def _reads_of(*functions) -> set:
+    """Every name read off the first parameter: `getattr(item, "x")` and `item.x`."""
+    found: set = set()
+    for function in functions:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        item = tree.body[0].args.args[0].arg
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and getattr(node.value, "id", None) == item:
+                found.add(node.attr)
+            elif (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == "getattr"
+                and getattr(node.args[0], "id", None) == item
+            ):
+                found.add(node.args[1].value)
+    return found
+
+
+@pytest.mark.parametrize(
+    ("row", "builders"),
+    [
+        ("track", (music.track_row, music.track_year)),
+        ("album", (music.album_row,)),
+        ("artist", (music.artist_row,)),
+        ("playlist", (playlist._playlist_row,)),
+    ],
+)
+def test_a_row_builder_reads_exactly_what_the_model_says_its_row_reads(row, builders):
+    """The model's `READS` is a claim about hand-written code, so it is checked against it."""
+    declared = {name for names in vocabulary.READS[row].values() for name in names}
+    assert _reads_of(*builders) - set(BEYOND_THE_MODEL.get(row, {})) == declared
+
+
+@pytest.mark.parametrize("libtype", ["artist", "album", "track"])
+def test_a_row_builder_fills_exactly_the_columns_the_model_offers(libtype):
+    item = type("Item", (), {"ratingKey": 1})()
+    built = music.ROW_BUILDERS[libtype](item, conftest.MACHINE_ID)
+    assert list(built) == list(vocabulary.FIELDS[libtype])
+    assert set(vocabulary.DEFAULT[libtype]) <= set(built)

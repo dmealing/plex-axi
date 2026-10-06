@@ -304,9 +304,9 @@ this repository's:
 **What deliberately stayed, and the line the split follows.** Anything taking a `server`, a
 `section` or a page of items is here — `resolve_section`, `run_search`, `count_matches`, the
 `advertised_*` probes, `offers`, `label_filters`, `SearchResult` — along with the `plexapi`
-exception classification and the whole `--fields` row vocabulary (`ROW_FIELDS`, `default_fields`,
-`available_fields`, the seven row builders, `rows_for`, `with_track_artist`, `tag_titles`,
-`date_only`, `number`). Those are decisions about *this* tool's output rather than about Plex's
+exception classification and the whole `--fields` row vocabulary (`default_fields` and
+`available_fields`, over the tables generated into `model/rows.py`, the seven row builders,
+`rows_for`, `with_track_artist`, `tag_titles`, `date_only`, `number`). Those are decisions about *this* tool's output rather than about Plex's
 query language. **Do not propose moving them.**
 
 **Every call site was repointed rather than re-exported, and that was a decision.** `music.py`

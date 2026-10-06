@@ -1,0 +1,146 @@
+# What a Plex Media Server sends for music, as plex-axi and its test double name it.
+#
+# Every name here is Plex's own, transcribed from the names-only capture of a real
+# server (tests/fixtures/plex-shape/capture.json, written by scripts/shape-capture.py).
+# Nothing is taken from memory or from a client library's model: a track `year` was
+# invented that way once, and it was empty on every real server.
+#
+# An object declares the attributes this tool reads or its double emits, not every
+# attribute the server sends. The generated capture check fails when a declared
+# attribute is in no captured answer and carries no `unobserved` reason.
+#
+# Not declared: Player, Client and Session. No capture has seen one -- nothing was
+# playing and no client was advertising -- so declaring them would be authoring.
+metadata:
+  package: plex::library
+  children:
+    - attr.properties: { name: capture, value: { file: tests/fixtures/plex-shape/capture.json } }
+    - object.entity:
+        name: Track
+        description: >-
+          One Track element: a row of GET /library/sections/{id}/all?type=10, the answer
+          of GET /library/metadata/{ratingKey}, and an item of a playlist.
+        children:
+          - attr.properties:
+              name: wire
+              value:
+                key: track
+                element: Track
+                format: xml-attributes
+                capture: [track.row, track.detail, playlist.item]
+          - field.string: { name: ratingKey, required: true, description: "This server's row number for the item. It moves on a re-match." }
+          - field.string: { name: key }
+          - field.string: { name: guid }
+          - field.string: { name: type, required: true }
+          - field.string: { name: title, required: true }
+          - field.string: { name: titleSort }
+          - field.string: { name: originalTitle, description: "The performer, when it is not the album artist." }
+          - field.string: { name: parentRatingKey }
+          - field.string: { name: parentTitle, description: The album. }
+          - field.int: { name: parentIndex }
+          - field.int: { name: parentYear, description: "The album's year. A track element carries no year of its own." }
+          - field.string: { name: grandparentRatingKey }
+          - field.string: { name: grandparentTitle, description: The album artist. }
+          - field.int: { name: index }
+          - field.long: { name: duration, description: Milliseconds. }
+          - field.double: { name: userRating, description: "0 to 10 points, two to a star. Sent only on a rated item." }
+          - field.int: { name: viewCount }
+          - field.int: { name: skipCount }
+          - field.long: { name: addedAt, description: Epoch seconds. }
+          - field.long: { name: lastViewedAt, description: "Epoch seconds. Absent, not zero, on a never-played track." }
+          - field.int:
+              name: musicAnalysisVersion
+              children:
+                - attr.properties: { name: unobserved, value: { reason: sonic analysis was off for the captured library } }
+          - field.double:
+              name: distance
+              children:
+                - attr.properties: { name: unobserved, value: { reason: "only on `/nearest`, which answers nothing with analysis off" } }
+          - field.string: { name: playlistItemID, description: "Only on a playlist's item: the handle of one membership, not of the track." }
+          - identity.primary: { name: id, fields: ratingKey }
+
+    - object.entity:
+        name: Album
+        description: >-
+          One album Directory element: a row of GET /library/sections/{id}/all?type=9
+          and the answer of GET /library/metadata/{ratingKey}.
+        children:
+          - attr.properties:
+              name: wire
+              value:
+                key: album
+                element: Directory
+                format: xml-attributes
+                capture: [album.row, album.detail]
+          - field.string: { name: ratingKey, required: true }
+          - field.string: { name: key }
+          - field.string: { name: guid }
+          - field.string: { name: type, required: true }
+          - field.string: { name: title, required: true }
+          - field.string: { name: titleSort }
+          - field.string: { name: parentRatingKey }
+          - field.string: { name: parentTitle, description: The album artist. }
+          - field.string: { name: parentGuid }
+          - field.int: { name: year }
+          - field.int: { name: leafCount, description: "The track count. On the detail view only, never on a row." }
+          - field.double:
+              name: userRating
+              children:
+                - attr.properties: { name: unobserved, value: { reason: "sent only on a rated item, and no album in the sample was rated" } }
+          - field.long: { name: addedAt, description: Epoch seconds. }
+          - field.string: { name: studio }
+          - field.string: { name: summary }
+          - identity.primary: { name: id, fields: ratingKey }
+
+    - object.entity:
+        name: Artist
+        description: >-
+          One artist Directory element: a row of GET /library/sections/{id}/all?type=8
+          and the answer of GET /library/metadata/{ratingKey}. It carries no album or
+          track count in either.
+        children:
+          - attr.properties:
+              name: wire
+              value:
+                key: artist
+                element: Directory
+                format: xml-attributes
+                capture: [artist.row, artist.detail]
+          - field.string: { name: ratingKey, required: true }
+          - field.string: { name: key }
+          - field.string: { name: guid }
+          - field.string: { name: type, required: true }
+          - field.string: { name: title, required: true }
+          - field.string: { name: titleSort }
+          - field.string: { name: summary }
+          - field.double: { name: userRating, description: "0 to 10 points, two to a star. Sent only on a rated item." }
+          - field.long: { name: addedAt, description: Epoch seconds. }
+          - field.string: { name: librarySectionID, description: On the detail view only. }
+          - identity.primary: { name: id, fields: ratingKey }
+
+    - object.entity:
+        name: Playlist
+        description: One Playlist element of GET /playlists?playlistType=audio.
+        children:
+          - attr.properties:
+              name: wire
+              value:
+                key: playlist
+                element: Playlist
+                format: xml-attributes
+                capture: [playlist]
+          - field.string: { name: ratingKey, required: true }
+          - field.string: { name: key }
+          - field.string: { name: guid }
+          - field.string: { name: type, required: true }
+          - field.string: { name: title, required: true }
+          - field.string: { name: titleSort }
+          - field.string: { name: summary }
+          - field.boolean: { name: smart, description: "Sent as 0 or 1." }
+          - field.string: { name: playlistType }
+          - field.string: { name: composite }
+          - field.long: { name: duration, description: Milliseconds. }
+          - field.int: { name: leafCount, description: "The count the server declares, which is not always the count it holds." }
+          - field.long: { name: addedAt, description: Epoch seconds. }
+          - field.long: { name: updatedAt, description: Epoch seconds. }
+          - identity.primary: { name: id, fields: ratingKey }
