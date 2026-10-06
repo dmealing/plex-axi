@@ -183,7 +183,8 @@ re-run the scanner *after* formatting, not before. This has already bitten once.
   this boundary: not its exceptions, not its response bodies, not its name.
 - `music.py` — the product, and only the half of it that needs a live server: section resolution,
   the operator titles a section advertises, the search, the exact total, the `plexapi` exception
-  classification and the whole `--fields` row vocabulary.
+  classification and the `--fields` row builders, over the vocabulary generated into
+  `model/rows.py`.
 - `axi_toolkit.plex.filters` — the pure half of the same product, and no longer in this repository:
   `LIBTYPES`, the stars conversion both ways, `FIELD_MAP`, the operators, `build_filters`, the
   relative dates and `parse_sort`. Everything there takes a flag's raw value and returns a value or

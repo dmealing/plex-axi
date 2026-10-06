@@ -4,9 +4,10 @@
 """The rows this tool prints: the columns each offers, and what each one reads.
 
 ``FIELDS`` is every column a row can carry, in the order they are documented and
-printed. ``DEFAULT`` is the set shown when no columns are asked for. ``SOURCE`` is
-the upstream object a row is read from, and ``READS`` the attributes of it that
-each column is read from.
+printed. ``DEFAULT`` is the set shown when no columns are asked for. ``READS`` is
+the attributes of the upstream object that each column is read from: nothing at
+run time reads it, and it is here so that what a column is made of ships with
+the column, for the test suite and for whatever builds on this package.
 """
 
 from __future__ import annotations
@@ -103,14 +104,6 @@ DEFAULT = {
         "title",
         "smart",
     ),
-}
-
-SOURCE = {
-    "track": "plex::library::Track",
-    "similar": "plex::library::Track",
-    "album": "plex::library::Album",
-    "artist": "plex::library::Artist",
-    "playlist": "plex::library::Playlist",
 }
 
 READS = {

@@ -59,17 +59,16 @@ class Rows:
             + '"""The rows this tool prints: the columns each offers, and what each one reads.\n'
             "\n"
             "``FIELDS`` is every column a row can carry, in the order they are documented and\n"
-            "printed. ``DEFAULT`` is the set shown when no columns are asked for. ``SOURCE`` is\n"
-            "the upstream object a row is read from, and ``READS`` the attributes of it that\n"
-            'each column is read from.\n"""\n'
+            "printed. ``DEFAULT`` is the set shown when no columns are asked for. ``READS`` is\n"
+            "the attributes of the upstream object that each column is read from: nothing at\n"
+            "run time reads it, and it is here so that what a column is made of ships with\n"
+            'the column, for the test suite and for whatever builds on this package.\n"""\n'
             "\n"
             "from __future__ import annotations\n"
             "\n"
             + _assign("FIELDS", {row.key: tuple(row.reads) for row in rows})
             + "\n"
             + _assign("DEFAULT", {row.key: row.default for row in rows})
-            + "\n"
-            + _assign("SOURCE", {row.key: row.of for row in rows})
             + "\n"
             + _assign("READS", {row.key: row.reads for row in rows})
         )

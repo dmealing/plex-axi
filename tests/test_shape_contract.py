@@ -53,7 +53,7 @@ from conftest import (
     FakePlex,
 )
 from plex_axi import music
-from plex_axi.commands import playlist
+from plex_axi.commands import playlist, similar
 from plex_axi.model import rows as vocabulary
 from plexmodel import capture_contract as contract
 from plexmodel import elements
@@ -292,12 +292,11 @@ def test_the_double_cannot_build_an_element_with_an_invented_attribute():
 # ------------------------------------------------- the model, held to the row builders
 
 #: What a row builder reads off an item that is not an attribute of its element.
-BEYOND_THE_MODEL = {
-    "track": {
-        "_data": "the element the client library built the object from, not an attribute",
-        "year": "a fallback for a server that sends one; no captured track does",
-    },
+_BEYOND_A_TRACK = {
+    "_data": "the element the client library built the object from, not an attribute",
+    "year": "a fallback for a server that sends one; no captured track does",
 }
+BEYOND_THE_MODEL = {"track": _BEYOND_A_TRACK, "similar": _BEYOND_A_TRACK}
 
 
 def _reads_of(*functions) -> set:
@@ -322,6 +321,8 @@ def _reads_of(*functions) -> set:
     ("row", "builders"),
     [
         ("track", (music.track_row, music.track_year)),
+        # A neighbour is a track row with the distance `similar` adds to it.
+        ("similar", (music.track_row, music.track_year, similar._distance)),
         ("album", (music.album_row,)),
         ("artist", (music.artist_row,)),
         ("playlist", (playlist._playlist_row,)),
