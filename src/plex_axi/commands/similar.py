@@ -19,17 +19,12 @@ from __future__ import annotations
 
 from ..argspec import Command, Flag, Sub
 from ..errors import AxiError, UsageError
-from ..music import available_fields, rows_for
+from ..music import available_fields, default_fields, rows_for
 from ..output import HelpBlock
 from ..plex import translate
 from ._common import article, parse_key, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 20
-
-#: Four columns, AXI's bar for a default list. ``distance`` is the column this
-#: command exists to surface, so it takes the place a track list gives the
-#: artist; the artist is one ``--fields`` away and the help line says so.
-DEFAULT_FIELDS = ["distance", "key", "media_id", "title"]
 
 COMMAND = Command(
     name="similar",
@@ -111,8 +106,12 @@ def run(ctx, name: str, sub: str, parsed):
     for row, distance in zip(rows, distances):
         row["distance"] = distance
 
+    # The default is four columns, AXI's bar for a default list. ``distance`` is
+    # the column this command exists to surface, so it takes the place a track
+    # list gives the artist; the artist is one ``--fields`` away and the help
+    # line says so.
     fields = select_fields(
-        parsed.get("fields"), [*available_fields("track"), "distance"], DEFAULT_FIELDS
+        parsed.get("fields"), available_fields("similar"), default_fields("similar")
     )
 
     doc = {

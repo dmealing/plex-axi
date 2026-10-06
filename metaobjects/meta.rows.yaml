@@ -1,0 +1,153 @@
+# The rows plex-axi prints, and which Plex attribute each column is read from.
+#
+# A column read straight from one attribute `extends` it, so the loader refuses the
+# model when that attribute is renamed or retyped. A computed column names what it
+# reads in a `derived` bag, which the generator checks against the same object.
+# Column order is the order `--fields` documents and the order a row is printed in.
+# Each default set is an `object.projection` over its row. `row.capture` names the
+# captured answers a row is built from: every attribute it reads has to be in each.
+# `similar` names none, because no `/nearest` answer has been captured.
+#
+# Not declared: the `sessions` row. It reads a Player element, which no capture has.
+metadata:
+  package: plex_axi::rows
+  children:
+    - object.value:
+        name: TrackRow
+        description: One track, as `search`, `pick`, `recent` and `playlist show` print it.
+        children:
+          - attr.properties: { name: row, value: { key: track, of: "plex::library::Track", capture: [track.row, playlist.item] } }
+          - field.long:
+              name: key
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string:
+              name: media_id
+              description: "plex://<machineIdentifier>/<ratingKey>; the machine identifier is the server's, not the element's."
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string: { name: title, extends: "plex::library::Track.title" }
+          - field.string: { name: artist, extends: "plex::library::Track.grandparentTitle" }
+          - field.string:
+              name: track_artist
+              children: [ { attr.properties: { name: derived, value: { reads: [grandparentTitle, originalTitle] } } } ]
+          - field.string: { name: album, extends: "plex::library::Track.parentTitle" }
+          - field.int: { name: year, extends: "plex::library::Track.parentYear" }
+          - field.double:
+              name: rating
+              children: [ { attr.properties: { name: derived, value: { reads: [userRating], unit: stars } } } ]
+          - field.int:
+              name: duration
+              children: [ { attr.properties: { name: derived, value: { reads: [duration], unit: seconds } } } ]
+          - field.int: { name: plays, extends: "plex::library::Track.viewCount" }
+          - field.int: { name: skips, extends: "plex::library::Track.skipCount" }
+          - field.int: { name: index, extends: "plex::library::Track.index" }
+          - field.string:
+              name: added
+              children: [ { attr.properties: { name: derived, value: { reads: [addedAt], unit: date } } } ]
+          - field.string: { name: guid, extends: "plex::library::Track.guid" }
+    - object.projection:
+        name: TrackRowDefault
+        description: The columns a track listing shows when --fields is not given.
+        children:
+          - field.long: { name: key, extends: "TrackRow.key" }
+          - field.string: { name: media_id, extends: "TrackRow.media_id" }
+          - field.string: { name: title, extends: "TrackRow.title" }
+          - field.string: { name: artist, extends: "TrackRow.artist" }
+
+    - object.value:
+        name: SimilarRow
+        extends: TrackRow
+        description: One sonic neighbour, as `similar` prints it - a track row and its distance from the seed.
+        children:
+          - attr.properties: { name: row, value: { key: similar, of: "plex::library::Track", capture: [] } }
+          - field.double: { name: distance, extends: "plex::library::Track.distance" }
+    - object.projection:
+        name: SimilarRowDefault
+        description: The columns `similar` shows when --fields is not given.
+        children:
+          - field.double: { name: distance, extends: "SimilarRow.distance" }
+          - field.long: { name: key, extends: "SimilarRow.key" }
+          - field.string: { name: media_id, extends: "SimilarRow.media_id" }
+          - field.string: { name: title, extends: "SimilarRow.title" }
+
+    - object.value:
+        name: AlbumRow
+        description: One album, as `search --type album` and `recent` print it.
+        children:
+          - attr.properties: { name: row, value: { key: album, of: "plex::library::Album", capture: [album.row] } }
+          - field.long:
+              name: key
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string:
+              name: media_id
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string: { name: title, extends: "plex::library::Album.title" }
+          - field.string: { name: artist, extends: "plex::library::Album.parentTitle" }
+          - field.int: { name: year, extends: "plex::library::Album.year" }
+          - field.double:
+              name: rating
+              children: [ { attr.properties: { name: derived, value: { reads: [userRating], unit: stars } } } ]
+          - field.string:
+              name: added
+              children: [ { attr.properties: { name: derived, value: { reads: [addedAt], unit: date } } } ]
+          - field.string: { name: guid, extends: "plex::library::Album.guid" }
+    - object.projection:
+        name: AlbumRowDefault
+        description: The columns an album listing shows when --fields is not given.
+        children:
+          - field.long: { name: key, extends: "AlbumRow.key" }
+          - field.string: { name: media_id, extends: "AlbumRow.media_id" }
+          - field.string: { name: title, extends: "AlbumRow.title" }
+          - field.string: { name: artist, extends: "AlbumRow.artist" }
+
+    - object.value:
+        name: ArtistRow
+        description: One artist, as `search --type artist` prints it.
+        children:
+          - attr.properties: { name: row, value: { key: artist, of: "plex::library::Artist", capture: [artist.row] } }
+          - field.long:
+              name: key
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string:
+              name: media_id
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string: { name: title, extends: "plex::library::Artist.title" }
+          - field.double:
+              name: rating
+              children: [ { attr.properties: { name: derived, value: { reads: [userRating], unit: stars } } } ]
+          - field.string:
+              name: added
+              children: [ { attr.properties: { name: derived, value: { reads: [addedAt], unit: date } } } ]
+          - field.string: { name: guid, extends: "plex::library::Artist.guid" }
+    - object.projection:
+        name: ArtistRowDefault
+        description: The columns an artist listing shows when --fields is not given.
+        children:
+          - field.long: { name: key, extends: "ArtistRow.key" }
+          - field.string: { name: media_id, extends: "ArtistRow.media_id" }
+          - field.string: { name: title, extends: "ArtistRow.title" }
+
+    - object.value:
+        name: PlaylistRow
+        description: One audio playlist, as `playlist list` prints it.
+        children:
+          - attr.properties: { name: row, value: { key: playlist, of: "plex::library::Playlist", capture: [playlist] } }
+          - field.long:
+              name: key
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string:
+              name: media_id
+              children: [ { attr.properties: { name: derived, value: { reads: [ratingKey] } } } ]
+          - field.string: { name: title, extends: "plex::library::Playlist.title" }
+          - field.boolean: { name: smart, extends: "plex::library::Playlist.smart" }
+          - field.int: { name: items, extends: "plex::library::Playlist.leafCount" }
+          - field.string:
+              name: updated
+              children: [ { attr.properties: { name: derived, value: { reads: [updatedAt], unit: date } } } ]
+    - object.projection:
+        name: PlaylistRowDefault
+        description: The columns `playlist list` shows when --fields is not given.
+        children:
+          - field.long: { name: key, extends: "PlaylistRow.key" }
+          - field.string: { name: media_id, extends: "PlaylistRow.media_id" }
+          - field.string: { name: title, extends: "PlaylistRow.title" }
+          - field.boolean: { name: smart, extends: "PlaylistRow.smart" }

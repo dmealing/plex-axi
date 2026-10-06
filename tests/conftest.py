@@ -47,6 +47,8 @@ from xml.sax.saxutils import quoteattr
 
 import pytest
 
+from plexmodel import elements
+
 # --------------------------------------------------------------------- fixture data
 
 TOKEN = "example-token-0000000001"
@@ -743,23 +745,23 @@ def _tags(kind, ids, table):
 
 def artist_xml(row, *, detail=False):
     head = _attrs(
-        [
-            ("ratingKey", row["key"]),
-            ("key", "/library/metadata/{}/children".format(row["key"])),
-            ("guid", row["guid"]),
-            ("type", "artist"),
-            ("title", row["title"]),
-            ("titleSort", row["title"]),
-            ("summary", row["summary"]),
-            ("userRating", row["userRating"]),
-            ("addedAt", row["addedAt"]),
+        elements.artist(
+            ratingKey=row["key"],
+            key="/library/metadata/{}/children".format(row["key"]),
+            guid=row["guid"],
+            type="artist",
+            title=row["title"],
+            titleSort=row["title"],
+            summary=row["summary"],
+            userRating=row["userRating"],
+            addedAt=row["addedAt"],
             # TRANSCRIBED: a real artist element carries neither `childCount`
             # nor `leafCount`, in a list or in its own detail view. Both were
             # here once, the tool read them, and an artist's album and track
             # counts were empty on every real server. The counts come from a
             # section search on `artist.id`.
-            ("librarySectionID", MUSIC_SECTION_KEY if detail else None),
-        ]
+            librarySectionID=MUSIC_SECTION_KEY if detail else None,
+        ).items()
     )
     body = (
         _tags("Genre", row["genres"], GENRES)
@@ -772,26 +774,26 @@ def artist_xml(row, *, detail=False):
 def album_xml(row, tables, *, detail=False):
     artist = tables.artist_by_key[row["artist"]]
     head = _attrs(
-        [
-            ("ratingKey", row["key"]),
-            ("key", "/library/metadata/{}/children".format(row["key"])),
-            ("guid", "plex://album/a1b2c3d4e5f60718293b{:04d}".format(row["key"])),
-            ("type", "album"),
-            ("title", row["title"]),
-            ("titleSort", row["title"]),
-            ("parentRatingKey", artist["key"]),
-            ("parentTitle", artist["title"]),
-            ("parentGuid", artist["guid"]),
-            ("year", row["year"]),
+        elements.album(
+            ratingKey=row["key"],
+            key="/library/metadata/{}/children".format(row["key"]),
+            guid="plex://album/a1b2c3d4e5f60718293b{:04d}".format(row["key"]),
+            type="album",
+            title=row["title"],
+            titleSort=row["title"],
+            parentRatingKey=artist["key"],
+            parentTitle=artist["title"],
+            parentGuid=artist["guid"],
+            year=row["year"],
             # TRANSCRIBED: `leafCount` is on an album's own detail view and not
             # on an album *row*. It was on both here, so `--fields tracks` on an
             # album search printed a number in every test and null on a real one.
-            ("leafCount", row["leafCount"] if detail else None),
-            ("userRating", row["userRating"]),
-            ("addedAt", row["addedAt"]),
-            ("studio", row["studio"]),
-            ("summary", row["summary"]),
-        ]
+            leafCount=row["leafCount"] if detail else None,
+            userRating=row["userRating"],
+            addedAt=row["addedAt"],
+            studio=row["studio"],
+            summary=row["summary"],
+        ).items()
     )
     return f"<Directory {head}/>"
 
@@ -851,43 +853,40 @@ def track_xml(row, tables, *, check_files=False, distance=None, session=None, it
             ),
         )
     head = _attrs(
-        [
-            ("ratingKey", row["key"]),
-            ("key", "/library/metadata/{}".format(row["key"])),
+        elements.track(
+            ratingKey=row["key"],
+            key="/library/metadata/{}".format(row["key"]),
             # An explicit guid wins, which is how a `local://` row is modelled;
             # the catalogue form is the default because most tracks carry it.
-            (
-                "guid",
-                row.get("guid") or "plex://track/a1b2c3d4e5f60718293c{:04d}".format(row["key"]),
-            ),
-            ("type", "track"),
-            ("title", row["title"]),
-            ("titleSort", row["title"]),
-            ("originalTitle", row["originalTitle"]),
-            ("parentRatingKey", album["key"]),
-            ("parentTitle", album["title"]),
-            ("parentIndex", 1),
-            ("grandparentRatingKey", artist["key"]),
-            ("grandparentTitle", artist["title"]),
-            ("index", row["index"]),
+            guid=row.get("guid") or "plex://track/a1b2c3d4e5f60718293c{:04d}".format(row["key"]),
+            type="track",
+            title=row["title"],
+            titleSort=row["title"],
+            originalTitle=row["originalTitle"],
+            parentRatingKey=album["key"],
+            parentTitle=album["title"],
+            parentIndex=1,
+            grandparentRatingKey=artist["key"],
+            grandparentTitle=artist["title"],
+            index=row["index"],
             # TRANSCRIBED: a real track carries `parentYear` and no `year` at
             # all (0 of 10,851 on the library this was read from). This element
             # once carried an invented `year=`, the tool read it, and a track's
             # year was empty on every real server while every test here passed.
-            ("parentYear", album["year"]),
-            ("duration", row["duration"]),
-            ("userRating", row["userRating"]),
-            ("viewCount", row["viewCount"]),
-            ("skipCount", row["skipCount"]),
-            ("addedAt", row["addedAt"]),
-            ("lastViewedAt", row["lastViewedAt"] or None),
-            ("musicAnalysisVersion", row["analysis"]),
-            ("distance", distance),
+            parentYear=album["year"],
+            duration=row["duration"],
+            userRating=row["userRating"],
+            viewCount=row["viewCount"],
+            skipCount=row["skipCount"],
+            addedAt=row["addedAt"],
+            lastViewedAt=row["lastViewedAt"] or None,
+            musicAnalysisVersion=row["analysis"],
+            distance=distance,
             # Only present when the track is being listed as part of a playlist.
             # It is the handle `removeItems` deletes by, and it is per membership
             # rather than per track: the same song twice in a list has two.
-            ("playlistItemID", item_id),
-        ]
+            playlistItemID=item_id,
+        ).items()
     )
     body = media + _tags("Mood", row["moods"], TRACK_MOODS) + player
     return f"<Track {head}>{body}</Track>"
@@ -925,23 +924,23 @@ def playlist_xml(row, tables):
         _kind, item = tables.by_key[entry["key"]]
         duration += item.get("duration") or 0
     head = _attrs(
-        [
-            ("ratingKey", row["id"]),
-            ("key", "/playlists/{}/items".format(row["id"])),
-            ("guid", "com.plexapp.agents.none://{:08d}".format(row["id"])),
-            ("type", "playlist"),
-            ("title", row["title"]),
-            ("titleSort", row["title"]),
-            ("summary", ""),
-            ("smart", row["smart"]),
-            ("playlistType", row["type"]),
-            ("composite", "/playlist/{}/composite/1".format(row["id"])),
-            ("duration", duration or None),
+        elements.playlist(
+            ratingKey=row["id"],
+            key="/playlists/{}/items".format(row["id"]),
+            guid="com.plexapp.agents.none://{:08d}".format(row["id"]),
+            type="playlist",
+            title=row["title"],
+            titleSort=row["title"],
+            summary="",
+            smart=row["smart"],
+            playlistType=row["type"],
+            composite="/playlist/{}/composite/1".format(row["id"]),
+            duration=duration or None,
             # The declared count, which is not always the real one.
-            ("leafCount", row.get("leafCount", len(row["items"]))),
-            ("addedAt", 1700000000),
-            ("updatedAt", row["updatedAt"]),
-        ]
+            leafCount=row.get("leafCount", len(row["items"])),
+            addedAt=1700000000,
+            updatedAt=row["updatedAt"],
+        ).items()
     )
     return f"<Playlist {head}/>"
 

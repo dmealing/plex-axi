@@ -62,13 +62,6 @@ DEFAULT_ITEM_LIMIT = 50
 MAX_LIMIT = 1000
 MAX_ITEM_LIMIT = 500
 
-#: Every column a listing row can carry, and the four it carries by default.
-#: ``smart`` is the default's fourth because it decides what a caller can do
-#: next -- a smart playlist cannot be added to -- where ``items`` is a count the
-#: server caches and gets wrong (see :func:`_list`), so it is asked for by name.
-PLAYLIST_FIELDS = ["key", "media_id", "title", "smart", "items", "updated"]
-PLAYLIST_DEFAULT_FIELDS = ["key", "media_id", "title", "smart"]
-
 _KEY_FLAG = Flag(
     "--key",
     "<rating_key>",
@@ -141,7 +134,7 @@ COMMAND = Command(
         "`items` in a listing (`--fields key,title,items`) is the count the server "
         "declares, which for a smart playlist is cached; `playlist show` reports what it "
         "actually holds",
-        f"listing columns: {', '.join(PLAYLIST_FIELDS)}",
+        f"listing columns: {', '.join(available_fields('playlist'))}",
         "nothing here plays a playlist: both `list` and `show` print the playlist's own "
         "media_id, and `show` prints one per track as well",
     ),
@@ -186,7 +179,11 @@ def run(ctx, name: str, sub: str, parsed):
 def _list(ctx, parsed):
     limit = parse_limit(parsed.get("limit"), default=DEFAULT_LIMIT, maximum=MAX_LIMIT)
     chosen = parsed.get("fields")
-    fields = select_fields(chosen, PLAYLIST_FIELDS, PLAYLIST_DEFAULT_FIELDS)
+    # ``smart`` is the default's fourth column because it decides what a caller
+    # can do next -- a smart playlist cannot be added to -- where ``items`` is a
+    # count the server caches and gets wrong (see below), so it is asked for by
+    # name.
+    fields = select_fields(chosen, available_fields("playlist"), default_fields("playlist"))
     server = ctx.server()
     playlists = _audio_playlists(server)
     shown = playlists[:limit]
