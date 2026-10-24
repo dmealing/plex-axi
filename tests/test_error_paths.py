@@ -16,7 +16,8 @@ import pytest
 import requests
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 
-from plex_axi import music, plex
+from conftest import ACCOUNT_TOKEN, SHARED_USERNAME, TOKEN
+from plex_axi import cloud, config, music, plex
 from plex_axi.errors import AnyAxiError
 
 SEARCH = ("search", "--artist", "Example Artist")
@@ -108,3 +109,89 @@ def test_a_filter_validation_failure_becomes_a_recoverable_error(message, code, 
 def test_an_unknown_operator_never_recommends_the_flag_that_failed():
     error = music._filter_error(BadRequest("Unknown operator '>=' for field 'x'"), "track")
     assert not any("--rated-min" in line for line in error.help_lines)
+
+
+@pytest.mark.parametrize(
+    "build, fault, token, code, says",
+    [
+        ({"sonos_status": 500}, None, "account", "SONOS_REFUSED", "refused to list the speakers"),
+        ({"sonos_status": 403}, None, "account", "SONOS_TOKEN_REFUSED", "(403)"),
+        ({}, None, "server", "SONOS_TOKEN_REFUSED", "(401)"),
+        (
+            {},
+            {"raise": requests.exceptions.ConnectionError("reset")},
+            "account",
+            "SONOS_UNREACHABLE",
+            "could not be reached",
+        ),
+        (
+            {},
+            {"raise": requests.exceptions.ReadTimeout("slow")},
+            "account",
+            "SONOS_UNREACHABLE",
+            "did not answer within",
+        ),
+        (
+            {},
+            {"status": 200, "body": "<html>sign in</html"},
+            "account",
+            "SONOS_UNPARSEABLE",
+            "not with a list of speakers",
+        ),
+    ],
+)
+def test_a_sonos_route_failure_is_classified(
+    make_server, plex_env, build, fault, token, code, says
+):
+    fake = make_server(**build)
+    if fault:
+        fake.fault = {**fault, "host": cloud.SONOS, "match": "/resources"}
+    with pytest.raises(AnyAxiError) as raised:
+        cloud.speakers(config.load(plex_env), ACCOUNT_TOKEN if token == "account" else TOKEN)
+    assert raised.value.code == code
+    assert says in raised.value.message
+    assert raised.value.help_lines
+
+
+@pytest.mark.parametrize(
+    "build, fault, code, says",
+    [
+        ({"plex_tv_status": 500}, None, "PLEX_TV_REFUSED", "refused to list"),
+        ({"plex_tv_status": 401}, None, "NOT_SERVER_OWNER", "admin-only"),
+        (
+            {"plex_tv_status": 401, "plex_tv_account": False},
+            None,
+            "PLEX_TV_TOKEN_REJECTED",
+            "does not recognise PLEX_TOKEN",
+        ),
+        (
+            {},
+            {"status": 200, "body": "<html>sign in</html"},
+            "PLEX_TV_UNPARSEABLE",
+            "not with a sharing record",
+        ),
+        (
+            {},
+            {"raise": requests.exceptions.ConnectionError("reset")},
+            "PLEX_TV_UNREACHABLE",
+            "could not be reached",
+        ),
+        (
+            {},
+            {"raise": requests.exceptions.ReadTimeout("slow")},
+            "PLEX_TV_UNREACHABLE",
+            "did not answer within",
+        ),
+    ],
+)
+def test_a_plex_tv_failure_behind_user_is_classified(
+    make_server, cli_run, build, fault, code, says
+):
+    fake = make_server(**build)
+    if fault:
+        fake.fault = {**fault, "host": "plex.tv", "match": "/shared_servers"}
+    result = cli_run("--user", SHARED_USERNAME, "search", "--track", "Example Track")
+    assert result.code == 1
+    assert f"code: {code}" in result.out
+    assert says in result.out
+    assert "plexapi" not in (result.out + result.err).lower()

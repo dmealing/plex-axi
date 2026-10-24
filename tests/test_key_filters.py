@@ -42,7 +42,8 @@ def test_artist_key_narrows_to_that_artist_and_not_a_namesake(server, cli_run):
     assert _queries(server)[-1]["artist.id"] == "200"
     keys = {row["key"] for row in _rows(result)}
     assert keys == {211}
-    assert keys < {row["key"] for row in everything} | keys
+    # The text search also finds Example Artist's track; the key does not.
+    assert {111, 211} <= {row["key"] for row in everything}
 
 
 def test_a_key_filter_is_echoed_as_the_predicate_that_ran(server, cli_run):
@@ -103,11 +104,14 @@ def test_pick_by_artist_is_a_server_side_title_predicate(server, cli_run):
 
 
 def test_pick_by_mood_and_style_resolve_to_tag_ids(server, cli_run):
-    result = cli_run("pick", "--mood", "Mellow", "--style", "Example Style")
-    assert result.code in (0, 2)
+    result = cli_run("pick", "--mood", "Mellow", "--style", "Cool Jazz", "--json")
+    assert result.code == 0
     query = _queries(server)[-1]
     assert query["track.mood"] == "31"
-    assert "artist.style" in query
+    assert query["artist.style"] == "21"
+    # Mellow tracks by the one Cool Jazz artist, grouped by title; Guest Track
+    # is Mellow too, by an artist with no style.
+    assert {row["title"] for row in _rows(result)} == {"Example Track"}
 
 
 def test_pick_reports_a_field_this_server_does_not_offer(monkeypatch, cli_run):

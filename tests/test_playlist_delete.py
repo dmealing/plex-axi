@@ -61,3 +61,36 @@ def test_a_film_playlist_is_invisible_to_delete(server, cli_run, writable_env):
     result = cli_run("playlist", "delete", "Example Film Night", "--write", env=writable_env)
     assert result.code == 1
     assert server.writes == []
+
+
+def test_a_retried_delete_by_key_converges_rather_than_failing(server, cli_run, writable_env):
+    assert cli_run("playlist", "delete", "501", "--write", env=writable_env).code == 0
+    retried = cli_run("playlist", "delete", "501", "--write", env=writable_env)
+    assert retried.code == 0
+    assert "(no-op)" in retried.line("already:")
+    assert [w["method"] for w in server.writes] == ["DELETE"]
+
+
+def test_a_retried_delete_by_media_id_converges_too(server, cli_run, writable_env):
+    from conftest import MACHINE_ID
+
+    media_id = f"plex://{MACHINE_ID}/501"
+    assert cli_run("playlist", "delete", media_id, "--write", env=writable_env).code == 0
+    retried = cli_run("playlist", "delete", media_id, "--write", env=writable_env)
+    assert retried.code == 0
+    assert "(no-op)" in retried.line("already:")
+    assert [w["method"] for w in server.writes] == ["DELETE"]
+
+
+def test_a_title_that_was_deleted_is_still_refused_as_missing(server, cli_run, writable_env):
+    assert cli_run("playlist", "delete", "Example Playlist", "--write", env=writable_env).code == 0
+    retried = cli_run("playlist", "delete", "Example Playlist", "--write", env=writable_env)
+    assert retried.code == 1
+    assert "code: NO_SUCH_PLAYLIST" in retried.out
+
+
+def test_the_preview_counts_the_items_without_fetching_them(server, cli_run, writable_env):
+    assert cli_run("playlist", "delete", "501", env=writable_env).code == 0
+    item_reads = [r for r in server.requests if r["path"] == "/playlists/501/items"]
+    assert item_reads
+    assert all(r["headers"].get("X-Plex-Container-Size") == "0" for r in item_reads)

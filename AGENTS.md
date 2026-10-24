@@ -241,9 +241,9 @@ committed `SKILL.md` and for the tests that pin the public surface, and wrong fo
 sees. Adding a playback noun is one entry in each of those two, plus its module.
 
 **Two output shapes have exactly one construction site, and the row builders deliberately do not.**
-`describe_filter(field, operator, value)` builds every echoed filter — five call sites in
-`commands/pick.py` now, the two that sat in `music.py` having moved with `build_filters` and
-`rating_predicate`, and the builder itself being `axi_toolkit.plex.filters`' — and
+`describe_filter(field, operator, value)` builds every echoed filter — the call sites are in
+`commands/pick.py` and in `music.plan_search`'s key-filter loop, the builder itself being
+`axi_toolkit.plex.filters`' — and
 `doctor._check(name, status, detail)` builds all twelve rows
 of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
 rather than reconciling a difference — which is what made it checkable as byte-identical output on
@@ -813,8 +813,10 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   live state — nothing at that rating key, no music library, an ambiguous section — exits 1. A zero
   result from a well-formed search exits **0**: an empty answer is an answer. Two more exit 0 by
   AXI's rule and must stay that way: a mutation whose desired state already holds (`playlist add`
-  of a held track, `playlist remove` of an absent one, a repeated `playlist create`) answers
-  `already: … (no-op)`, and a second `setup remove` reports every target `absent`, because a
+  of a held track, `playlist remove` of an absent one, a repeated `playlist create`, a
+  `playlist delete` naming a key or `media_id` no playlist holds) answers `already: … (no-op)` —
+  a `delete` naming a *title* that matches nothing still exits 1 as `NO_SUCH_PLAYLIST`, because a
+  title miss is as likely a typo as an earlier success — and a second `setup remove` reports every target `absent`, because a
   retried command has to converge rather
   than fail on its own earlier success; and the bare home view reports an unconfigured or
   unreachable server as its *content*, with the next step, because it was asked what is here rather

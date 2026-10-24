@@ -232,7 +232,7 @@ plex-axi playlist delete 'Example Playlist'
 
 - only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
-- repeating one of these writes is safe: when the playlist already holds everything a `create` or `add` names, or none of what a `remove` names, the command answers `already: … (no-op)` and exits 0 rather than failing
+- repeating one of these writes is safe: when the playlist already holds everything a `create` or `add` names, or none of what a `remove` names, the command answers `already: … (no-op)` and exits 0 rather than failing; so does a `delete` naming a key or media_id no playlist holds any more, while a title that matches nothing is still refused
 - a playlist is named by its `key` or `media_id` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
 - `delete` removes the playlist and none of its tracks; without `--write` it shows the playlist's title, item count and whether it is smart, and deletes nothing. A smart playlist is refused, because its saved search cannot be recreated here
 - `--key` takes tracks: an album's or an artist's key is refused with the search that lists its tracks, rather than added as one item that is not a song
