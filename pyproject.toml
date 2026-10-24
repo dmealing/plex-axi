@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "plex-axi"
-version = "0.8.1"
+version = "0.9.0"
 description = "Plex CLI for LLM agents: an Agent eXperience Interface (AXI) tool for structured, per-field music search on a Plex Media Server"
 readme = "README.md"
 license = { text = "MIT" }
