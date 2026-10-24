@@ -1253,7 +1253,7 @@ unreachable but the library is fine" be a test case rather than a hypothetical, 
 expression is carried by the *order* of `push`/`or`/`pop`, so a dictionary cannot represent it and a
 test that only saw the mapping could not tell `(A or B) and C` from `A or (B and C)`.
 
-Supported Pythons are 3.10 through 3.12, and **the floor is not a free choice — `PlexAPI` sets
+Supported Pythons are 3.10 through 3.14, and **the floor is not a free choice — `PlexAPI` sets
 it**, still, now that there are two runtime dependencies rather than one: `axi-toolkit` publishes
 `requires-python >= 3.9`, so it has no say in the floor today. That is a thing to re-read whenever
 either pin moves, not a thing to assume. plexapi 4.18.0 raised its own `requires-python` to
@@ -1351,7 +1351,7 @@ none of them; a drive-by GitHub reader wants exactly those three facts before sc
 
 Three workflows, split by where the work is cheap:
 
-- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
+- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.14,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests. Each job runs one section of
   `scripts/ci-local.sh`. GitHub Actions is disabled on this repository, so today those checks run
@@ -1361,8 +1361,8 @@ Three workflows, split by where the work is cheap:
   request's own title and body. Exactly one GitHub-hosted job per PR, and it takes seconds; the two
   steps that read the pull request are the one deliberate exception to keeping this workflow thin,
   and the reasons for them are under "There are three surfaces" above and "Releasing" below.
-- **`.github/workflows/release.yml`** — GitHub-hosted, and to stay that way: OIDC trusted publishing
-  needs `id-token: write` on a GitHub-hosted runner.
+- **`.github/workflows/release.yml`** — written for GitHub-hosted publishing, but Actions is disabled
+  here, so it does not run: releases are published locally with a token.
 
 **`ci.yml` must never gain a `pull_request` trigger.** This repository is public and the runner is
 the maintainer's own workstation. Every trigger it has requires write access, so fork-submitted code
