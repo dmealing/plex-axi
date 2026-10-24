@@ -27,6 +27,7 @@ MUTATIONS = (
     ("playlist", "create", "New Example", "--key", "111", "--write"),
     ("playlist", "add", "Example Playlist", "--key", "121", "--write"),
     ("playlist", "remove", "Example Playlist", "--key", "111", "--write"),
+    ("playlist", "delete", "Example Playlist", "--write"),
 )
 
 
@@ -135,7 +136,7 @@ def test_playlist_help_separates_the_reads_from_the_writes(server, cli_run):
     result = cli_run("playlist", "--help")
     assert "access[2]:" in result
     assert "list, show: read-only" in result
-    assert "create, add, remove: mutating" in result
+    assert "create, add, remove, delete: mutating" in result
 
 
 def test_the_read_only_commands_are_still_read_only(server, cli_run, writable_env):

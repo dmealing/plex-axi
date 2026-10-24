@@ -7,7 +7,7 @@ description: Choose tracks to play now, filtered and shuffled by the server
 access:
   read-only - this command cannot change anything on the server
 flags{pick}:
-  --rated-min <stars> (0-5 stars, the scale ratings print in; 0 filters nothing, so `--rated-min 0.5` is what asks for the rated ones), --genre <name> (run `plex-axi genres` for this library's list), --not-played-since <period> (e.g. 30d, 6mon, 2y; never-played tracks count as well, and the result says so if this server cannot include them), --exclude-live (drop pressings Plex tags Compilation or Live), --limit <n> (default 10, how many to pick), --fields <a,b,c> (replaces the default columns; see `plex-axi search --help`)
+  --rated-min <stars> (0-5 stars, the scale ratings print in; 0 filters nothing, so `--rated-min 0.5` is what asks for the rated ones), --artist <name> (the album artist, matched by word like `search --artist`; a compilation track is not found under its performer), --genre <name> (run `plex-axi genres` for this library's list), --mood <name> (run `plex-axi moods` for this library's list), --style <name> (run `plex-axi styles` for this library's list), --not-played-since <period> (e.g. 30d, 6mon, 2y; never-played tracks count as well, and the result says so if this server cannot include them), --exclude-live (drop pressings Plex tags Compilation or Live), --limit <n> (default 10, how many to pick), --fields <a,b,c> (replaces the default columns; see `plex-axi search --help`)
 note:
   every filter is a Plex predicate evaluated server-side; anything this server does not offer is reported under `unapplied`, never applied client-side
 note:
@@ -20,3 +20,4 @@ examples:
   plex-axi pick
   plex-axi pick --rated-min 4 --limit 20
   plex-axi pick --genre Jazz --not-played-since 30d --exclude-live
+  plex-axi pick --artist 'Example Artist' --mood mellow --limit 5

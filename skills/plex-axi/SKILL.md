@@ -62,6 +62,7 @@ Search the music library field by field, server-side.
 plex-axi search --artist 'Example Artist' --track 'Example Track'
 plex-axi search --genre Jazz --rated-min 4 --limit 10
 plex-axi search --artist 'Example Artist' --type album
+plex-axi search --album-key 12345 --no-group
 plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,rating
 ```
 
@@ -86,6 +87,7 @@ Choose tracks to play now, filtered and shuffled by the server.
 plex-axi pick
 plex-axi pick --rated-min 4 --limit 20
 plex-axi pick --genre Jazz --not-played-since 30d --exclude-live
+plex-axi pick --artist 'Example Artist' --mood mellow --limit 5
 ```
 
 - every filter is a Plex predicate evaluated server-side; anything this server does not offer is reported under `unapplied`, never applied client-side
@@ -217,7 +219,7 @@ plex-axi recent --type track --limit 50
 List, inspect and edit the audio playlists on this server.
 
 - **list, show: read-only - this command cannot change anything on the server**
-  - create, add, remove: mutating - needs PLEX_AXI_ALLOW_WRITES=true in the environment; without --write it previews the change and sends nothing
+  - create, add, remove, delete: mutating - needs PLEX_AXI_ALLOW_WRITES=true in the environment; without --write it previews the change and sends nothing
 
 ```sh
 plex-axi playlist
@@ -225,12 +227,14 @@ plex-axi playlist show 'Example Playlist'
 plex-axi playlist show 501
 plex-axi playlist add 'Example Playlist' --key 12345 --key 12346
 plex-axi playlist create 'Example Playlist' --key 12345 --write
+plex-axi playlist delete 'Example Playlist'
 ```
 
 - only audio playlists are listed or edited; video and photo playlists on the same server are deliberately invisible here
 - a smart playlist's contents are a saved search and cannot be edited by adding items; the command says so rather than letting the server refuse
-- repeating one of these writes is safe: when the playlist already holds everything a `create` or `add` names, or none of what a `remove` names, the command answers `already: … (no-op)` and exits 0 rather than failing
+- repeating one of these writes is safe: when the playlist already holds everything a `create` or `add` names, or none of what a `remove` names, the command answers `already: … (no-op)` and exits 0 rather than failing; so does a `delete` naming a key or media_id no playlist holds any more, while a title that matches nothing is still refused
 - a playlist is named by its `key` or `media_id` from `playlist list`, or by its exact case-folded title; on a miss the real keys and titles are handed back
+- `delete` removes the playlist and none of its tracks; without `--write` it shows the playlist's title, item count and whether it is smart, and deletes nothing. A smart playlist is refused, because its saved search cannot be recreated here
 - `--key` takes tracks: an album's or an artist's key is refused with the search that lists its tracks, rather than added as one item that is not a song
 - `items` in a listing (`--fields key,title,items`) is the count the server declares, which for a smart playlist is cached; `playlist show` reports what it actually holds
 - listing columns: key, media_id, title, smart, items, updated

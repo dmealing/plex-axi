@@ -1,4 +1,4 @@
-"""`plex-axi playlist list|show|create|add|remove` -- audio playlists, and their two traps.
+"""`plex-axi playlist list|show|create|add|remove|delete` -- audio playlists, and their two traps.
 
 Every playlist tool in the Plex landscape omits the same two guards, and both
 of them are one line in the client library:
@@ -77,7 +77,7 @@ _WRITE_FLAG = Flag(
 COMMAND = Command(
     name="playlist",
     summary="List, inspect and edit the audio playlists on this server",
-    usage="usage: plex-axi playlist <list|show|create|add|remove> [<title>] [flags]",
+    usage="usage: plex-axi playlist <list|show|create|add|remove|delete> [<title>] [flags]",
     default_sub="list",
     subs=(
         Sub(
@@ -118,6 +118,13 @@ COMMAND = Command(
             summary="Remove tracks from a playlist",
             access=writes.MUTATING,
         ),
+        Sub(
+            name="delete",
+            args=("<title-or-key>",),
+            flags=(_WRITE_FLAG,),
+            summary="Delete a whole playlist; its tracks stay in the library",
+            access=writes.MUTATING,
+        ),
     ),
     notes=(
         "only audio playlists are listed or edited; video and photo playlists on the "
@@ -126,9 +133,14 @@ COMMAND = Command(
         "items; the command says so rather than letting the server refuse",
         "repeating one of these writes is safe: when the playlist already holds "
         "everything a `create` or `add` names, or none of what a `remove` names, the "
-        "command answers `already: … (no-op)` and exits 0 rather than failing",
+        "command answers `already: … (no-op)` and exits 0 rather than failing; so does "
+        "a `delete` naming a key or media_id no playlist holds any more, while a title "
+        "that matches nothing is still refused",
         "a playlist is named by its `key` or `media_id` from `playlist list`, or by its "
         "exact case-folded title; on a miss the real keys and titles are handed back",
+        "`delete` removes the playlist and none of its tracks; without `--write` it shows "
+        "the playlist's title, item count and whether it is smart, and deletes nothing. "
+        "A smart playlist is refused, because its saved search cannot be recreated here",
         "`--key` takes tracks: an album's or an artist's key is refused with the search "
         "that lists its tracks, rather than added as one item that is not a song",
         "`items` in a listing (`--fields key,title,items`) is the count the server "
@@ -144,6 +156,7 @@ COMMAND = Command(
         "plex-axi playlist show 501",
         "plex-axi playlist add 'Example Playlist' --key 12345 --key 12346",
         "plex-axi playlist create 'Example Playlist' --key 12345 --write",
+        "plex-axi playlist delete 'Example Playlist'",
     ),
 )
 
@@ -153,6 +166,10 @@ def COMMAND_FOR(name: str) -> Command:
 
 
 def run(ctx, name: str, sub: str, parsed):
+    if sub == "delete":
+        title = parsed.positionals[0]
+        writes.require(ctx.environ, action=f"delete {title!r}")
+        return _delete(ctx, title, parsed)
     if sub in ("create", "add", "remove"):
         title = parsed.positionals[0]
         if sub == "create" and not title.strip():
@@ -457,6 +474,59 @@ def _remove(ctx, title, keys, parsed):
     return doc
 
 
+def _delete(ctx, title, parsed):
+    server = ctx.server()
+    try:
+        playlist = _resolve(server, title)
+    except AxiError as exc:
+        # A key is what a retried delete names, and a key nothing holds is the
+        # state the delete asked for. A title is what a typo names, so a miss
+        # on one is still refused.
+        if exc.code != "NO_SUCH_PLAYLIST" or _named_key(title) is None:
+            raise
+        return {
+            "key": int(_named_key(title)),
+            "already": "no audio playlist holds this key, so there is nothing to delete (no-op)",
+            "help": HelpBlock(["Run `plex-axi playlist list` to confirm"]),
+        }
+    if playlist.smart:
+        raise AxiError(
+            f"cannot delete {playlist.title!r}: it is a smart playlist",
+            help_lines=[
+                "A smart playlist is a saved search, and this tool cannot create one, so a "
+                "deletion could not be undone from here",
+                f"Run `plex-axi playlist show {quoted(playlist.title)}` to see what the search "
+                "currently returns",
+            ],
+            code="SMART_PLAYLIST",
+        )
+    held = _count(server, playlist)
+    if held is None:
+        held = len(_items(playlist))
+    key = int(playlist.ratingKey)
+    doc = {"playlist": playlist.title, "key": key, "smart": False, "holds": f"{held} items"}
+    command = f"plex-axi playlist delete {key}"
+    if not parsed.get("write"):
+        doc["would_delete"] = (
+            f"the playlist {playlist.title!r}; its {held} track(s) stay in the library"
+        )
+        doc["preview"] = writes.preview_note(command)
+        doc["help"] = HelpBlock([f"Run `{command} --write` to delete it"])
+        return doc
+
+    try:
+        playlist.delete()
+    except Exception as exc:
+        raise _write_error(exc, action="delete", title=playlist.title, keys=[]) from None
+
+    # Read back rather than echoed: the playlist is gone only if the server
+    # no longer lists it.
+    gone = all(int(p.ratingKey) != key for p in _audio_playlists(server))
+    doc["applied"] = "deleted" if gone else "asked to delete, but the server still lists it"
+    doc["help"] = HelpBlock(["Run `plex-axi playlist list` to confirm"])
+    return doc
+
+
 _MUTATORS = {"create": _create, "add": _add, "remove": _remove}
 
 
@@ -479,15 +549,12 @@ def _by_key(server, playlist):
     raise _missing(playlist.title, [])
 
 
-def _page(server, playlist, limit: int) -> tuple:
-    """The first ``limit`` items of a playlist, and how many it holds in all."""
+def _count(server, playlist):
+    """How many items a playlist holds, for the price of a header; None if unsaid."""
     path = f"/playlists/{int(playlist.ratingKey)}/items"
     try:
         counted = server.query(
             path, headers={"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
-        )
-        items = list(
-            server.fetchItems(path, container_start=0, container_size=limit, maxresults=limit)
         )
     except Exception as exc:
         raise translate(exc, what=f"the contents of {playlist.title!r}") from None
@@ -495,8 +562,22 @@ def _page(server, playlist, limit: int) -> tuple:
     if total is None:
         total = counted.attrib.get("size")
     try:
-        total = int(total)
+        return int(total)
     except (TypeError, ValueError):
+        return None
+
+
+def _page(server, playlist, limit: int) -> tuple:
+    """The first ``limit`` items of a playlist, and how many it holds in all."""
+    path = f"/playlists/{int(playlist.ratingKey)}/items"
+    total = _count(server, playlist)
+    try:
+        items = list(
+            server.fetchItems(path, container_start=0, container_size=limit, maxresults=limit)
+        )
+    except Exception as exc:
+        raise translate(exc, what=f"the contents of {playlist.title!r}") from None
+    if total is None:
         total = len(items)
     return items, max(total, len(items))
 
@@ -568,15 +649,24 @@ def _resolve(server, title: str):
     if media.kind == ids.MEDIA_ID:
         # The `media_id` a listing prints beside the key, accepted back.
         KeyRef(media.key, media.machine, wanted).confirm(server)
-        wanted = media.key
-    if wanted.isascii() and wanted.isdigit():
+    key = _named_key(title)
+    if key is not None:
         for playlist in playlists:
-            if str(playlist.ratingKey) == wanted:
+            if str(playlist.ratingKey) == key:
                 return playlist
     found = _find(playlists, title)
     if found is not None:
         return found
     raise _missing(title, playlists)
+
+
+def _named_key(title: str):
+    """The rating key an argument names, when it names one: digits, or a `media_id`."""
+    wanted = str(title).strip()
+    media = ids.parse_reference(wanted)
+    if media.kind == ids.MEDIA_ID:
+        wanted = media.key
+    return wanted if wanted.isascii() and wanted.isdigit() else None
 
 
 def _missing(title: str, playlists: list) -> AxiError:
@@ -646,8 +736,7 @@ def _fetch_items(server, keys: list) -> list:
             raise AxiError(
                 f"{key} is {article(kind)} {kind}, and `--key` takes tracks",
                 help_lines=[
-                    f"Run `plex-axi search {flag} {quoted(getattr(item, 'title', '') or '<title>')}"
-                    f" --no-group` for the keys of its tracks",
+                    f"Run `plex-axi search {flag}-key {key} --no-group` for the keys of its tracks",
                 ],
                 code="NOT_A_TRACK",
             )

@@ -5,4 +5,4 @@ exit: 1
 error: "110 is an album, and `--key` takes tracks"
 code: NOT_A_TRACK
 help[1]:
-  Run `plex-axi search --album 'Example Album' --no-group` for the keys of its tracks
+  Run `plex-axi search --album-key 110 --no-group` for the keys of its tracks

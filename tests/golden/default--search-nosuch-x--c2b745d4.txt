@@ -5,5 +5,5 @@ exit: 2
 error: unknown flag --nosuch for `search`
 code: UNKNOWN_FLAG
 help[2]:
-  valid flags for `search`: --artist, --album, --track, --genre, --mood, --style, --year, --rated-min, --query, --type, --limit, --fields, --sort, --no-group (--help always allowed)
+  valid flags for `search`: --artist, --album, --track, --artist-key, --album-key, --genre, --mood, --style, --year, --rated-min, --query, --type, --limit, --fields, --sort, --no-group (--help always allowed)
   Run `plex-axi search --help` for the full reference

@@ -35,9 +35,10 @@ from axi_toolkit.plex.filters import (
     LIBTYPES,
     assert_server_side,
     build_filters,
+    describe_filter,
     stars,
 )
-from axi_toolkit.plex.ids import media_id_for
+from axi_toolkit.plex.ids import media_id_for, validate_rating_key
 
 from . import output
 from .errors import AnyAxiError, AxiError, UsageError
@@ -196,6 +197,13 @@ def parse_year(raw) -> str:
     return value
 
 
+#: The flags that name a row by its rating key, and the field each one filters.
+#: Neither field is advertised by a music section: the client library adds `id`
+#: to every libtype by hand, as it does `group`, and `commands/item.py` already
+#: counts an artist's albums and tracks on `artist.id`.
+KEY_FLAGS = {"artist_key": "artist.id", "album_key": "album.id"}
+
+
 class SearchPlan:
     """One search, decided from the arguments alone: no server in the picture."""
 
@@ -280,6 +288,13 @@ def plan_search(parsed, libtype: str, *, performer: bool = True) -> SearchPlan:
             "typographic spellings of the apostrophes, quotes, hyphens and ellipses typed "
             "were searched as well, because the server does not treat them as the same character"
         )
+    for flag, field in KEY_FLAGS.items():
+        raw = parsed.get(flag)
+        if raw in (None, ""):
+            continue
+        key = validate_rating_key(raw, command=("search",))
+        filters[field] = int(key)
+        plan.described.append(describe_filter(field, BARE_OPERATOR, key))
     plan.filters = compose(filters, groups)
     return plan
 

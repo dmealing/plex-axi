@@ -660,6 +660,11 @@ KNOWN_FIELDS = {
     # and not advertised -- the client library adds `id` by hand for the same
     # reason. It is how an artist's albums and tracks are counted.
     "artist.id",
+    # The same, one level down. Whether a real server honours `album.id` on a
+    # track search is NOT confirmed against one: the client library documents
+    # it and adds the field by hand, and no live run has asked. It is here so
+    # the request the tool builds is checked, not so the claim is.
+    "album.id",
 }
 
 #: What `/hubs/search` defines. The same rule as everywhere else.
@@ -1474,7 +1479,9 @@ class FakePlex:
         #: One injected fault, for the answers a real server can give and a tidy
         #: double never does: ``{"status": 503}``, ``{"body": ""}``,
         #: ``{"body": "<html>..."}``, ``{"raise": exception}``, each optionally
-        #: limited to paths containing ``match``.
+        #: limited to paths containing ``match``. A fault reaches the server
+        #: alone unless ``host`` names a cloud host (``plex.tv``,
+        #: ``sonos.plex.tv``) instead.
         self.fault = None
         #: A server that answers a playlist addition with 200 and adds nothing,
         #: which a real one was seen to do. The tool has to report what the
@@ -2412,7 +2419,8 @@ class FakeSession:
         pairs.extend((key, str(value)) for key, value in (params or {}).items())
         query = dict(pairs)
         fault = getattr(self.server, "fault", None)
-        if fault and not host.endswith("plex.tv") and fault.get("match", "") in parts.path:
+        aimed = fault and fault.get("host", "" if host.endswith("plex.tv") else host) == host
+        if aimed and fault.get("match", "") in parts.path:
             self.server.requests.append(
                 {"path": parts.path, "query": query, "pairs": pairs, "method": method}
             )

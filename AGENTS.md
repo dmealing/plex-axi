@@ -241,9 +241,9 @@ committed `SKILL.md` and for the tests that pin the public surface, and wrong fo
 sees. Adding a playback noun is one entry in each of those two, plus its module.
 
 **Two output shapes have exactly one construction site, and the row builders deliberately do not.**
-`describe_filter(field, operator, value)` builds every echoed filter — five call sites in
-`commands/pick.py` now, the two that sat in `music.py` having moved with `build_filters` and
-`rating_predicate`, and the builder itself being `axi_toolkit.plex.filters`' — and
+`describe_filter(field, operator, value)` builds every echoed filter — the call sites are in
+`commands/pick.py` and in `music.plan_search`'s key-filter loop, the builder itself being
+`axi_toolkit.plex.filters`' — and
 `doctor._check(name, status, detail)` builds all twelve rows
 of the doctor report. Neither shape had ever diverged, so collapsing them removed the *opportunity*
 rather than reconciling a difference — which is what made it checkable as byte-identical output on
@@ -813,8 +813,10 @@ Everything here was paid for once. Most of it is invisible until it is wrong.
   live state — nothing at that rating key, no music library, an ambiguous section — exits 1. A zero
   result from a well-formed search exits **0**: an empty answer is an answer. Two more exit 0 by
   AXI's rule and must stay that way: a mutation whose desired state already holds (`playlist add`
-  of a held track, `playlist remove` of an absent one, a repeated `playlist create`) answers
-  `already: … (no-op)`, and a second `setup remove` reports every target `absent`, because a
+  of a held track, `playlist remove` of an absent one, a repeated `playlist create`, a
+  `playlist delete` naming a key or `media_id` no playlist holds) answers `already: … (no-op)` —
+  a `delete` naming a *title* that matches nothing still exits 1 as `NO_SUCH_PLAYLIST`, because a
+  title miss is as likely a typo as an earlier success — and a second `setup remove` reports every target `absent`, because a
   retried command has to converge rather
   than fail on its own earlier success; and the bare home view reports an unconfigured or
   unreachable server as its *content*, with the next step, because it was asked what is here rather
@@ -1253,7 +1255,7 @@ unreachable but the library is fine" be a test case rather than a hypothetical, 
 expression is carried by the *order* of `push`/`or`/`pop`, so a dictionary cannot represent it and a
 test that only saw the mapping could not tell `(A or B) and C` from `A or (B and C)`.
 
-Supported Pythons are 3.10 through 3.12, and **the floor is not a free choice — `PlexAPI` sets
+Supported Pythons are 3.10 through 3.14, and **the floor is not a free choice — `PlexAPI` sets
 it**, still, now that there are two runtime dependencies rather than one: `axi-toolkit` publishes
 `requires-python >= 3.9`, so it has no say in the floor today. That is a thing to re-read whenever
 either pin moves, not a thing to assume. plexapi 4.18.0 raised its own `requires-python` to
@@ -1351,7 +1353,7 @@ none of them; a drive-by GitHub reader wants exactly those three facts before sc
 
 Three workflows, split by where the work is cheap:
 
-- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.12,
+- **`.github/workflows/ci.yml`** — the heavy matrix (leak scan, lint, `pytest` on 3.10 through 3.14,
   the generated-skill check) on the maintainer's self-hosted runner. Triggers: push to `main`, a
   nightly `schedule`, and `workflow_dispatch`. Never pull requests. Each job runs one section of
   `scripts/ci-local.sh`. GitHub Actions is disabled on this repository, so today those checks run
@@ -1361,8 +1363,8 @@ Three workflows, split by where the work is cheap:
   request's own title and body. Exactly one GitHub-hosted job per PR, and it takes seconds; the two
   steps that read the pull request are the one deliberate exception to keeping this workflow thin,
   and the reasons for them are under "There are three surfaces" above and "Releasing" below.
-- **`.github/workflows/release.yml`** — GitHub-hosted, and to stay that way: OIDC trusted publishing
-  needs `id-token: write` on a GitHub-hosted runner.
+- **`.github/workflows/release.yml`** — written for GitHub-hosted publishing, but Actions is disabled
+  here, so it does not run: releases are published locally with a token.
 
 **`ci.yml` must never gain a `pull_request` trigger.** This repository is public and the runner is
 the maintainer's own workstation. Every trigger it has requires write access, so fork-submitted code
