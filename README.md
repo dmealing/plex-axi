@@ -26,6 +26,11 @@ prompts, a non-zero exit on every failure, and errors that carry the command whi
 reads perfectly well in a terminal — `--human` prints aligned tables — it is simply not optimised
 for one.
 
+Running Home Assistant? Let it dispatch the playback, and use [hass-axi](https://github.com/dmealing/hass-axi)
+to drive it from the command line.
+
+Not affiliated with or endorsed by Plex Inc. Plex is a trademark of Plex, Inc.
+
 ## Why per-field search
 
 Every published Plex CLI, MCP server and LLM wrapper takes a single free-text `query` string and
@@ -111,7 +116,9 @@ plex-axi doctor    # exits non-zero when any check fails, so it works as a hook 
 plex-axi                                              # the library at a glance
 plex-axi search --artist "Example Artist" --rated-min 4
 plex-axi search --genre Jazz --type album --limit 10
+plex-axi search --album-key 12345 --no-group          # every track on one album, by rating key
 plex-axi pick --rated-min 4 --not-played-since 30d --exclude-live
+plex-axi pick --artist "Example Artist" --mood mellow
 plex-axi genres                                       # and `moods`, `styles`
 plex-axi track 12345 --check-files
 plex-axi similar 12345 --max-distance 0.1
@@ -130,6 +137,11 @@ compilation/live exclusion — and the shuffle is Plex's own `sort=random` over 
 rather than a shuffle of one page. A filter this particular server does not offer is reported under
 `unapplied` rather than quietly applied in Python, because a client-side filter fights `--limit`
 exactly as it fights Plex's own `limit`.
+
+`--artist-key` and `--album-key` on `search` filter on a rating key instead of a name, so two
+albums that share a title are told apart: `search --album-key <key> --no-group` lists one album's
+tracks. They are server-side predicates like every other flag here; `album.id` in particular has
+been checked against the test double and not against a live server.
 
 ### Reading as another account
 
@@ -232,6 +244,7 @@ in the suite and every one of them has to pass.
 |---|---|
 | `rate <rating_key> --stars <0.5-5>` | your rating on one track, album or artist — per account, not library metadata |
 | `playlist create\|add\|remove` | the contents of an audio playlist |
+| `playlist delete <title-or-key>` | removes a whole audio playlist; its tracks stay in the library, and a smart playlist is refused |
 
 Both are behind the same two-part gate, and the order matters:
 
