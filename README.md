@@ -64,7 +64,7 @@ accepts one is [below](#what-media_id-is-and-what-consumes-it); why the tool ref
 it, and the test that holds the line, are in [AGENTS.md](AGENTS.md).
 
 **Two commands can change your library, and neither runs by accident.** `rate` sets the rating that
-`--rated-min` reads, and `playlist` edits an audio playlist. Both are refused unless the operator
+`--rated-min` reads, and `playlist` edits or deletes an audio playlist. Both are refused unless the operator
 has exported `PLEX_AXI_ALLOW_WRITES=true`, and even then they preview the change and send nothing
 until `--write` is passed. Every other command reads. See [Writing](#writing).
 
@@ -132,8 +132,8 @@ Every command takes `--help`, which is the authoritative reference for its flags
 `access:` line under the description saying whether that command reads, writes or starts playback.
 
 `pick` is the "give me something to listen to" command. Every one of its filters is a Plex
-predicate the server evaluates — the rating comparison, the genre, the relative date, the
-compilation/live exclusion — and the shuffle is Plex's own `sort=random` over the whole match set
+predicate the server evaluates — the rating comparison, the artist, genre, mood and style, the
+relative date, the compilation/live exclusion — and the shuffle is Plex's own `sort=random` over the whole match set
 rather than a shuffle of one page. A filter this particular server does not offer is reported under
 `unapplied` rather than quietly applied in Python, because a client-side filter fights `--limit`
 exactly as it fights Plex's own `limit`.
@@ -184,7 +184,7 @@ caps each repeated element at twenty children for the same reason.
   agents do not read.
 - Exit codes: `0` success — **including a search that matched nothing**, because an empty answer is
   an answer, a write whose result already holds (adding a track a playlist already has, removing
-  one it does not, repeating a create), which is reported as a no-op, and the bare `plex-axi` home
+  one it does not, repeating a create, deleting a playlist named by a key that no longer exists), which is reported as a no-op, and the bare `plex-axi` home
   view, which reports an unconfigured or unreachable server as its content with the next step; `1` the outcome of a lookup against live state (nothing at that rating key, no music
   library on the server, an ambiguous section); `2` a usage error (unknown command, unknown flag, a
   rating key that is not a number, a write method on `api`).
