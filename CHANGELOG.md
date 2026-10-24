@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/dmealing/plex-axi/compare/v0.8.1...v0.9.0) (2026-10-24)
+
+
+### Features
+
+* add playlist delete and key/artist/mood/style filters ([#40](https://github.com/dmealing/plex-axi/issues/40)) ([f24de5a](https://github.com/dmealing/plex-axi/commit/f24de5a5e29746ff43ab4619627d8c2568243fd7))
+
+
+### Documentation
+
+* lead the PyPI summary with Plex CLI for LLM agents and add ai-agents keyword ([#41](https://github.com/dmealing/plex-axi/issues/41)) ([6277cfd](https://github.com/dmealing/plex-axi/commit/6277cfd708d752b4fb2dcf3316762b60ca155b4c))
+
 ## [0.8.1](https://github.com/dmealing/plex-axi/compare/v0.8.0...v0.8.1) (2026-10-05)
 
 
