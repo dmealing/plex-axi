@@ -71,10 +71,12 @@ ELEMENTS = CAPTURE["elements"]
 #: advertising and no rated album, so those states were not there to read.
 UNOBSERVED = contract.UNOBSERVED
 
-#: Fields the server accepts on the wire and does not advertise. Each was
-#: measured against a real server, and each is a deliberate exception to "the
-#: tool only sends what the section advertises".
-ACCEPTED_UNADVERTISED = {"track.originalTitle", "artist.id"}
+#: Fields the server accepts on the wire and does not advertise, each a
+#: deliberate exception to "the tool only sends what the section advertises".
+#: `track.originalTitle` and `artist.id` were measured against a real server.
+#: `album.id` was NOT: the client library documents it and adds it by hand, and
+#: no live run has asked a server for tracks by album yet.
+ACCEPTED_UNADVERTISED = {"track.originalTitle", "artist.id", "album.id"}
 
 
 def _get(server, path, query=None):

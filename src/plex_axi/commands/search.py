@@ -55,6 +55,18 @@ _FLAGS = (
         "<title>",
         note="searched on track.title, which on this field also matches the performer",
     ),
+    Flag(
+        "--artist-key",
+        "<key>",
+        note="every row under the artist with this rating key; unlike --artist it "
+        "cannot match a namesake",
+    ),
+    Flag(
+        "--album-key",
+        "<key>",
+        note="every row under the album with this rating key, which is its track list "
+        "with --type track",
+    ),
     Flag("--genre", "<name>", note="searched on artist.genre; run `plex-axi genres` for the list"),
     Flag("--mood", "<name>", note="run `plex-axi moods` for the list"),
     Flag("--style", "<name>", note="run `plex-axi styles` for the list"),
@@ -120,6 +132,7 @@ COMMAND = Command(
         "plex-axi search --artist 'Example Artist' --track 'Example Track'",
         "plex-axi search --genre Jazz --rated-min 4 --limit 10",
         "plex-axi search --artist 'Example Artist' --type album",
+        "plex-axi search --album-key 12345 --no-group",
         "plex-axi search --mood mellow --sort userRating:desc --fields key,title,artist,rating",
     ),
 )

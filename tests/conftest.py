@@ -660,6 +660,11 @@ KNOWN_FIELDS = {
     # and not advertised -- the client library adds `id` by hand for the same
     # reason. It is how an artist's albums and tracks are counted.
     "artist.id",
+    # The same, one level down. Whether a real server honours `album.id` on a
+    # track search is NOT confirmed against one: the client library documents
+    # it and adds the field by hand, and no live run has asked. It is here so
+    # the request the tool builds is checked, not so the claim is.
+    "album.id",
 }
 
 #: What `/hubs/search` defines. The same rule as everywhere else.

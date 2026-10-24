@@ -47,6 +47,7 @@ from ..music import (
     GROUP_BY_TITLE,
     advertised_sorts,
     available_fields,
+    clean_text,
     compose,
     default_fields,
     label_filters,
@@ -57,6 +58,7 @@ from ..music import (
 )
 from ..output import HelpBlock
 from ..plex import translate
+from ..toolkit.matching import TEXT_OPERATOR, spellings
 from ._common import count_line, parse_limit, project, select_fields
 
 DEFAULT_LIMIT = 10
@@ -90,7 +92,15 @@ COMMAND = Command(
                         "`--rated-min 0.5` is what asks for the rated ones"
                     ),
                 ),
+                Flag(
+                    "--artist",
+                    "<name>",
+                    note="the album artist, matched by word like `search --artist`; "
+                    "a compilation track is not found under its performer",
+                ),
                 Flag("--genre", "<name>", note="run `plex-axi genres` for this library's list"),
+                Flag("--mood", "<name>", note="run `plex-axi moods` for this library's list"),
+                Flag("--style", "<name>", note="run `plex-axi styles` for this library's list"),
                 Flag(
                     "--not-played-since",
                     "<period>",
@@ -129,6 +139,7 @@ COMMAND = Command(
         "plex-axi pick",
         "plex-axi pick --rated-min 4 --limit 20",
         "plex-axi pick --genre Jazz --not-played-since 30d --exclude-live",
+        "plex-axi pick --artist 'Example Artist' --mood mellow --limit 5",
     ),
 )
 
@@ -213,12 +224,20 @@ def _validate(parsed) -> dict:
     period = parsed.get("not_played_since")
     return {
         "stars": None if raw_rating in (None, "") else parse_stars(raw_rating, flag="--rated-min"),
+        "artist": _artist(parsed.get("artist")),
         "genre": parsed.get("genre") or None,
+        "mood": parsed.get("mood") or None,
+        "style": parsed.get("style") or None,
         "period": (
             None if period in (None, "") else parse_relative_date(period, flag="--not-played-since")
         ),
         "exclude_live": bool(parsed.get("exclude_live")),
     }
+
+
+def _artist(raw):
+    """The typed artist, cleaned the way `search --artist` cleans it, or None."""
+    return None if raw in (None, "") else clean_text(raw, flag="--artist")
 
 
 def _build(section, asked) -> tuple:
@@ -261,6 +280,30 @@ def _build(section, asked) -> tuple:
             described.append(describe_filter("artist.genre", "=", genre))
         else:
             unavailable("--genre", "artist.genre")
+
+    # The album artist only. `search --artist` also matches a track's own
+    # performer through a field the server does not advertise, and that needs a
+    # second pass to prove it ran; a picker that asked for it would have to
+    # carry the same fallback, and "by this artist" is answered by the album
+    # artist everywhere but on a compilation.
+    artist = asked["artist"]
+    if artist:
+        if offers(section, "artist.title", libtype="track"):
+            variants = spellings(artist)
+            filters["artist.title"] = variants if len(variants) > 1 else variants[0]
+            described.append(describe_filter("artist.title", TEXT_OPERATOR, artist))
+        else:
+            unavailable("--artist", "artist.title")
+
+    for flag, field in (("mood", "track.mood"), ("style", "artist.style")):
+        value = asked[flag]
+        if not value:
+            continue
+        if offers(section, field, libtype="track", tag=True):
+            filters[field] = value
+            described.append(describe_filter(field, "=", value))
+        else:
+            unavailable(f"--{flag}", field)
 
     if asked["period"] is not None:
         _add_last_played(section, asked["period"], filters, groups, described, unapplied)
@@ -477,6 +520,12 @@ def _empty_steps(asked, unapplied) -> list:
         lines.append("One filter did not run; see `unapplied` above before widening the others")
     if asked["genre"]:
         lines.append("Run `plex-axi genres` for the genres this library actually uses")
+    if asked["mood"]:
+        lines.append("Run `plex-axi moods` for the moods this library actually uses")
+    if asked["style"]:
+        lines.append("Run `plex-axi styles` for the styles this library actually uses")
+    if asked["artist"]:
+        lines.append("Run `plex-axi search --artist '<name>' --type artist` to check the spelling")
     if asked["stars"] is not None:
         lines.append("Run the same command with a lower `--rated-min`, or without it")
     if asked["period"]:
