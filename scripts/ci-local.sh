@@ -25,7 +25,7 @@
 #
 # THE TEST MATRIX DECISION. `test` runs the suite once, on the interpreter that
 # built .venv. That is what the gate runs, because it is the cost every change
-# pays. The supported range (3.10 through 3.12; `requires-python = ">=3.10"` in
+# pays. The supported range (3.10 through 3.14; `requires-python = ">=3.10"` in
 # pyproject.toml, held to the ci.yml matrix by tests/test_python_floor.py) is
 # checked on demand with `--matrix`, which builds a throwaway `uv` venv per
 # version and runs pytest in each. `--matrix` needs `uv` on PATH and fails if it
@@ -69,7 +69,7 @@ cd "$root" || exit 1
 SECTIONS=(leakcheck commits lint test skill model)
 METAOBJECTS=${METAOBJECTS:-"metaobjects==1.1.0"}
 AXI_TOOLKIT=${AXI_TOOLKIT:-"axi-toolkit[metagen]==0.7.1"}
-MATRIX_PYTHONS=${MATRIX_PYTHONS:-"3.10 3.11 3.12"}
+MATRIX_PYTHONS=${MATRIX_PYTHONS:-"3.10 3.11 3.12 3.13 3.14"}
 
 usage() { sed -n '2,/^set -uo/p' "$self" | sed '$d; s/^# \{0,1\}//'; }
 

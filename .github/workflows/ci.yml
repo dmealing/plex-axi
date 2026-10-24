@@ -135,7 +135,7 @@ jobs:
         # `tests/test_python_floor.py` fails if the two ever disagree. 3.9 was
         # dropped because plexapi 4.18.0 dropped it: the declared floor said 3.9
         # while the dependency graph could not be resolved there at all.
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
         with:
