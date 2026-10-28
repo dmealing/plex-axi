@@ -587,7 +587,7 @@ is one a real server was captured sending (both in `tests/plexmodel/`). Change t
 a generated file:
 
 ```sh
-uvx --python 3.12 --from metaobjects==1.1.0 --with 'axi-toolkit[metagen]==0.7.1' metaobjects gen   # regenerate, then commit
+uvx --python 3.12 --from metaobjects==1.1.4 --with 'axi-toolkit[metagen]==1.0.1' metaobjects gen   # regenerate, then commit
 scripts/ci-local.sh --only model                               # fails on a hand edit or a stale file
 ```
 
