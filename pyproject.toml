@@ -51,12 +51,12 @@ dependencies = [
   # The `plex://` forms and the music filter language live here now, with the
   # error contract they raise against and the renderer that puts this tool's
   # name back in front of a recovery. So does the TOON encoder: `axi_toolkit.toon`
-  # is the only copy, and this package no longer carries its own. 1.0.1 is the
-  # release whose generators accept the MetaObjects 1.1.x toolchain, so it is the floor.
+  # is the only copy, and this package no longer carries its own. 0.4.2 is the
+  # release whose encoder quotes a key ending in a newline, so it is the floor.
   # The package declares no runtime
   # dependency of its own and publishes `requires-python >= 3.9`, so it neither
   # brings anything transitive with it nor has any say in the floor above.
-  "axi-toolkit>=1.0.1",
+  "axi-toolkit>=0.4.2",
 ]
 
 [project.optional-dependencies]
