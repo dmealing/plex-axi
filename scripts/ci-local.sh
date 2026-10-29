@@ -15,7 +15,7 @@
 #   lint       ruff check . && ruff format --check .
 #   test       pytest, once, on the interpreter that built .venv
 #   skill      plex-axi skill --check
-#   model      metaobjects verify --codegen, then the capture report
+#   model      metaobjects verify --codegen and --templates, then the capture report
 #
 # Usage:
 #   scripts/ci-local.sh                        # every section
@@ -67,8 +67,8 @@ root=$(dirname "$self")/..
 cd "$root" || exit 1
 
 SECTIONS=(leakcheck commits lint test skill model)
-METAOBJECTS=${METAOBJECTS:-"metaobjects==1.1.0"}
-AXI_TOOLKIT=${AXI_TOOLKIT:-"axi-toolkit[metagen]==0.7.1"}
+METAOBJECTS=${METAOBJECTS:-"metaobjects==1.1.4"}
+AXI_TOOLKIT=${AXI_TOOLKIT:-"axi-toolkit[metagen]==1.0.1"}
 MATRIX_PYTHONS=${MATRIX_PYTHONS:-"3.10 3.11 3.12 3.13 3.14"}
 
 usage() { sed -n '2,/^set -uo/p' "$self" | sed '$d; s/^# \{0,1\}//'; }
@@ -149,7 +149,12 @@ sec_skill() {
 
 sec_model() {
   command -v uvx >/dev/null 2>&1 || { echo "ci-local: model needs uv on PATH" >&2; return 1; }
-  uvx --quiet --python 3.12 --from "$METAOBJECTS" --with "$AXI_TOOLKIT" metaobjects verify --codegen
+  mo=(uvx --quiet --python 3.12 --from "$METAOBJECTS" --with "$AXI_TOOLKIT" metaobjects verify)
+  "${mo[@]}" --codegen
+  # No template.* nodes today, so this passes trivially and starts checking when one is added.
+  "${mo[@]}" --templates
+  # Not run: --db is unsupported in the Python port (exit 2) and this project has no database.
+  echo "model: --db skipped (unsupported in the Python port; no database); no requirements ledger"
   # Both directions of the capture check, in words; pytest runs the failing one.
   python3 tests/plexmodel/capture_contract.py
 }
