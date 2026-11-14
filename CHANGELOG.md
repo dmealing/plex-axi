@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/dmealing/plex-axi/compare/v0.9.0...v0.9.1) (2026-11-14)
+
+
+### Documentation
+
+* add disk I/O guidance to agent instructions ([#44](https://github.com/dmealing/plex-axi/issues/44)) ([0a9c133](https://github.com/dmealing/plex-axi/commit/0a9c1330262e3a5fc7f2009f021e848fda4a7d05))
+
 ## [0.9.0](https://github.com/dmealing/plex-axi/compare/v0.8.1...v0.9.0) (2026-10-24)
 
 
